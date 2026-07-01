@@ -18,6 +18,17 @@
     <meta name="apple-mobile-web-app-title" content="GEMB" />
 
     <title>Asistencia GEMB</title>
+
+    <!-- Aplica el tema guardado antes de pintar (evita parpadeo). -->
+    <script>
+      try {
+        var t = localStorage.getItem('gemb-theme');
+        if (t !== 'light' && t !== 'pink' && t !== 'dark') t = 'light';
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

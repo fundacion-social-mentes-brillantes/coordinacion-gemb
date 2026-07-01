@@ -2,14 +2,144 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ==================================================================
+   SISTEMA DE TEMAS
+   3 modos: light (Verde), pink (Pink Brillante), dark (Noche Dorada).
+   - Las variables --c-* son canales "R G B" que alimentan la paleta de
+     Tailwind (primary, slate, surface, white) para que TODA la app cambie
+     de color con el tema, incluidas las utilidades con opacidad.
+   - Las variables --app-* son semánticas (degradados, paneles, bordes)
+     usadas por las clases de componentes (.card, .btn-*, .input, body).
+   Para cambiar un tema, edita solo su bloque de abajo.
+   ================================================================== */
 @layer base {
+  :root,
+  [data-theme='light'] {
+    /* Canales de color (R G B) */
+    --c-surface: 245 250 248;
+    --c-white: 255 255 255;
+    --c-p-50: 242 250 247;
+    --c-p-100: 217 242 234;
+    --c-p-200: 179 228 211;
+    --c-p-300: 132 207 183;
+    --c-p-400: 79 180 151;
+    --c-p-500: 43 150 120;
+    --c-p-600: 31 120 98;
+    --c-p-700: 28 95 79;
+    --c-p-800: 25 76 64;
+    --c-p-900: 22 63 54;
+    --c-sl-50: 248 250 252;
+    --c-sl-100: 241 245 249;
+    --c-sl-200: 226 232 240;
+    --c-sl-300: 203 213 225;
+    --c-sl-400: 148 163 184;
+    --c-sl-500: 100 116 139;
+    --c-sl-600: 71 85 105;
+    --c-sl-700: 51 65 85;
+    --c-sl-800: 30 41 59;
+    --c-sl-900: 15 23 42;
+    /* Semánticas */
+    --app-bg-gradient: linear-gradient(155deg, #e9f6f1 0%, #f5faf8 55%, #eef7f3 100%);
+    --app-panel: rgba(255, 255, 255, 0.86);
+    --app-panel-solid: #ffffff;
+    --app-soft-solid: #e9f5f0;
+    --app-border: rgba(43, 150, 120, 0.18);
+    --app-strong: #163f36;
+    --app-muted: #475569;
+    --app-faint: #94a3b8;
+    --app-accent: #2b9678;
+    --app-accent-strong: #1f7862;
+    --app-accent-gradient: linear-gradient(135deg, #2b9678 0%, #1f7862 100%);
+    --app-on-accent: #ffffff;
+    --app-danger: #dc2626;
+  }
+
+  [data-theme='pink'] {
+    --c-surface: 255 242 255;
+    --c-white: 255 255 255;
+    --c-p-50: 253 240 251;
+    --c-p-100: 251 220 245;
+    --c-p-200: 244 194 236;
+    --c-p-300: 233 155 217;
+    --c-p-400: 217 104 196;
+    --c-p-500: 200 58 184;
+    --c-p-600: 166 47 154;
+    --c-p-700: 124 36 114;
+    --c-p-800: 85 33 78;
+    --c-p-900: 54 33 51;
+    --c-sl-50: 250 241 247;
+    --c-sl-100: 245 230 241;
+    --c-sl-200: 236 214 230;
+    --c-sl-300: 217 189 208;
+    --c-sl-400: 169 132 155;
+    --c-sl-500: 141 106 131;
+    --c-sl-600: 116 86 110;
+    --c-sl-700: 88 65 82;
+    --c-sl-800: 63 45 59;
+    --c-sl-900: 42 28 40;
+    --app-bg-gradient: linear-gradient(155deg, #ffa1ff 0%, #fff2ff 50%, #ffb2f6 100%);
+    --app-panel: rgba(255, 255, 255, 0.86);
+    --app-panel-solid: #ffffff;
+    --app-soft-solid: #fbe4f6;
+    --app-border: rgba(202, 126, 170, 0.24);
+    --app-strong: #362133;
+    --app-muted: #74566e;
+    --app-faint: #a9849b;
+    --app-accent: #c83ab8;
+    --app-accent-strong: #ff9ef2;
+    --app-accent-gradient: linear-gradient(135deg, #c83ab8 0%, #ff9ef2 100%);
+    --app-on-accent: #ffffff;
+    --app-danger: #dc2626;
+  }
+
+  [data-theme='dark'] {
+    --c-surface: 6 9 19;
+    --c-white: 17 24 39; /* los "bg-white" se vuelven panel oscuro */
+    --c-p-50: 20 27 48;
+    --c-p-100: 30 39 64;
+    --c-p-200: 43 55 87;
+    --c-p-300: 138 122 78;
+    --c-p-400: 184 154 86;
+    --c-p-500: 215 180 106;
+    --c-p-600: 227 198 128;
+    --c-p-700: 238 212 154;
+    --c-p-800: 244 230 194;
+    --c-p-900: 255 247 230;
+    --c-sl-50: 15 22 38;
+    --c-sl-100: 27 37 64;
+    --c-sl-200: 39 51 80;
+    --c-sl-300: 57 70 106;
+    --c-sl-400: 116 128 150;
+    --c-sl-500: 151 161 181;
+    --c-sl-600: 184 192 212;
+    --c-sl-700: 210 216 228;
+    --c-sl-800: 232 236 243;
+    --c-sl-900: 244 247 251;
+    --app-bg-gradient: radial-gradient(120% 78% at 50% -12%, rgba(215, 180, 106, 0.2), transparent 55%),
+      linear-gradient(160deg, #05070e 0%, #090e1c 48%, #0c1222 100%);
+    --app-panel: rgba(14, 20, 37, 0.82);
+    --app-panel-solid: #111827;
+    --app-soft-solid: #182036;
+    --app-border: rgba(226, 196, 120, 0.18);
+    --app-strong: #fff7e6;
+    --app-muted: #b8c0d4;
+    --app-faint: #748096;
+    --app-accent: #d7b46a;
+    --app-accent-strong: #f4d992;
+    --app-accent-gradient: linear-gradient(135deg, #b8934a 0%, #d7b46a 45%, #f6e0a0 100%);
+    --app-on-accent: #0c1020;
+    --app-danger: #ef4444;
+  }
+
   html {
     -webkit-tap-highlight-color: transparent;
   }
   body {
-    @apply bg-surface text-slate-800 antialiased;
-    /* Respeta el "notch" en móviles instalados. */
+    background: var(--app-bg-gradient);
+    background-attachment: fixed;
+    color: var(--app-strong);
     min-height: 100dvh;
+    @apply antialiased;
   }
   /* font-size 16px evita el zoom automático de iOS al enfocar inputs. */
   input,
@@ -17,8 +147,10 @@
   textarea {
     font-size: 16px;
   }
-  h1, h2, h3 {
-    @apply text-primary-900;
+  h1,
+  h2,
+  h3 {
+    color: var(--app-strong);
   }
 }
 
@@ -26,37 +158,68 @@
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-xl font-semibold
       transition active:scale-[.98] disabled:opacity-50 disabled:pointer-events-none
-      focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2;
+      focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2;
   }
   .btn-primary {
-    @apply btn bg-primary-500 text-white px-4 py-3 shadow-card hover:bg-primary-600;
+    @apply btn px-4 py-3;
+    background: var(--app-accent-gradient);
+    color: var(--app-on-accent);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  }
+  .btn-primary:hover {
+    filter: brightness(1.05);
   }
   .btn-secondary {
-    @apply btn bg-white text-primary-700 border border-primary-200 px-4 py-3 hover:bg-primary-50;
+    @apply btn px-4 py-3;
+    background: var(--app-panel-solid);
+    color: var(--app-accent);
+    border: 1px solid var(--app-border);
+  }
+  .btn-secondary:hover {
+    background: var(--app-soft-solid);
   }
   .btn-ghost {
-    @apply btn text-primary-700 px-3 py-2 hover:bg-primary-50;
+    @apply btn px-3 py-2;
+    color: var(--app-accent);
+  }
+  .btn-ghost:hover {
+    background: var(--app-soft-solid);
   }
   .btn-danger {
-    @apply btn bg-rose-500 text-white px-4 py-3 hover:bg-rose-600;
+    @apply btn px-4 py-3;
+    background: var(--app-danger);
+    color: #ffffff;
   }
   .card {
-    @apply bg-white rounded-2xl shadow-card border border-primary-100/60;
+    @apply rounded-2xl;
+    background: var(--app-panel);
+    border: 1px solid var(--app-border);
+    box-shadow: 0 1px 3px rgba(8, 15, 30, 0.08), 0 1px 2px rgba(8, 15, 30, 0.04);
   }
   .input {
-    @apply w-full rounded-xl border border-slate-300 bg-white px-4 py-3
-      text-slate-800 placeholder:text-slate-400
-      focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-primary-400;
+    @apply w-full rounded-xl px-4 py-3;
+    background: var(--app-panel-solid);
+    border: 1px solid var(--app-border);
+    color: var(--app-strong);
+  }
+  .input::placeholder {
+    color: var(--app-faint);
+  }
+  .input:focus {
+    outline: none;
+    border-color: var(--app-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 25%, transparent);
   }
   .label {
-    @apply block text-sm font-medium text-slate-600 mb-1;
+    @apply block text-sm font-medium mb-1;
+    color: var(--app-muted);
   }
   .chip {
     @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium;
   }
 }
 
-/* Oculta la barra de scroll pero mantiene el desplazamiento (listas horizontales). */
+/* Oculta la barra de scroll pero mantiene el desplazamiento. */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }

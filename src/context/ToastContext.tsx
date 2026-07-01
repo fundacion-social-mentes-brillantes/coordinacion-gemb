@@ -22,10 +22,11 @@ export const useToast = () => useContext(Ctx);
 
 let counter = 0;
 
+// Colores fijos (legibles en cualquier tema): los toasts no cambian con el modo.
 const STYLES: Record<ToastType, string> = {
-  success: 'bg-primary-600 text-white',
-  error: 'bg-rose-600 text-white',
-  info: 'bg-slate-800 text-white',
+  success: 'linear-gradient(135deg, #16a34a, #15803d)',
+  error: '#dc2626',
+  info: '#1f2937',
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -47,7 +48,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={t.id}
             role="status"
-            className={`pointer-events-auto max-w-sm rounded-xl px-4 py-3 text-sm font-medium shadow-lifted ${STYLES[t.type]}`}
+            className="pointer-events-auto max-w-sm rounded-xl px-4 py-3 text-sm font-medium shadow-lifted"
+            style={{ background: STYLES[t.type], color: '#ffffff' }}
           >
             {t.message}
           </div>

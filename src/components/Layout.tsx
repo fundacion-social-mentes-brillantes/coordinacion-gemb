@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { Logo } from './Logo';
 import { InstallButton } from './InstallPrompt';
+import { ThemeToggle } from './ThemeToggle';
 import {
   CalendarIcon,
   ChartIcon,
@@ -45,9 +46,9 @@ export function Layout() {
   };
 
   return (
-    <div className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col bg-surface">
+    <div className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col">
       {/* Cabecera */}
-      <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-primary-100 bg-white/90 px-4 py-3 backdrop-blur">
+      <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-primary-100 bg-white/85 px-4 py-3 backdrop-blur">
         <Logo className="h-8 w-8 shrink-0" />
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-bold leading-tight text-primary-800">
@@ -63,6 +64,7 @@ export function Layout() {
           </span>
         )}
         <InstallButton className="btn-ghost hidden text-sm sm:inline-flex" />
+        <ThemeToggle />
         <button
           type="button"
           onClick={handleLogout}
@@ -80,7 +82,7 @@ export function Layout() {
       </main>
 
       {/* Navegación inferior (móvil) */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 mx-auto max-w-2xl border-t border-primary-100 bg-white/95 backdrop-blur">
+      <nav className="fixed inset-x-0 bottom-0 z-40 mx-auto max-w-2xl border-t border-primary-100 bg-white/90 backdrop-blur">
         <div
           className="flex items-stretch justify-around"
           style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}

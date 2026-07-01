@@ -165,6 +165,20 @@ ahí y se aplican en toda la app.
 
 ---
 
+## 🎨 Temas (Verde / Pink / Dorado)
+
+La app tiene **3 temas** que la usuaria cambia con los tres círculos de color
+en la barra superior (y en la pantalla de ingreso):
+
+- **Verde** (por defecto)
+- **Pink Brillante** (rosa)
+- **Noche Dorada** (oscuro con dorado)
+
+La elección se recuerda en cada dispositivo. Todos los colores están
+centralizados en [`src/index.css`](./src/index.css) (bloques `[data-theme='…']`)
+y en [`tailwind.config.js`](./tailwind.config.js): para ajustar un tono, edítalo
+ahí y se aplica en toda la app.
+
 ## 📱 Instalar como app (PWA)
 
 - **Android (Chrome):** aparece el botón **"Instalar app"** dentro de la app,

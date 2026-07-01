@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { Logo } from '../components/Logo';
 import { Spinner, FullScreenSpinner } from '../components/Spinner';
 import { InstallButton } from '../components/InstallPrompt';
+import { ThemeToggle } from '../components/ThemeToggle';
 import { useState } from 'react';
 
 export function LoginPage() {
@@ -61,6 +62,11 @@ export function LoginPage() {
 
         <div className="mt-6">
           <InstallButton className="btn-ghost mx-auto text-sm" />
+        </div>
+
+        <div className="mt-6 flex items-center justify-center gap-3 border-t border-primary-100 pt-5">
+          <span className="text-xs text-slate-500">Tema:</span>
+          <ThemeToggle />
         </div>
       </div>
 

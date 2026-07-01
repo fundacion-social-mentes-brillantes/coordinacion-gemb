@@ -34,3 +34,5 @@ pnpm-debug.log*
 # Archivos de estado/locks de la herramienta
 .claude/*.lock
 .claude/scheduled_tasks.lock
+
+.vercel
