@@ -16,7 +16,7 @@ import type { UserProfile, Role } from '../types';
 import { ROLE_LABELS } from '../lib/constants';
 import { Spinner } from '../components/Spinner';
 import { EmptyState } from '../components/EmptyState';
-import { UsersIcon, TrashIcon, UserPlusIcon } from '../components/Icons';
+import { UsersIcon, TrashIcon, CheckIcon, PlusIcon } from '../components/Icons';
 
 export function UsersPage() {
   const { profile, isSuperAdmin } = useAuth();
@@ -26,6 +26,7 @@ export function UsersPage() {
   const [invites, setInvites] = useState<Invite[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [showInvite, setShowInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<Role>('coordinador');
   const [savingInvite, setSavingInvite] = useState(false);
@@ -52,60 +53,54 @@ export function UsersPage() {
     };
   }, [toast]);
 
-  const pending = useMemo(
-    () => users.filter((u) => u.role === 'pending'),
-    [users],
-  );
-  const active = useMemo(
+  const pending = useMemo(() => users.filter((u) => u.role === 'pending'), [users]);
+  const withAccess = useMemo(
     () => users.filter((u) => u.role !== 'pending'),
     [users],
   );
 
-  // Roles que el usuario actual puede asignar.
+  // Roles que puedo asignar (el admin normal solo crea coordinadoras).
   const assignable: Role[] = isSuperAdmin
     ? ['coordinador', 'admin']
     : ['coordinador'];
 
   const isSuperDoc = (u: UserProfile) => u.email === SUPER_ADMIN_EMAIL;
-  // ¿Puedo administrar este usuario? (los admins no gestionan a otros admins)
   const canManage = (u: UserProfile) => {
     if (isSuperDoc(u)) return false;
-    if (u.uid === profile?.uid) return false; // no editarme a mí mismo aquí
+    if (u.uid === profile?.uid) return false;
     if (u.role === 'admin' && !isSuperAdmin) return false;
     return true;
   };
 
-  const handleApprove = async (u: UserProfile, role: Role) => {
+  const approve = async (u: UserProfile, role: Role) => {
     try {
       await approveUser(u.uid, role);
-      toast(`${u.displayName || u.email} aprobado como ${ROLE_LABELS[role]}.`, 'success');
+      toast(`${u.displayName || u.email} ahora es ${ROLE_LABELS[role]}.`, 'success');
     } catch (e) {
       console.error(e);
       toast('No se pudo aprobar.', 'error');
     }
   };
-
-  const handleRole = async (u: UserProfile, role: Role) => {
+  const changeRole = async (u: UserProfile, role: Role) => {
     try {
       await updateUserRole(u.uid, role);
       toast('Rol actualizado.', 'success');
     } catch (e) {
       console.error(e);
-      toast('No se pudo actualizar el rol.', 'error');
+      toast('No se pudo cambiar el rol.', 'error');
     }
   };
-
-  const handleActive = async (u: UserProfile) => {
+  const toggleActive = async (u: UserProfile) => {
     try {
       await setUserActive(u.uid, !u.active);
-      toast(u.active ? 'Usuario desactivado.' : 'Usuario reactivado.', 'success');
+      toast(u.active ? 'Acceso quitado.' : 'Acceso reactivado.', 'success');
     } catch (e) {
       console.error(e);
       toast('No se pudo cambiar el estado.', 'error');
     }
   };
 
-  const handleInvite = async () => {
+  const sendInvite = async () => {
     if (!profile) return;
     const email = inviteEmail.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(email)) {
@@ -115,23 +110,13 @@ export function UsersPage() {
     setSavingInvite(true);
     try {
       await createInvite(email, inviteRole, profile);
-      toast('Invitación creada. La persona quedará con ese rol al ingresar.', 'success');
+      toast('Invitación creada.', 'success');
       setInviteEmail('');
     } catch (e) {
       console.error(e);
       toast('No se pudo crear la invitación.', 'error');
     } finally {
       setSavingInvite(false);
-    }
-  };
-
-  const removeInvite = async (inv: Invite) => {
-    try {
-      await deleteInvite(inv.id);
-      toast('Invitación eliminada.', 'success');
-    } catch (e) {
-      console.error(e);
-      toast('No se pudo eliminar.', 'error');
     }
   };
 
@@ -144,35 +129,53 @@ export function UsersPage() {
   }
 
   return (
-    <div className="space-y-5">
-      <h2 className="text-lg font-bold text-primary-900">Usuarios</h2>
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-bold text-primary-900">Usuarios</h2>
+        <p className="text-sm text-slate-500">
+          Aquí decides quién puede usar la app y con qué permisos.
+        </p>
+      </div>
 
-      {/* Pendientes */}
-      <section className="space-y-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Pendientes de aprobación ({pending.length})
+      {/* 1) Solicitudes nuevas */}
+      <section className="space-y-3">
+        <h3 className="text-sm font-bold text-primary-800">
+          🔔 Solicitudes nuevas
+          {pending.length > 0 && (
+            <span className="ml-2 rounded-full bg-primary-500 px-2 py-0.5 text-xs font-bold text-white">
+              {pending.length}
+            </span>
+          )}
         </h3>
+
         {pending.length === 0 ? (
-          <p className="rounded-xl bg-white px-4 py-3 text-sm text-slate-400">
-            No hay solicitudes pendientes.
+          <p className="rounded-xl border border-primary-100 bg-white px-4 py-4 text-center text-sm text-slate-400">
+            No hay solicitudes por ahora. Cuando alguien entre por primera vez,
+            aparecerá aquí para que la apruebes.
           </p>
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-3">
             {pending.map((u) => (
-              <li key={u.uid} className="card p-3">
-                <p className="font-medium text-slate-800">
+              <li key={u.uid} className="card p-4">
+                <p className="font-semibold text-slate-800">
                   {u.displayName || u.email}
                 </p>
-                <p className="text-xs text-slate-400">{u.email}</p>
-                <div className="mt-2 flex flex-wrap gap-2">
+                <p className="mb-3 text-xs text-slate-400">{u.email}</p>
+                <p className="mb-2 text-xs font-medium text-slate-500">
+                  Dale acceso como:
+                </p>
+                <div className="flex flex-wrap gap-2">
                   {assignable.map((r) => (
                     <button
                       key={r}
                       type="button"
-                      onClick={() => handleApprove(u, r)}
-                      className="btn-primary py-2 text-sm"
+                      onClick={() => approve(u, r)}
+                      className={
+                        r === 'coordinador' ? 'btn-primary py-2.5' : 'btn-secondary py-2.5'
+                      }
                     >
-                      Aprobar como {ROLE_LABELS[r]}
+                      <CheckIcon className="text-lg" />
+                      {ROLE_LABELS[r]}
                     </button>
                   ))}
                 </div>
@@ -182,108 +185,34 @@ export function UsersPage() {
         )}
       </section>
 
-      {/* Invitaciones */}
-      <section className="space-y-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Pre-autorizar por correo
+      {/* 2) Personas con acceso */}
+      <section className="space-y-3">
+        <h3 className="text-sm font-bold text-primary-800">
+          Personas con acceso ({withAccess.length})
         </h3>
-        <div className="card space-y-3 p-4">
-          <p className="text-sm text-slate-500">
-            Deja lista a una persona con su rol antes de que ingrese por primera
-            vez.
-          </p>
-          <input
-            className="input"
-            placeholder="correo@ejemplo.com"
-            value={inviteEmail}
-            onChange={(e) => setInviteEmail(e.target.value)}
-            inputMode="email"
-            autoComplete="off"
-          />
-          <div className="flex gap-2">
-            <select
-              className="input flex-1"
-              value={inviteRole}
-              onChange={(e) => setInviteRole(e.target.value as Role)}
-            >
-              {assignable.map((r) => (
-                <option key={r} value={r}>
-                  {ROLE_LABELS[r]}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={handleInvite}
-              disabled={savingInvite}
-              className="btn-primary"
-            >
-              {savingInvite ? (
-                <Spinner className="h-5 w-5 text-white" />
-              ) : (
-                <UserPlusIcon className="text-lg" />
-              )}
-              Invitar
-            </button>
-          </div>
-
-          {invites.length > 0 && (
-            <ul className="divide-y divide-slate-100">
-              {invites.map((inv) => (
-                <li
-                  key={inv.id}
-                  className="flex items-center justify-between py-2 text-sm"
-                >
-                  <span className="min-w-0 flex-1 truncate">
-                    <span className="text-slate-700">{inv.email}</span>{' '}
-                    <span className="chip bg-primary-100 text-primary-700">
-                      {ROLE_LABELS[inv.role]}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => removeInvite(inv)}
-                    className="rounded-full p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-500"
-                    aria-label="Eliminar invitación"
-                  >
-                    <TrashIcon className="text-base" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </section>
-
-      {/* Usuarios con rol */}
-      <section className="space-y-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Personas con acceso ({active.length})
-        </h3>
-        {active.length === 0 ? (
-          <EmptyState icon={<UsersIcon />} title="Aún no hay usuarios con rol" />
+        {withAccess.length === 0 ? (
+          <EmptyState icon={<UsersIcon />} title="Aún no hay nadie con acceso" />
         ) : (
           <ul className="space-y-2">
-            {active.map((u) => {
+            {withAccess.map((u) => {
               const superDoc = isSuperDoc(u);
               const manageable = canManage(u);
               return (
-                <li
-                  key={u.uid}
-                  className={`card p-3 ${u.active ? '' : 'opacity-60'}`}
-                >
-                  <div className="flex items-center gap-3">
+                <li key={u.uid} className={`card p-4 ${u.active ? '' : 'opacity-60'}`}>
+                  <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium text-slate-800">
+                      <p className="truncate font-semibold text-slate-800">
                         {u.displayName || u.email}
                         {u.uid === profile?.uid && (
-                          <span className="ml-1 text-xs text-slate-400">(tú)</span>
+                          <span className="ml-1 text-xs font-normal text-slate-400">
+                            (tú)
+                          </span>
                         )}
                       </p>
                       <p className="truncate text-xs text-slate-400">{u.email}</p>
                     </div>
                     <span
-                      className={`chip ${
+                      className={`chip whitespace-nowrap ${
                         superDoc
                           ? 'bg-amber-100 text-amber-700'
                           : u.role === 'admin'
@@ -291,54 +220,139 @@ export function UsersPage() {
                             : 'bg-primary-100 text-primary-700'
                       }`}
                     >
-                      {ROLE_LABELS[u.role]}
+                      {u.role === 'super_admin'
+                        ? 'Dueña'
+                        : ROLE_LABELS[u.role]}
                     </span>
                   </div>
 
                   {superDoc ? (
                     <p className="mt-2 text-xs text-slate-400">
-                      Cuenta protegida (no se puede degradar ni desactivar).
+                      Cuenta principal protegida.
                     </p>
                   ) : manageable ? (
-                    <div className="mt-3 flex items-center gap-2">
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <label className="text-xs text-slate-500">Permiso:</label>
                       <select
-                        className="input flex-1 py-2"
+                        className="input w-auto flex-1 py-2"
                         value={u.role}
-                        onChange={(e) => handleRole(u, e.target.value as Role)}
+                        onChange={(e) => changeRole(u, e.target.value as Role)}
                       >
                         {assignable.map((r) => (
                           <option key={r} value={r}>
                             {ROLE_LABELS[r]}
                           </option>
                         ))}
-                        {/* Mantén visible el rol actual aunque no sea asignable por ti */}
                         {!assignable.includes(u.role) && (
                           <option value={u.role}>{ROLE_LABELS[u.role]}</option>
                         )}
                       </select>
                       <button
                         type="button"
-                        onClick={() => handleActive(u)}
+                        onClick={() => toggleActive(u)}
                         className={`chip ${
                           u.active
-                            ? 'bg-slate-100 text-slate-600'
+                            ? 'bg-rose-100 text-rose-600'
                             : 'bg-primary-100 text-primary-700'
                         }`}
                       >
-                        {u.active ? 'Desactivar' : 'Activar'}
+                        {u.active ? 'Quitar acceso' : 'Reactivar'}
                       </button>
                     </div>
                   ) : (
                     <p className="mt-2 text-xs text-slate-400">
                       {u.uid === profile?.uid
                         ? 'Este eres tú.'
-                        : 'Solo el super administrador puede gestionar a este usuario.'}
+                        : 'Solo la dueña puede cambiar a este usuario.'}
                     </p>
                   )}
                 </li>
               );
             })}
           </ul>
+        )}
+      </section>
+
+      {/* 3) Invitar por correo (opcional, plegable) */}
+      <section>
+        <button
+          type="button"
+          onClick={() => setShowInvite((v) => !v)}
+          className="flex w-full items-center justify-between rounded-xl border border-dashed border-primary-200 bg-white px-4 py-3 text-left text-sm font-medium text-primary-700"
+        >
+          <span>➕ Invitar a alguien por correo (opcional)</span>
+          <span className="text-primary-500">{showInvite ? 'Ocultar' : 'Abrir'}</span>
+        </button>
+
+        {showInvite && (
+          <div className="card mt-2 space-y-3 p-4">
+            <p className="text-sm text-slate-500">
+              Úsalo solo si quieres dejar el permiso listo <strong>antes</strong> de
+              que la persona entre por primera vez. Si la persona <strong>ya
+              entró</strong>, no uses esto: apruébala arriba en “Solicitudes
+              nuevas”.
+            </p>
+            <input
+              className="input"
+              placeholder="correo@ejemplo.com"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              inputMode="email"
+              autoComplete="off"
+            />
+            <div className="flex gap-2">
+              <select
+                className="input flex-1"
+                value={inviteRole}
+                onChange={(e) => setInviteRole(e.target.value as Role)}
+              >
+                {assignable.map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_LABELS[r]}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={sendInvite}
+                disabled={savingInvite}
+                className="btn-primary"
+              >
+                {savingInvite ? (
+                  <Spinner className="h-5 w-5 text-white" />
+                ) : (
+                  <PlusIcon className="text-lg" />
+                )}
+                Invitar
+              </button>
+            </div>
+
+            {invites.length > 0 && (
+              <ul className="divide-y divide-slate-100">
+                {invites.map((inv) => (
+                  <li
+                    key={inv.id}
+                    className="flex items-center justify-between py-2 text-sm"
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      <span className="text-slate-700">{inv.email}</span>{' '}
+                      <span className="chip bg-primary-100 text-primary-700">
+                        {ROLE_LABELS[inv.role]}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => deleteInvite(inv.id)}
+                      className="rounded-full p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-500"
+                      aria-label="Eliminar invitación"
+                    >
+                      <TrashIcon className="text-base" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </section>
     </div>

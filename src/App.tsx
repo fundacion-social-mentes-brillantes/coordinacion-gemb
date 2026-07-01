@@ -52,10 +52,10 @@ export default function App() {
             <Route index element={<Navigate to="/sesiones" replace />} />
             <Route path="/sesiones" element={<SessionsPage />} />
             <Route path="/sesiones/:id" element={<AttendancePage />} />
-            <Route path="/panel" element={<DashboardPage />} />
 
-            {/* Solo administración */}
+            {/* Solo administración (las coordinadoras solo usan Sesiones) */}
             <Route element={<RequireAuth allow={[...ADMIN]} />}>
+              <Route path="/panel" element={<DashboardPage />} />
               <Route path="/personas" element={<MembersPage />} />
               <Route path="/personas/importar" element={<ImportPage />} />
               <Route path="/usuarios" element={<UsersPage />} />

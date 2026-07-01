@@ -27,7 +27,9 @@ const ADMIN: Role[] = ['admin', 'super_admin'];
 
 const NAV: NavItem[] = [
   { to: '/sesiones', label: 'Sesiones', icon: CalendarIcon, roles: ALL },
-  { to: '/panel', label: 'Panel', icon: ChartIcon, roles: ALL },
+  // El panel y la administración son solo para admin/super_admin.
+  // Las coordinadoras solo ven "Sesiones".
+  { to: '/panel', label: 'Panel', icon: ChartIcon, roles: ADMIN },
   { to: '/personas', label: 'Personas', icon: UsersIcon, roles: ADMIN },
   { to: '/usuarios', label: 'Usuarios', icon: ShieldIcon, roles: ADMIN },
 ];
