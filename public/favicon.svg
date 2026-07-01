@@ -34,7 +34,7 @@
   <rect x="3.5" y="3.5" width="505" height="505" rx="109" fill="none" stroke="url(#rim)" stroke-width="7"/>
   <rect x="17" y="17" width="478" height="478" rx="99" fill="none" stroke="#f6e0a0" stroke-opacity=".1" stroke-width="2"/>
   <circle cx="256" cy="252" r="205" fill="url(#aura)"/>
-  <g>
+  <g transform="translate(256 256) scale(.88) translate(-256 -256)">
     <g fill="none" stroke="url(#goldStroke)" stroke-linecap="round" stroke-linejoin="round">
       <path d="M113 243c35-24 84-11 143-10 59 1 108-14 143 10" stroke-width="11"/>
       <path d="M114 243c-28 7-43 28-31 41 9 10 28 3 20-14" stroke-width="10"/>
