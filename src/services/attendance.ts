@@ -2,6 +2,7 @@ import {
   collection,
   collectionGroup,
   doc,
+  setDoc,
   onSnapshot,
   writeBatch,
   increment,
@@ -9,7 +10,7 @@ import {
   type SnapshotMetadata,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { Attendance, Session, Member } from '../types';
+import type { Attendance, Session, Member, SessionType, Modality } from '../types';
 import type { UserProfile } from '../types';
 
 function attendanceCol(sessionId: string) {
@@ -80,6 +81,30 @@ export async function unmarkPresent(sessionId: string, memberId: string) {
     presentCount: increment(-1),
   });
   await batch.commit();
+}
+
+/**
+ * Escribe una asistencia HISTÓRICA (importación) con fecha propia (la de la
+ * reunión), sin tocar el contador (se fija al final). No usa Timestamp.now().
+ */
+export async function writeImportedAttendance(
+  sessionId: string,
+  meta: { type: SessionType; modality: Modality; dateTs: Timestamp },
+  member: Pick<Member, 'id' | 'fullName'>,
+) {
+  const ref = doc(db, 'sessions', sessionId, 'attendance', member.id);
+  await setDoc(ref, {
+    memberId: member.id,
+    fullName: member.fullName,
+    status: 'present',
+    checkedInAt: meta.dateTs,
+    checkedInBy: 'import',
+    checkedInByName: 'Importado (Meet)',
+    sessionId,
+    sessionType: meta.type,
+    modality: meta.modality,
+    sessionDate: meta.dateTs,
+  });
 }
 
 /**

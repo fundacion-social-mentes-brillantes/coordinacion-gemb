@@ -28,6 +28,11 @@ const MembersPage = lazy(() =>
 const ImportPage = lazy(() =>
   import('./pages/ImportPage').then((m) => ({ default: m.ImportPage })),
 );
+const ImportHistoryPage = lazy(() =>
+  import('./pages/ImportHistoryPage').then((m) => ({
+    default: m.ImportHistoryPage,
+  })),
+);
 const UsersPage = lazy(() =>
   import('./pages/UsersPage').then((m) => ({ default: m.UsersPage })),
 );
@@ -58,6 +63,7 @@ export default function App() {
               <Route path="/panel" element={<DashboardPage />} />
               <Route path="/personas" element={<MembersPage />} />
               <Route path="/personas/importar" element={<ImportPage />} />
+              <Route path="/personas/historial" element={<ImportHistoryPage />} />
               <Route path="/usuarios" element={<UsersPage />} />
             </Route>
           </Route>

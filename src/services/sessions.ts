@@ -82,6 +82,11 @@ export async function setSessionStatus(id: string, status: SessionStatus) {
   await updateDoc(doc(db, 'sessions', id), { status });
 }
 
+/** Cierra una sesión importada y fija su conteo de presentes. */
+export async function finalizeImportedSession(id: string, presentCount: number) {
+  await updateDoc(doc(db, 'sessions', id), { presentCount, status: 'closed' });
+}
+
 /** Borra una sesión y toda su asistencia (solo admin). */
 export async function deleteSession(id: string) {
   const attSnap = await getDocs(collection(db, 'sessions', id, 'attendance'));

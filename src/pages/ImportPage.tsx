@@ -176,6 +176,15 @@ export function ImportPage() {
         <ArrowLeftIcon className="text-lg" /> Personas
       </button>
       <h2 className="text-lg font-bold text-primary-900">Importar personas</h2>
+
+      <button
+        type="button"
+        onClick={() => navigate('/personas/historial')}
+        className="flex w-full items-center justify-between rounded-xl border border-dashed border-primary-200 bg-white px-4 py-3 text-left text-sm font-medium text-primary-700"
+      >
+        <span>📅 ¿Tienes historial de reuniones (asistencia pasada)? Impórtalo aquí</span>
+        <span className="text-primary-500">Abrir</span>
+      </button>
       <p className="text-sm text-slate-500">
         Sube un archivo <strong>CSV</strong> o <strong>Excel (.xlsx)</strong>.
         Se corrigen automáticamente los acentos dañados y se detectan
