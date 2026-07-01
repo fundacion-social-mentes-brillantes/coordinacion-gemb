@@ -1,0 +1,172 @@
+rules_version = '2';
+
+// =====================================================================
+//  Reglas de seguridad de Firestore — Asistencia GEMB
+// ---------------------------------------------------------------------
+//  Publícalas en: consola de Firebase → Firestore → pestaña "Reglas"
+//  → pega TODO este archivo → "Publicar".
+//  Sin esto la app no puede leer ni escribir (el proyecto está en modo
+//  producción).
+// =====================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -------------------- Helpers --------------------
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Correo del super administrador (admin de admins). Debe coincidir con
+    // SUPER_ADMIN_EMAIL en src/lib/firebase.ts.
+    function superEmail() {
+      return 'fundacionsocial@gimnasioemocionalmb.com';
+    }
+    function isSuperEmail(email) {
+      return email == superEmail();
+    }
+
+    function userExists() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    function userData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    // Rol del usuario actual ('none' si aún no tiene documento).
+    function role() {
+      return userExists() ? userData().role : 'none';
+    }
+    function isActive() {
+      return userExists() && userData().active == true;
+    }
+
+    function isSuper() {
+      return role() == 'super_admin';
+    }
+    function isAdmin() {
+      return role() == 'admin' || role() == 'super_admin';
+    }
+    // "Staff" = quien puede marcar asistencia y crear sesiones.
+    function isStaff() {
+      return role() == 'coordinador' || isAdmin();
+    }
+    // Cualquiera con un rol real y la cuenta activa (no pendiente).
+    function canRead() {
+      return isSignedIn() && role() != 'pending' && role() != 'none' && isActive();
+    }
+
+    function sessionIsOpen(sessionId) {
+      return get(/databases/$(database)/documents/sessions/$(sessionId)).data.status == 'open';
+    }
+
+    function hasInvite(email, r) {
+      return exists(/databases/$(database)/documents/invites/$(email)) &&
+        get(/databases/$(database)/documents/invites/$(email)).data.role == r;
+    }
+
+    // -------------------- users --------------------
+    match /users/{userId} {
+      // Cada quien lee su propio documento; admin/super leen todos.
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+
+      // Alta del propio documento en el primer ingreso.
+      // El correo guardado DEBE ser el del propio usuario autenticado: así
+      // nadie puede crear su documento con el correo de otra persona (ni el
+      // del super admin) para suplantar identidad o bloquear la administración.
+      allow create: if request.auth.uid == userId
+        && request.resource.data.email == request.auth.token.email
+        && (
+          // El super admin se crea a sí mismo como super_admin.
+          (isSuperEmail(request.auth.token.email)
+            && request.resource.data.role == 'super_admin'
+            && request.resource.data.active == true)
+          ||
+          // Cualquiera se crea como pendiente.
+          (request.resource.data.role == 'pending')
+          ||
+          // Con una invitación previa se crea con el rol invitado.
+          (request.resource.data.role in ['admin', 'coordinador']
+            && hasInvite(request.auth.token.email, request.resource.data.role))
+        );
+
+      // Actualización.
+      allow update: if isSignedIn() && (
+        // A) El super admin corrige/mantiene su propio documento.
+        (request.auth.uid == userId
+          && isSuperEmail(request.auth.token.email)
+          && request.resource.data.role == 'super_admin'
+          && request.resource.data.active == true)
+        ||
+        // B) Administración de otros usuarios.
+        (isAdmin() && isActive()
+          && !isSuperEmail(resource.data.email) // nunca el doc del super admin
+          && (
+            // El super gestiona a cualquiera (incluidos admins).
+            isSuper()
+            ||
+            // El admin normal solo gestiona coordinadores/pendientes y NO
+            // puede crear/editar administradores.
+            (resource.data.role in ['coordinador', 'pending']
+              && request.resource.data.role in ['coordinador', 'pending'])
+          ))
+      );
+
+      // Nadie puede borrar el documento del super admin.
+      allow delete: if isSuper() && isActive() && !isSuperEmail(resource.data.email);
+    }
+
+    // -------------------- invites (pre-autorizaciones) --------------------
+    // ID del documento = correo en minúsculas.
+    match /invites/{inviteId} {
+      // Al ingresar, el propio usuario consulta si tiene invitación.
+      allow read: if isSignedIn();
+
+      // El super invita coordinadores y admins; el admin solo coordinadores.
+      allow create, update: if isActive() && (
+        (isSuper() && request.resource.data.role in ['admin', 'coordinador'])
+        || (isAdmin() && request.resource.data.role == 'coordinador')
+      );
+      allow delete: if isAdmin() && isActive();
+    }
+
+    // -------------------- members (personas) --------------------
+    match /members/{memberId} {
+      allow read: if canRead();
+      // Crear: coordinador (walk-in) y admin (alta/importación).
+      allow create: if isStaff() && isActive();
+      // Editar / desactivar / borrar: solo admin.
+      allow update, delete: if isAdmin() && isActive();
+    }
+
+    // -------------------- sessions (reuniones) --------------------
+    match /sessions/{sessionId} {
+      allow read: if canRead();
+      // Crear sesiones: coordinador y admin.
+      allow create: if isStaff() && isActive();
+      // Actualizar:
+      allow update: if isActive() && (
+        // El admin puede todo (incluido abrir/cerrar).
+        isAdmin()
+        ||
+        // El coordinador SOLO puede ajustar el contador de presentes
+        // (auto-mantenido al marcar/desmarcar). No puede cambiar el estado
+        // ni tocar ningún otro campo (fecha, tipo, createdBy, etc.).
+        (role() == 'coordinador'
+          && request.resource.data.status == resource.data.status
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['presentCount']))
+      );
+      // Borrar sesión: solo admin.
+      allow delete: if isAdmin() && isActive();
+
+      // -------------------- attendance (asistencia) --------------------
+      match /attendance/{memberId} {
+        allow read: if canRead();
+        // Marcar/desmarcar solo si la sesión está ABIERTA.
+        allow create, update, delete: if isStaff() && isActive()
+          && sessionIsOpen(sessionId);
+      }
+    }
+  }
+}

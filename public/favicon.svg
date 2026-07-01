@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="GEMB">
+  <rect width="128" height="128" rx="28" fill="#1f7862"/>
+  <circle cx="64" cy="64" r="34" fill="none" stroke="#f2faf7" stroke-width="10"/>
+  <circle cx="64" cy="64" r="13" fill="#f2faf7"/>
+</svg>

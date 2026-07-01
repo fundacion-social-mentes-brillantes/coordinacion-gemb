@@ -1,0 +1,36 @@
+# Dependencias
+node_modules
+
+# Builds
+dist
+dist-ssr
+dev-dist
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor / SO
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Entorno / despliegue
+.env
+.env.*
+!.env.example
+.vercel
+
+# Archivos de estado/locks de la herramienta
+.claude/*.lock
+.claude/scheduled_tasks.lock
