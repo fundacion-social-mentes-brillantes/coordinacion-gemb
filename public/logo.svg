@@ -1,13 +1,59 @@
-<!-- PLACEHOLDER — Reemplaza este archivo por el logo real de la fundación.
-     Mantén el mismo nombre (logo.svg) o actualiza las referencias en el README. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Logo GEMB (placeholder)">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title>GEMB</title>
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#2b9678"/>
-      <stop offset="1" stop-color="#1f7862"/>
+    <linearGradient id="bg" x1="76" y1="36" x2="430" y2="476" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0b1020"/>
+      <stop offset=".48" stop-color="#111a30"/>
+      <stop offset="1" stop-color="#16203a"/>
     </linearGradient>
+    <linearGradient id="rim" x1="42" y1="34" x2="470" y2="478" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f6e0a0" stop-opacity=".2"/>
+      <stop offset=".5" stop-color="#d7b46a" stop-opacity=".78"/>
+      <stop offset="1" stop-color="#8f7131" stop-opacity=".25"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="151" y1="92" x2="374" y2="406" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#b8934a"/>
+      <stop offset=".24" stop-color="#f6e0a0"/>
+      <stop offset=".52" stop-color="#d7b46a"/>
+      <stop offset=".78" stop-color="#fff0b8"/>
+      <stop offset="1" stop-color="#b8934a"/>
+    </linearGradient>
+    <linearGradient id="goldStroke" x1="96" y1="126" x2="420" y2="365" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#b8934a"/>
+      <stop offset=".38" stop-color="#f6e0a0"/>
+      <stop offset=".66" stop-color="#d7b46a"/>
+      <stop offset="1" stop-color="#b8934a"/>
+    </linearGradient>
+    <radialGradient id="aura" cx="50%" cy="45%" r="58%">
+      <stop offset="0" stop-color="#d7b46a" stop-opacity=".18"/>
+      <stop offset=".72" stop-color="#d7b46a" stop-opacity=".05"/>
+      <stop offset="1" stop-color="#d7b46a" stop-opacity="0"/>
+    </radialGradient>
   </defs>
-  <rect width="128" height="128" rx="28" fill="url(#g)"/>
-  <circle cx="64" cy="64" r="34" fill="none" stroke="#f2faf7" stroke-width="9"/>
-  <circle cx="64" cy="64" r="13" fill="#f2faf7"/>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect x="3.5" y="3.5" width="505" height="505" rx="109" fill="none" stroke="url(#rim)" stroke-width="7"/>
+  <rect x="17" y="17" width="478" height="478" rx="99" fill="none" stroke="#f6e0a0" stroke-opacity=".1" stroke-width="2"/>
+  <circle cx="256" cy="252" r="205" fill="url(#aura)"/>
+  <g>
+    <g fill="none" stroke="url(#goldStroke)" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M113 243c35-24 84-11 143-10 59 1 108-14 143 10" stroke-width="11"/>
+      <path d="M114 243c-28 7-43 28-31 41 9 10 28 3 20-14" stroke-width="10"/>
+      <path d="M398 243c28 7 43 28 31 41-9 10-28 3-20-14" stroke-width="10"/>
+      <path d="M100 280v31M81 311h38M83 311l10 18h14l10-18" stroke-width="7"/>
+      <path d="M412 280v31M393 311h38M395 311l10 18h14l10-18" stroke-width="7"/>
+      <path d="M183 221v42M197 224v36M169 227v30" stroke-width="8"/>
+      <path d="M329 221v42M315 224v36M343 227v30" stroke-width="8"/>
+    </g>
+    <path fill="url(#gold)" d="M247 260c-13-10-31-9-42 2-13-7-31-4-41 8-9 11-11 25-5 39-17 8-26 26-22 44 5 23 27 38 50 34 8 15 24 25 42 25 17 0 31-8 40-21V276c-7-5-14-10-22-16z"/>
+    <path fill="url(#gold)" d="M265 260c13-10 31-9 42 2 13-7 31-4 41 8 9 11 11 25 5 39 17 8 26 26 22 44-5 23-27 38-50 34-8 15-24 25-42 25-17 0-31-8-40-21V276c7-5 14-10 22-16z"/>
+    <path fill="url(#gold)" d="M151 185c-24 0-44-20-44-44 0-20 14-38 33-43 3-23 23-41 47-41 10 0 20 3 28 8 10-21 31-35 56-35 27 0 50 17 59 42 9-5 20-8 32-8 32 0 59 26 59 58 0 5-1 11-2 16 20 7 34 26 34 48 0 28-23 51-51 51h-36c-9 0-17-4-23-10-7 6-16 10-27 10h-120c-11 0-21-4-29-11-5 6-13 9-22 9h-13c-17 0-31-14-31-30 0-8 3-15 9-20z"/>
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M256 388V162" stroke="url(#goldStroke)" stroke-width="16"/>
+      <path d="M256 164c-21 13-34 29-43 51M256 163c22 13 37 30 46 52M257 162c-1 23-3 40-8 57M241 188c-16 2-29 11-40 25M273 188c17 2 30 11 41 25" stroke="url(#goldStroke)" stroke-width="9"/>
+      <path d="M203 291c-7 15 4 31 23 31M176 343c19 7 40 0 52-15M221 374c-17-1-32-8-42-20" stroke="#0d1426" stroke-opacity=".72" stroke-width="8"/>
+      <path d="M309 291c7 15-4 31-23 31M336 343c-19 7-40 0-52-15M291 374c17-1 32-8 42-20" stroke="#0d1426" stroke-opacity=".72" stroke-width="8"/>
+      <path d="M256 388V267" stroke="#0d1426" stroke-opacity=".24" stroke-width="4"/>
+      <path d="M116 238c35-19 83-7 140-6 57 1 105-13 140 6" stroke="#fff0b8" stroke-opacity=".42" stroke-width="2"/>
+    </g>
+  </g>
 </svg>

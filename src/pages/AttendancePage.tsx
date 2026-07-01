@@ -24,6 +24,7 @@ import {
   PlusIcon,
   XIcon,
   UserPlusIcon,
+  LeafIcon,
 } from '../components/Icons';
 
 export function AttendancePage() {
@@ -97,10 +98,11 @@ export function AttendancePage() {
   );
 
   const presentIds = useMemo(() => new Set(rows.map((r) => r.memberId)), [rows]);
-  const presentSorted = useMemo(
+  // Orden de llegada: primero en llegar = número 1.
+  const presentByArrival = useMemo(
     () =>
       [...rows].sort(
-        (a, b) => toDate(b.checkedInAt).getTime() - toDate(a.checkedInAt).getTime(),
+        (a, b) => toDate(a.checkedInAt).getTime() - toDate(b.checkedInAt).getTime(),
       ),
     [rows],
   );
@@ -123,6 +125,14 @@ export function AttendancePage() {
       console.error(e);
       toast('No se pudo guardar. Se reintentará al reconectar.', 'error');
     }
+  };
+
+  // Al elegir a alguien desde el buscador: márcalo y limpia la búsqueda para
+  // pasar rápido al siguiente nombre (el foco vuelve al buscador).
+  const pickFromSearch = (member: Pick<Member, 'id' | 'fullName'>) => {
+    toggle(member);
+    setQuery('');
+    searchRef.current?.focus();
   };
 
   const handleWalkin = async () => {
@@ -298,7 +308,7 @@ export function AttendancePage() {
                   <li key={m.id}>
                     <button
                       type="button"
-                      onClick={() => toggle(m)}
+                      onClick={() => pickFromSearch(m)}
                       className={`flex min-h-[56px] w-full items-center gap-3 rounded-xl border p-3 text-left transition active:scale-[.99] ${
                         present
                           ? 'border-primary-500 bg-primary-50'
@@ -337,33 +347,67 @@ export function AttendancePage() {
         </section>
       )}
 
-      {/* Lista de presentes */}
-      <section>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Presentes de hoy ({rows.length})
-        </h3>
+      {/* Hoja de asistencia — en orden de llegada */}
+      <section
+        className="overflow-hidden rounded-2xl border shadow-card"
+        style={{ borderColor: 'var(--app-border)', background: 'var(--app-panel)' }}
+      >
+        <div
+          className="flex items-center justify-between px-4 py-3"
+          style={{
+            background: 'var(--app-accent-gradient)',
+            color: 'var(--app-on-accent)',
+          }}
+        >
+          <span className="flex items-center gap-2 font-semibold">
+            <LeafIcon className="text-lg" /> Hoja de asistencia
+          </span>
+          <span className="rounded-full bg-black/15 px-2.5 py-0.5 text-sm font-bold">
+            {rows.length}
+          </span>
+        </div>
+
         {rows.length === 0 ? (
-          <EmptyState
-            icon={<CheckIcon />}
-            title="Aún no hay presentes"
-            description="Busca a una persona arriba y tócala para marcarla."
-          />
+          <div className="px-6 py-12 text-center">
+            <p
+              className="text-sm font-semibold"
+              style={{ color: 'var(--app-strong)' }}
+            >
+              Aún no hay presentes
+            </p>
+            <p className="mt-1 text-sm" style={{ color: 'var(--app-faint)' }}>
+              Busca a una persona arriba y tócala para marcarla.
+            </p>
+          </div>
         ) : (
-          <ul className="space-y-2">
-            {presentSorted.map((r) => (
+          <ol>
+            {presentByArrival.map((r, i) => (
               <li
                 key={r.id}
-                className="flex items-center gap-3 rounded-xl border border-primary-100 bg-white p-3"
+                className="flex items-center gap-3 border-t px-4 py-3"
+                style={{ borderColor: 'var(--app-border)' }}
               >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-500 text-white">
-                  <CheckIcon className="text-lg" />
+                <span
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold"
+                  style={{
+                    background: 'var(--app-soft-solid)',
+                    color: 'var(--app-accent)',
+                  }}
+                >
+                  {i + 1}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-slate-800">
+                  <p
+                    className="truncate font-medium"
+                    style={{ color: 'var(--app-strong)' }}
+                  >
                     {r.fullName}
                   </p>
-                  <p className="truncate text-xs text-slate-400">
-                    {fmtTime(r.checkedInAt)} · {r.checkedInByName}
+                  <p
+                    className="truncate text-xs"
+                    style={{ color: 'var(--app-faint)' }}
+                  >
+                    Llegó {fmtTime(r.checkedInAt)} · {r.checkedInByName}
                   </p>
                 </div>
                 {isOpen && (
@@ -378,7 +422,7 @@ export function AttendancePage() {
                 )}
               </li>
             ))}
-          </ul>
+          </ol>
         )}
       </section>
 
