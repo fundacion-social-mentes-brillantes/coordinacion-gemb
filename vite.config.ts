@@ -12,8 +12,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'logo.svg'],
       manifest: {
-        name: 'Asistencia GEMB',
-        short_name: 'GEMB',
+        name: 'Coordinación GEMB — Asistencia',
+        short_name: 'Coordinación',
         description:
           'Control de asistencia — Gimnasio Emocional Mentes Brillantes',
         lang: 'es',
