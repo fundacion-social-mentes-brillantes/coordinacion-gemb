@@ -136,8 +136,13 @@ service cloud.firestore {
       allow read: if canRead();
       // Crear: coordinador (walk-in) y admin (alta/importación).
       allow create: if isStaff() && isActive();
-      // Editar / desactivar / borrar: solo admin.
-      allow update, delete: if isAdmin() && isActive();
+      // Editar / desactivar / borrar: admin. Excepción: las fichas
+      // provisionales "Por identificar" (pendingIdentify == true) también las
+      // puede corregir/fusionar una coordinadora (ponerles el nombre real).
+      allow update, delete: if isActive() && (
+        isAdmin()
+        || (isStaff() && resource.data.get('pendingIdentify', false) == true)
+      );
     }
 
     // -------------------- sessions (reuniones) --------------------
@@ -151,11 +156,13 @@ service cloud.firestore {
         isAdmin()
         ||
         // El coordinador SOLO puede ajustar el contador de presentes
-        // (auto-mantenido al marcar/desmarcar). No puede cambiar el estado
-        // ni tocar ningún otro campo (fecha, tipo, createdBy, etc.).
+        // (auto-mantenido al marcar/desmarcar) y asignar quién coordina.
+        // No puede cambiar el estado ni tocar ningún otro campo
+        // (fecha, tipo, createdBy, etc.).
         (role() == 'coordinador'
           && request.resource.data.status == resource.data.status
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['presentCount']))
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['presentCount', 'coordinator']))
       );
       // Borrar sesión: solo admin.
       allow delete: if isAdmin() && isActive();
@@ -164,9 +171,19 @@ service cloud.firestore {
       match /attendance/{memberId} {
         allow read: if canRead();
         // Marcar/desmarcar solo si la sesión está ABIERTA.
-        allow create, update, delete: if isStaff() && isActive()
-          && sessionIsOpen(sessionId);
+        // El admin también puede corregir sesiones cerradas (p. ej. ponerle
+        // el nombre real a una persona "Por identificar" días después).
+        allow create, update, delete: if isActive() && (
+          isAdmin()
+          || (isStaff() && sessionIsOpen(sessionId))
+        );
       }
+    }
+
+    // Lectura de TODA la asistencia en conjunto (consulta de grupo de
+    // colección): la usan el Panel y las correcciones de nombre.
+    match /{path=**}/attendance/{memberId} {
+      allow read: if canRead();
     }
   }
 }

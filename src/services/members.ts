@@ -45,6 +45,8 @@ export interface NewMemberInput {
   phone?: string;
   aliases?: string[];
   notes?: string;
+  /** true si aún no se sabe su nombre real ("Por identificar…"). */
+  pendingIdentify?: boolean;
 }
 
 /** Crea una persona (usado por walk-in y por el alta manual). */
@@ -61,6 +63,7 @@ export async function createMember(input: NewMemberInput, uid: string) {
     active: true,
     createdAt: serverTimestamp(),
     createdBy: uid,
+    pendingIdentify: input.pendingIdentify ?? false,
   });
   return ref.id;
 }
@@ -79,6 +82,7 @@ export async function updateMember(id: string, data: Partial<Member>) {
   if (data.phone != null) patch.phone = data.phone;
   if (data.notes != null) patch.notes = data.notes;
   if (data.active != null) patch.active = data.active;
+  if (data.pendingIdentify != null) patch.pendingIdentify = data.pendingIdentify;
   await updateDoc(doc(db, 'members', id), patch);
 }
 

@@ -8,6 +8,8 @@ import {
   updateMember,
   setMemberActive,
 } from '../services/members';
+import { propagateNameToAttendance } from '../services/identify';
+import { buildNameParts } from '../lib/normalize';
 import type { Member } from '../types';
 import { buildFuse, searchMembers, toSearchable } from '../lib/search';
 import { Modal } from '../components/Modal';
@@ -103,13 +105,37 @@ export function MembersPage() {
     setSaving(true);
     try {
       if (editing) {
+        const clean = buildNameParts(fullName).fullName;
+        const nameChanged = clean !== editing.fullName;
         await updateMember(editing.id, {
           fullName,
           phone: form.phone.trim(),
           aliases,
           notes: form.notes.trim(),
+          // Al ponerle nombre real a una "Por identificar", deja de serlo.
+          ...(editing.pendingIdentify && nameChanged
+            ? { pendingIdentify: false }
+            : {}),
         });
-        toast('Persona actualizada.', 'success');
+        if (nameChanged && !navigator.onLine) {
+          toast(
+            'Nombre guardado. Su historial se corrige con internet: vuelve a guardar entonces.',
+            'info',
+          );
+        } else if (nameChanged) {
+          // El nombre vive copiado en cada asistencia: corrige el historial.
+          const res = await propagateNameToAttendance(editing.id, clean);
+          if (res.failed > 0) {
+            toast(
+              `Persona actualizada; ${res.failed} registro(s) antiguos no se pudieron corregir.`,
+              'info',
+            );
+          } else {
+            toast('Persona actualizada (también su historial).', 'success');
+          }
+        } else {
+          toast('Persona actualizada.', 'success');
+        }
       } else {
         await createMember(
           { fullName, phone: form.phone.trim(), aliases, notes: form.notes.trim() },
@@ -211,8 +237,13 @@ export function MembersPage() {
               }`}
             >
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium text-slate-800">
-                  {m.fullName}
+                <p className="flex items-center gap-2 truncate font-medium text-slate-800">
+                  <span className="truncate">{m.fullName}</span>
+                  {m.pendingIdentify && (
+                    <span className="chip shrink-0 bg-amber-100 text-amber-700">
+                      Sin nombre aún
+                    </span>
+                  )}
                 </p>
                 <p className="truncate text-xs text-slate-400">
                   {m.phone || (m.aliases?.length ? `alias: ${m.aliases.join(', ')}` : 'sin datos')}

@@ -19,7 +19,13 @@ reuniones semanales de la fundación **Gimnasio Emocional Mentes Brillantes
   toca a la persona para marcarla presente. En tiempo real entre varios
   celulares y sin duplicados.
 - **Walk-in**: agregar a una persona nueva en el momento y marcarla presente.
-- **Sesiones**: crear reuniones (tipo + modalidad + fecha), abrirlas/cerrarlas.
+- **¿No sabes su nombre?**: se puede marcar presente a alguien "Por
+  identificar" anotando una seña ("saco rojo, vino con Marta"). Después, con
+  **Poner nombre**, se corrige su ficha y todo su historial — o se fusiona con
+  una persona que ya estaba en la base (sin contar doble).
+- **Sesiones**: crear reuniones (tipo + modalidad + fecha), abrirlas/cerrarlas,
+  y asignar **quién coordina** (atajos con las coordinadoras habituales o
+  cualquier otro nombre). Se ve en la lista, en el panel y en el PDF.
 - **Panel / reportes**: por sesión, por persona (con % de asistencia) y
   resumen anual (totales, únicos, por tipo, por modalidad y gráfico por mes).
   Exportación a **CSV** y **PDF**.

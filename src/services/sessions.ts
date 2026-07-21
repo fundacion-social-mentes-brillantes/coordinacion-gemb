@@ -59,6 +59,8 @@ export interface NewSessionInput {
   type: SessionType;
   modality: Modality;
   date: Date;
+  /** Nombre de quien coordina (opcional). */
+  coordinator?: string;
 }
 
 export async function createSession(
@@ -74,12 +76,18 @@ export async function createSession(
     createdByName: user.displayName || user.email,
     createdAt: serverTimestamp(),
     presentCount: 0,
+    coordinator: input.coordinator?.trim() ?? '',
   });
   return ref.id;
 }
 
 export async function setSessionStatus(id: string, status: SessionStatus) {
   await updateDoc(doc(db, 'sessions', id), { status });
+}
+
+/** Asigna (o cambia) quién coordina la sesión. '' = sin asignar. */
+export async function setSessionCoordinator(id: string, name: string) {
+  await updateDoc(doc(db, 'sessions', id), { coordinator: name.trim() });
 }
 
 /** Cierra una sesión importada y fija su conteo de presentes. */

@@ -17,6 +17,7 @@ import {
 } from '../lib/constants';
 import { fmtDateLong, toDate, toInputDate, fromInputDate } from '../lib/dates';
 import { Modal } from '../components/Modal';
+import { CoordinatorPicker } from '../components/CoordinatorPicker';
 import { Spinner } from '../components/Spinner';
 import { EmptyState } from '../components/EmptyState';
 import { TypeBadge, ModalityBadge, StatusBadge } from '../components/badges';
@@ -47,6 +48,7 @@ export function SessionsPage() {
   const [newType, setNewType] = useState<SessionType>('entrega_pasos');
   const [newModality, setNewModality] = useState<Modality>('presencial');
   const [newDate, setNewDate] = useState(toInputDate(new Date()));
+  const [newCoordinator, setNewCoordinator] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -79,6 +81,7 @@ export function SessionsPage() {
     setNewType('entrega_pasos');
     setNewModality('presencial');
     setNewDate(toInputDate(new Date()));
+    setNewCoordinator('');
     setCreating(true);
   };
 
@@ -87,7 +90,12 @@ export function SessionsPage() {
     setSaving(true);
     try {
       const id = await createSession(
-        { type: newType, modality: newModality, date: fromInputDate(newDate) },
+        {
+          type: newType,
+          modality: newModality,
+          date: fromInputDate(newDate),
+          coordinator: newCoordinator,
+        },
         profile,
       );
       toast('Sesión creada.', 'success');
@@ -241,6 +249,7 @@ export function SessionsPage() {
                   <p className="mt-1.5 text-xs text-slate-500">
                     {Math.max(0, s.presentCount ?? 0)} presente
                     {Math.max(0, s.presentCount ?? 0) === 1 ? '' : 's'}
+                    {s.coordinator ? ` · Coordina: ${s.coordinator}` : ''}
                   </p>
                 </div>
                 <ChevronRightIcon className="text-xl text-slate-300" />
@@ -323,6 +332,11 @@ export function SessionsPage() {
               value={newDate}
               onChange={(e) => setNewDate(e.target.value)}
             />
+          </div>
+
+          <div>
+            <label className="label">¿Quién coordina? (opcional)</label>
+            <CoordinatorPicker value={newCoordinator} onChange={setNewCoordinator} />
           </div>
 
           <button

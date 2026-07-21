@@ -494,9 +494,10 @@ function BySessionView({
         rows.map((r) => ({ Nombre: r.fullName, 'Registrado por': r.checkedInByName })),
       );
     } else {
+      const coord = selected.coordinator ? ` · Coordinó: ${selected.coordinator}` : '';
       exportPDF({
         title: `Asistencia — ${SESSION_TYPE_LABELS[selected.type]}`,
-        subtitle: `${fmtDateLong(selected.date)} · ${MODALITY_LABELS[selected.modality]} · ${rows.length} presentes`,
+        subtitle: `${fmtDateLong(selected.date)} · ${MODALITY_LABELS[selected.modality]} · ${rows.length} presentes${coord}`,
         columns: ['Nombre', 'Registrado por'],
         rows: rows.map((r) => [r.fullName, r.checkedInByName]),
         filename: `asistencia-${label}`,
@@ -530,6 +531,11 @@ function BySessionView({
           <TypeBadge type={selected.type} />
           <ModalityBadge modality={selected.modality} />
         </div>
+        {selected.coordinator && (
+          <p className="mt-1.5 text-xs text-slate-500">
+            Coordinó: <strong>{selected.coordinator}</strong>
+          </p>
+        )}
         <p className="mt-3 text-3xl font-bold text-primary-700">{rows.length}</p>
         <p className="text-xs text-slate-500">presentes</p>
       </div>

@@ -28,6 +28,8 @@ export interface Session {
   createdByName: string;
   createdAt?: Timestamp | null;
   presentCount?: number;
+  /** Nombre de quien coordina la reunión (texto libre; '' = sin asignar). */
+  coordinator?: string;
 }
 
 // --- Personas (lista maestra) ---
@@ -44,6 +46,11 @@ export interface Member {
   active: boolean;
   createdAt?: Timestamp | null;
   createdBy?: string;
+  /**
+   * true = se marcó presente sin saber su nombre ("Por identificar…").
+   * Al ponerle el nombre real (o fusionarla con alguien existente) se limpia.
+   */
+  pendingIdentify?: boolean;
 }
 
 // --- Asistencia ---

@@ -25,3 +25,15 @@ export const ROLE_LABELS: Record<Role, string> = {
 export const SESSION_TYPES: SessionType[] = ['entrega_pasos', 'reduccion_ego'];
 export const MODALITIES: Modality[] = ['presencial', 'virtual'];
 export const ASSIGNABLE_ROLES: Role[] = ['admin', 'coordinador'];
+
+/** Coordinadoras habituales: atajos al asignar quién coordina una sesión. */
+export const COORDINATOR_NAMES = [
+  'Alexandra Ortega',
+  'Eva Simbaqueba',
+  'Jessica Becerra',
+  'Marcela Sánchez',
+  'Tatiana López',
+];
+
+/** Prefijo con el que se crean las personas marcadas sin saber su nombre. */
+export const UNKNOWN_PREFIX = 'Por identificar';

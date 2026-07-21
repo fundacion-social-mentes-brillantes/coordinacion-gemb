@@ -3,19 +3,26 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
-import { listenSession, setSessionStatus } from '../services/sessions';
+import {
+  listenSession,
+  setSessionStatus,
+  setSessionCoordinator,
+} from '../services/sessions';
 import {
   listenAttendance,
   markPresent,
   unmarkPresent,
 } from '../services/attendance';
 import { listenMembers, createMember } from '../services/members';
+import { resolvePlaceholderName, mergeMemberInto } from '../services/identify';
 import type { Attendance, Member, Session } from '../types';
 import { buildFuse, searchMembers, toSearchable } from '../lib/search';
+import { UNKNOWN_PREFIX } from '../lib/constants';
 import { fmtDateLong, fmtTime, toDate } from '../lib/dates';
 import { Spinner } from '../components/Spinner';
 import { EmptyState } from '../components/EmptyState';
 import { Modal } from '../components/Modal';
+import { CoordinatorPicker } from '../components/CoordinatorPicker';
 import { TypeBadge, ModalityBadge, StatusBadge } from '../components/badges';
 import {
   ArrowLeftIcon,
@@ -25,6 +32,7 @@ import {
   XIcon,
   UserPlusIcon,
   LeafIcon,
+  EditIcon,
 } from '../components/Icons';
 
 export function AttendancePage() {
@@ -43,6 +51,18 @@ export function AttendancePage() {
   const [walkinOpen, setWalkinOpen] = useState(false);
   const [walkinName, setWalkinName] = useState('');
   const [walkinSaving, setWalkinSaving] = useState(false);
+  // Modo "no sé su nombre" del modal de agregar.
+  const [walkinUnknown, setWalkinUnknown] = useState(false);
+  const [walkinDesc, setWalkinDesc] = useState('');
+  // Quién coordina.
+  const [coordOpen, setCoordOpen] = useState(false);
+  const [coordDraft, setCoordDraft] = useState('');
+  const [coordSaving, setCoordSaving] = useState(false);
+  // Ponerle nombre a una persona "Por identificar".
+  const [resolveTarget, setResolveTarget] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
 
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -107,6 +127,19 @@ export function AttendancePage() {
     [rows],
   );
 
+  const membersById = useMemo(
+    () => new Map(members.map((m) => [m.id, m])),
+    [members],
+  );
+  // ¿Es una persona marcada sin nombre? (por bandera o por el prefijo).
+  const isPlaceholder = (memberId: string, name: string) =>
+    membersById.get(memberId)?.pendingIdentify === true ||
+    name.startsWith(UNKNOWN_PREFIX);
+  const placeholderCount = useMemo(
+    () => members.filter((m) => m.pendingIdentify).length,
+    [members],
+  );
+
   const isOpen = session?.status === 'open';
 
   const toggle = async (member: Pick<Member, 'id' | 'fullName'>) => {
@@ -151,6 +184,59 @@ export function AttendancePage() {
       toast('No se pudo agregar la persona.', 'error');
     } finally {
       setWalkinSaving(false);
+    }
+  };
+
+  // Marca presente a alguien cuyo nombre aún no se sabe: se crea como
+  // "Por identificar N — seña" y después se corrige con "Poner nombre".
+  const handleUnknownWalkin = async () => {
+    if (!session || !profile) return;
+    setWalkinSaving(true);
+    try {
+      const desc = walkinDesc.trim();
+      const n = placeholderCount + 1;
+      const name = `${UNKNOWN_PREFIX} ${n}${desc ? ` (${desc})` : ''}`;
+      const memberId = await createMember(
+        {
+          fullName: name,
+          notes: desc ? `Señas: ${desc}` : '',
+          pendingIdentify: true,
+        },
+        profile.uid,
+      );
+      await markPresent(session, { id: memberId, fullName: name }, profile);
+      toast(
+        'Quedó presente. Cuando sepas su nombre, usa "Poner nombre" en la hoja.',
+        'success',
+      );
+      setWalkinDesc('');
+      setWalkinUnknown(false);
+      setWalkinOpen(false);
+    } catch (e) {
+      console.error(e);
+      toast('No se pudo agregar la persona.', 'error');
+    } finally {
+      setWalkinSaving(false);
+    }
+  };
+
+  const saveCoordinator = async () => {
+    if (!session) return;
+    setCoordSaving(true);
+    try {
+      await setSessionCoordinator(session.id, coordDraft);
+      toast(
+        coordDraft.trim()
+          ? `Coordina: ${coordDraft.trim()}.`
+          : 'Quedó sin coordinadora asignada.',
+        'success',
+      );
+      setCoordOpen(false);
+    } catch (e) {
+      console.error(e);
+      toast('No se pudo guardar quién coordina.', 'error');
+    } finally {
+      setCoordSaving(false);
     }
   };
 
@@ -210,6 +296,23 @@ export function AttendancePage() {
           <ModalityBadge modality={session.modality} />
           <StatusBadge status={session.status} />
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            setCoordDraft(session.coordinator ?? '');
+            setCoordOpen(true);
+          }}
+          className="mt-2 flex items-center gap-1.5 text-sm text-primary-700"
+        >
+          <EditIcon className="text-base" />
+          {session.coordinator ? (
+            <span>
+              Coordina: <strong>{session.coordinator}</strong>
+            </span>
+          ) : (
+            <span className="underline">Asignar quién coordina</span>
+          )}
+        </button>
       </div>
 
       {/* Avisos de conexión / cierre */}
@@ -410,6 +513,17 @@ export function AttendancePage() {
                     Llegó {fmtTime(r.checkedInAt)} · {r.checkedInByName}
                   </p>
                 </div>
+                {isPlaceholder(r.memberId, r.fullName) && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setResolveTarget({ id: r.memberId, name: r.fullName })
+                    }
+                    className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1.5 text-xs font-semibold text-amber-800"
+                  >
+                    Poner nombre
+                  </button>
+                )}
                 {isOpen && (
                   <button
                     type="button"
@@ -426,40 +540,342 @@ export function AttendancePage() {
         )}
       </section>
 
-      {/* Modal walk-in */}
+      {/* Modal walk-in (con nombre o sin saberlo todavía) */}
       <Modal
         open={walkinOpen}
-        onClose={() => setWalkinOpen(false)}
-        title="Agregar persona nueva"
+        onClose={() => {
+          setWalkinOpen(false);
+          setWalkinUnknown(false);
+        }}
+        title={walkinUnknown ? 'Marcar sin saber el nombre' : 'Agregar persona nueva'}
+      >
+        {walkinUnknown ? (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-500">
+              Quedará presente como «{UNKNOWN_PREFIX}». Cuando sepas quién es,
+              toca <strong>Poner nombre</strong> en la hoja de asistencia y el
+              registro se corrige solo.
+            </p>
+            <div>
+              <label className="label">¿Cómo la reconoces? (opcional)</label>
+              <input
+                autoFocus
+                className="input"
+                value={walkinDesc}
+                onChange={(e) => setWalkinDesc(e.target.value)}
+                placeholder="Ej. saco rojo, vino con Marta"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleUnknownWalkin();
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleUnknownWalkin}
+              disabled={walkinSaving}
+              className="btn-primary w-full"
+            >
+              {walkinSaving ? <Spinner className="h-5 w-5 text-white" /> : null}
+              Marcar presente sin nombre
+            </button>
+            <button
+              type="button"
+              onClick={() => setWalkinUnknown(false)}
+              className="btn-ghost w-full text-sm"
+            >
+              ← Sí sé su nombre
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-500">
+              Se creará en la base y quedará marcada presente en esta sesión.
+            </p>
+            <div>
+              <label className="label">Nombre completo</label>
+              <input
+                autoFocus
+                className="input"
+                value={walkinName}
+                onChange={(e) => setWalkinName(e.target.value)}
+                placeholder="Ej. Johana Rendón"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleWalkin();
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleWalkin}
+              disabled={walkinSaving || !walkinName.trim()}
+              className="btn-primary w-full"
+            >
+              {walkinSaving ? <Spinner className="h-5 w-5 text-white" /> : null}
+              Agregar y marcar presente
+            </button>
+            <button
+              type="button"
+              onClick={() => setWalkinUnknown(true)}
+              className="btn-ghost w-full text-sm"
+            >
+              ¿No sabes su nombre? Márcala igual →
+            </button>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal quién coordina */}
+      <Modal
+        open={coordOpen}
+        onClose={() => setCoordOpen(false)}
+        title="¿Quién coordina esta sesión?"
       >
         <div className="space-y-4">
-          <p className="text-sm text-slate-500">
-            Se creará en la base y quedará marcada presente en esta sesión.
-          </p>
-          <div>
-            <label className="label">Nombre completo</label>
-            <input
-              autoFocus
-              className="input"
-              value={walkinName}
-              onChange={(e) => setWalkinName(e.target.value)}
-              placeholder="Ej. Johana Rendón"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleWalkin();
-              }}
-            />
-          </div>
+          <CoordinatorPicker value={coordDraft} onChange={setCoordDraft} />
           <button
             type="button"
-            onClick={handleWalkin}
-            disabled={walkinSaving || !walkinName.trim()}
+            onClick={saveCoordinator}
+            disabled={coordSaving}
             className="btn-primary w-full"
           >
-            {walkinSaving ? <Spinner className="h-5 w-5 text-white" /> : null}
-            Agregar y marcar presente
+            {coordSaving ? <Spinner className="h-5 w-5 text-white" /> : null}
+            Guardar
           </button>
         </div>
       </Modal>
+
+      {/* Modal para ponerle nombre a una persona "Por identificar" */}
+      <ResolveNameModal
+        target={resolveTarget}
+        onClose={() => setResolveTarget(null)}
+        members={members}
+        presentIds={presentIds}
+      />
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* "¿Quién es esta persona?" — escribir su nombre o fusionarla con     */
+/* alguien que ya está en la base.                                     */
+/* ------------------------------------------------------------------ */
+function ResolveNameModal({
+  target,
+  onClose,
+  members,
+  presentIds,
+}: {
+  target: { id: string; name: string } | null;
+  onClose: () => void;
+  members: Member[];
+  presentIds: Set<string>;
+}) {
+  const { toast } = useToast();
+  const [mode, setMode] = useState<'write' | 'pick'>('write');
+  const [name, setName] = useState('');
+  const [q, setQ] = useState('');
+  const [pick, setPick] = useState<Member | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Al abrir para otra persona, limpia el formulario.
+  useEffect(() => {
+    setMode('write');
+    setName('');
+    setQ('');
+    setPick(null);
+  }, [target?.id]);
+
+  // Candidatas para fusión: personas reales (no provisionales) activas.
+  const searchable = useMemo(
+    () =>
+      toSearchable(
+        members.filter(
+          (m) => m.id !== target?.id && !m.pendingIdentify && m.active,
+        ),
+      ),
+    [members, target?.id],
+  );
+  const fuse = useMemo(() => buildFuse(searchable), [searchable]);
+  const candidates = useMemo(
+    () => searchMembers(fuse, searchable, q, 8),
+    [fuse, searchable, q],
+  );
+
+  const doRename = async () => {
+    if (!target) return;
+    const n = name.trim();
+    if (!n) return;
+    if (!navigator.onLine) {
+      toast('Para esta corrección necesitas conexión a internet.', 'error');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await resolvePlaceholderName(target.id, n);
+      if (res.failed > 0) {
+        toast(
+          `Nombre guardado. ${res.failed} registro(s) de sesiones cerradas los corrige una administradora.`,
+          'info',
+        );
+      } else {
+        toast(`Listo: ahora aparece como ${n}.`, 'success');
+      }
+      onClose();
+    } catch (e) {
+      console.error(e);
+      toast('No se pudo poner el nombre.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doMerge = async () => {
+    if (!target || !pick) return;
+    if (!navigator.onLine) {
+      toast('Para esta corrección necesitas conexión a internet.', 'error');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await mergeMemberInto(target.id, {
+        id: pick.id,
+        fullName: pick.fullName,
+      });
+      if (res.failedSessions > 0) {
+        toast(
+          `Se pasaron ${res.moved} registro(s); ${res.failedSessions} de sesiones cerradas los corrige una administradora.`,
+          'info',
+        );
+      } else {
+        toast(`Listo: sus asistencias pasaron a ${pick.fullName}.`, 'success');
+      }
+      onClose();
+    } catch (e) {
+      console.error(e);
+      toast('No se pudo fusionar.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!target) return null;
+
+  return (
+    <Modal open onClose={onClose} title="¿Quién es esta persona?">
+      <div className="space-y-4">
+        <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">
+          {target.name}
+        </p>
+
+        <div className="flex gap-1 rounded-xl bg-primary-100/60 p-1 text-sm">
+          {(
+            [
+              ['write', 'Escribir su nombre'],
+              ['pick', 'Ya está en la base'],
+            ] as ['write' | 'pick', string][]
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setMode(key)}
+              className={`flex-1 rounded-lg py-2 font-medium transition ${
+                mode === key
+                  ? 'bg-white text-primary-700 shadow-sm'
+                  : 'text-slate-500'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {mode === 'write' ? (
+          <>
+            <p className="text-sm text-slate-500">
+              Es una persona nueva: escribe su nombre real y se corrige su
+              ficha y todo su historial.
+            </p>
+            <input
+              autoFocus
+              className="input"
+              placeholder="Nombre completo real"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') doRename();
+              }}
+            />
+            <button
+              type="button"
+              onClick={doRename}
+              disabled={busy || !name.trim()}
+              className="btn-primary w-full"
+            >
+              {busy ? <Spinner className="h-5 w-5 text-white" /> : null}
+              Guardar nombre
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-slate-500">
+              Resultó ser alguien que ya existe: búscala y sus asistencias se
+              le pasarán (sin contar doble).
+            </p>
+            <input
+              autoFocus
+              className="input"
+              placeholder="Buscar persona…"
+              value={q}
+              onChange={(e) => {
+                setQ(e.target.value);
+                setPick(null);
+              }}
+            />
+            {q.trim().length >= 2 && (
+              <ul className="max-h-52 space-y-1.5 overflow-y-auto">
+                {candidates.map((m) => (
+                  <li key={m.id}>
+                    <button
+                      type="button"
+                      onClick={() => setPick(m)}
+                      className={`w-full rounded-xl border p-2.5 text-left text-sm transition ${
+                        pick?.id === m.id
+                          ? 'border-primary-500 bg-primary-50'
+                          : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      <span className="font-medium text-slate-800">
+                        {m.fullName}
+                      </span>
+                      {presentIds.has(m.id) && (
+                        <span className="ml-2 text-xs text-primary-600">
+                          ya está presente aquí
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+                {candidates.length === 0 && (
+                  <li className="py-2 text-center text-sm text-slate-400">
+                    Sin resultados.
+                  </li>
+                )}
+              </ul>
+            )}
+            {pick && (
+              <button
+                type="button"
+                onClick={doMerge}
+                disabled={busy}
+                className="btn-primary w-full"
+              >
+                {busy ? <Spinner className="h-5 w-5 text-white" /> : null}
+                Confirmar: es {pick.fullName}
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }
