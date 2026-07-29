@@ -117,18 +117,16 @@ export function ReviewPage() {
     }
     setBusyId(m.id);
     try {
-      const res = await discardPendingMember(m.id);
-      if (res.memberDeleted) {
-        toast('Registro descartado.', 'success');
-      } else {
-        toast(
-          `Quedó a medias: ${res.failed} reunión(es) no se pudieron limpiar. Vuelve a tocar "Descartar" para terminar.`,
-          'error',
-        );
-      }
+      await discardPendingMember(m.id);
+      toast('Registro descartado.', 'success');
     } catch (e) {
       console.error(e);
-      toast('No se pudo descartar.', 'error');
+      toast(
+        (e as Error)?.message === 'SIN_CONEXION_REAL'
+          ? 'No hay conexión suficiente para descartar sin riesgo. Inténtalo con mejor señal.'
+          : 'No se pudo descartar.',
+        'error',
+      );
     } finally {
       setBusyId(null);
     }

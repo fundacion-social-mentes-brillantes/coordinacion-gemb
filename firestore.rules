@@ -147,19 +147,25 @@ service cloud.firestore {
       // "Por identificar" también las puede corregir una coordinadora (para
       // ponerles el nombre real), pero NO puede aprobarlas: la marca
       // "por revisar" tiene que quedar como estaba.
+      // Puede corregir cualquier ficha que AÚN no esté aprobada (sin nombre
+      // o por revisar), pero NO puede quitarle la marca "por revisar": eso
+      // le toca a la administradora. En cuanto se aprueba, queda blindada.
       allow update: if isActive() && (
         isAdmin()
         || (isStaff()
-          && resource.data.get('pendingIdentify', false) == true
+          && (resource.data.get('pendingIdentify', false) == true
+              || resource.data.get('pendingReview', false) == true)
           && request.resource.data.get('pendingReview', false)
              == resource.data.get('pendingReview', false))
       );
 
-      // Borrar: admin; y la coordinadora solo fichas provisionales
-      // (al fusionarlas con una persona que ya existía).
+      // Borrar: admin; y la coordinadora solo fichas sin aprobar (al
+      // fusionarlas con una persona que ya existía).
       allow delete: if isActive() && (
         isAdmin()
-        || (isStaff() && resource.data.get('pendingIdentify', false) == true)
+        || (isStaff()
+          && (resource.data.get('pendingIdentify', false) == true
+              || resource.data.get('pendingReview', false) == true))
       );
     }
 

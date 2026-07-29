@@ -219,7 +219,9 @@ export function AttendancePage() {
    * la sesión siga abierta (que es cuando hay permiso para tocarlo).
    */
   useEffect(() => {
-    if (!session || !isOpen || !rowsFromServer || !online) return;
+    // `canEdit` en vez de `isOpen`: así una administradora que abra una
+    // sesión ya cerrada con el número desajustado también lo repara.
+    if (!session || !canEdit || !rowsFromServer || !online) return;
     if ((session.presentCount ?? 0) === rows.length) return;
     const t = setTimeout(() => {
       setSessionPresentCount(session.id, rows.length).catch((e) =>
@@ -227,7 +229,7 @@ export function AttendancePage() {
       );
     }, 1500);
     return () => clearTimeout(t);
-  }, [session, isOpen, rowsFromServer, online, rows.length]);
+  }, [session, canEdit, rowsFromServer, online, rows.length]);
 
   /**
    * Deja la imagen dibujada de antemano, en segundo plano, cada vez que
@@ -1158,6 +1160,12 @@ function ResolveNameModal({
         toast(
           `Se pasaron ${res.moved} registro(s); ${res.failedSessions} de sesiones cerradas los corrige una administradora.`,
           'info',
+        );
+      } else if (!res.memberDeleted) {
+        // Si la ficha provisional sobrevive, quedaría duplicando a la persona.
+        toast(
+          `Sus asistencias pasaron a ${pick.fullName}, pero el registro provisional no se pudo borrar: avísale a la administradora.`,
+          'error',
         );
       } else {
         toast(`Listo: sus asistencias pasaron a ${pick.fullName}.`, 'success');

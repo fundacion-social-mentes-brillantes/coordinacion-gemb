@@ -23,7 +23,9 @@ async function attendanceDocsOf(memberId: string) {
   const mine = snap.docs.filter(
     (d) => (d.data() as Attendance).memberId === memberId,
   );
-  return { snap, mine };
+  // Sin internet real, Firestore responde con lo guardado en el teléfono en
+  // vez de fallar. Actuar sobre esa foto incompleta puede borrar de menos.
+  return { snap, mine, fromCache: snap.metadata.fromCache };
 }
 
 export interface PropagateResult {
@@ -59,11 +61,15 @@ export async function resolvePlaceholderName(
   newName: string,
 ): Promise<PropagateResult> {
   const parts = buildNameParts(newName);
+  // Primero el historial y DESPUÉS la marca: al quitar `pendingIdentify` la
+  // coordinadora pierde el permiso sobre esa ficha, así que si se hiciera al
+  // revés y algo fallara a mitad, ya no podría reintentarlo.
+  const res = await propagateNameToAttendance(memberId, parts.fullName);
   await updateMember(memberId, {
     fullName: parts.fullName,
     pendingIdentify: false,
   });
-  return propagateNameToAttendance(memberId, parts.fullName);
+  return res;
 }
 
 /**
@@ -105,37 +111,32 @@ export interface DiscardResult {
 export async function discardPendingMember(
   memberId: string,
 ): Promise<DiscardResult> {
-  const { mine } = await attendanceDocsOf(memberId);
-  let attendanceDeleted = 0;
-  let failed = 0;
+  const { mine, fromCache } = await attendanceDocsOf(memberId);
+  // Si la lista viene del teléfono podría faltar asistencia: borrar la ficha
+  // dejaría registros huérfanos imposibles de encontrar después.
+  if (fromCache) {
+    throw new Error('SIN_CONEXION_REAL');
+  }
 
+  // TODO en un único lote: o se borra la persona con todas sus asistencias, o
+  // no se borra nada. Nunca queda a medio camino.
+  const batch = writeBatch(db);
   for (const d of mine) {
     const data = d.data() as Omit<Attendance, 'id'>;
     const sessionId = d.ref.parent.parent?.id ?? data.sessionId;
-    const batch = writeBatch(db);
     batch.delete(d.ref);
     batch.update(doc(db, 'sessions', sessionId), {
       presentCount: increment(-1),
     });
-    try {
-      await batch.commit();
-      attendanceDeleted++;
-    } catch (e) {
-      console.error('No se pudo borrar la asistencia de la sesión', sessionId, e);
-      failed++;
-    }
   }
+  batch.delete(doc(db, 'members', memberId));
+  await batch.commit();
 
-  let memberDeleted = false;
-  if (failed === 0) {
-    try {
-      await deleteDoc(doc(db, 'members', memberId));
-      memberDeleted = true;
-    } catch (e) {
-      console.error('No se pudo borrar la ficha', e);
-    }
-  }
-  return { attendanceDeleted, failed, memberDeleted };
+  return {
+    attendanceDeleted: mine.length,
+    failed: 0,
+    memberDeleted: true,
+  };
 }
 
 export interface MergeResult {
