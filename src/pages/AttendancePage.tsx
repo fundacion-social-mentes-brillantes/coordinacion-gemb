@@ -1002,9 +1002,9 @@ export function AttendancePage() {
         ) : (
           <div className="space-y-4">
             <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              Quedará marcada presente en esta reunión. El nombre lo revisa
-              después la coordinación antes de sumarla a la lista oficial, así
-              que si solo sabes el nombre de pila, escríbelo igual.
+              Escribe su <strong>nombre completo</strong>: si no lo sabes,
+              pregúntaselo. Si solo alcanzas el primer nombre, sirve igual —
+              la coordinación lo revisa antes de sumarla a la lista oficial.
             </p>
             <div>
               <label className="label">Nombre completo</label>
