@@ -61,19 +61,32 @@ export function MembersPage() {
     return unsub;
   }, [toast]);
 
-  const searchable = useMemo(() => toSearchable(members), [members]);
+  // Las personas "por revisar" NO forman parte de la lista oficial: viven en
+  // su propia bandeja hasta que la administradora las apruebe.
+  const oficiales = useMemo(
+    () => members.filter((m) => !m.pendingReview),
+    [members],
+  );
+  const porRevisar = useMemo(
+    () => members.filter((m) => m.pendingReview).length,
+    [members],
+  );
+
+  // El buscador trabaja SOLO sobre la lista oficial: si se filtrara después
+  // del límite de resultados, con muchas coincidencias podría esconder gente.
+  const searchable = useMemo(() => toSearchable(oficiales), [oficiales]);
   const fuse = useMemo(() => buildFuse(searchable), [searchable]);
 
   const visible = useMemo(() => {
     let list: Member[] =
       query.trim().length >= 2
-        ? searchMembers(fuse, searchable, query, 100)
-        : members;
+        ? searchMembers(fuse, searchable, query, 300)
+        : oficiales;
     if (!showInactive) list = list.filter((m) => m.active);
     return list;
-  }, [members, query, fuse, searchable, showInactive]);
+  }, [oficiales, query, fuse, searchable, showInactive]);
 
-  const activeCount = members.filter((m) => m.active).length;
+  const activeCount = oficiales.filter((m) => m.active).length;
 
   const openAdd = () => {
     setEditing(null);
@@ -166,8 +179,32 @@ export function MembersPage() {
     <div className="space-y-4">
       <div>
         <h2 className="text-lg font-bold text-primary-900">Personas</h2>
-        <p className="text-xs text-slate-500">{activeCount} activas</p>
+        <p className="text-xs text-slate-500">{activeCount} en la lista oficial</p>
       </div>
+
+      {/* Aviso: hay gente que registraron las coordinadoras sin revisar. */}
+      {porRevisar > 0 && (
+        <button
+          type="button"
+          onClick={() => navigate('/personas/revisar')}
+          className="flex w-full items-center gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 text-left"
+        >
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-400 text-lg font-bold text-white">
+            {porRevisar}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-semibold text-amber-900">
+              {porRevisar === 1
+                ? 'Hay 1 persona nueva por revisar'
+                : `Hay ${porRevisar} personas nuevas por revisar`}
+            </span>
+            <span className="block text-xs text-amber-800">
+              Las registraron en las reuniones. Toca para aprobarlas o corregir
+              el nombre.
+            </span>
+          </span>
+        </button>
+      )}
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"

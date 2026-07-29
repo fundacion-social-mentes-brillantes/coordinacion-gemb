@@ -5,6 +5,7 @@ import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 import { isUpdateReady } from '../lib/swUpdate';
+import { listenPendingReviewCount } from '../services/members';
 import {
   CalendarIcon,
   ChartIcon,
@@ -53,6 +54,16 @@ export function Layout() {
 
   const role = profile?.role ?? 'coordinador';
   const items = NAV.filter((n) => n.roles.includes(role));
+  const esAdmin = role === 'admin' || role === 'super_admin';
+
+  // Aviso de personas nuevas por revisar (solo le interesa a la admin).
+  const [porRevisar, setPorRevisar] = useState(0);
+  useEffect(() => {
+    if (!esAdmin) return;
+    return listenPendingReviewCount(setPorRevisar, (e) =>
+      console.warn('No se pudo contar las personas por revisar', e),
+    );
+  }, [esAdmin]);
 
   /**
    * Publica la altura real de la cabecera en --header-h para que los
@@ -158,11 +169,19 @@ export function Layout() {
               >
                 {({ isActive }) => (
                   <>
-                    <Icon
-                      className={`text-2xl transition-transform ${
-                        isActive ? 'scale-110' : ''
-                      }`}
-                    />
+                    <span className="relative">
+                      <Icon
+                        className={`text-2xl transition-transform ${
+                          isActive ? 'scale-110' : ''
+                        }`}
+                      />
+                      {/* Aviso: hay personas nuevas esperando revisión. */}
+                      {item.to === '/personas' && porRevisar > 0 && (
+                        <span className="absolute -right-2.5 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+                          {porRevisar > 9 ? '9+' : porRevisar}
+                        </span>
+                      )}
+                    </span>
                     {item.label}
                     <span
                       className={`mt-0.5 h-0.5 w-6 rounded-full transition ${

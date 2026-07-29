@@ -40,6 +40,21 @@ export function listenMembers(
   );
 }
 
+/**
+ * Cuenta en vivo las personas registradas en reuniones que la administradora
+ * aún no ha revisado (alimenta el aviso de la barra de navegación).
+ */
+export function listenPendingReviewCount(
+  onCount: (n: number) => void,
+  onError?: (e: Error) => void,
+) {
+  return onSnapshot(
+    query(membersCol, where('pendingReview', '==', true)),
+    (snap) => onCount(snap.size),
+    (e) => onError?.(e),
+  );
+}
+
 export interface NewMemberInput {
   fullName: string;
   phone?: string;
@@ -83,6 +98,7 @@ export async function updateMember(id: string, data: Partial<Member>) {
   if (data.notes != null) patch.notes = data.notes;
   if (data.active != null) patch.active = data.active;
   if (data.pendingIdentify != null) patch.pendingIdentify = data.pendingIdentify;
+  if (data.pendingReview != null) patch.pendingReview = data.pendingReview;
   await updateDoc(doc(db, 'members', id), patch);
 }
 

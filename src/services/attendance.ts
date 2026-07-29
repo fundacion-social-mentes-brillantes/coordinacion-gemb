@@ -29,6 +29,10 @@ export function listenAttendance(
 ) {
   return onSnapshot(
     attendanceCol(sessionId),
+    // Sin `includeMetadataChanges` no llega el aviso de "esto ya viene del
+    // servidor": el rótulo "Sincronizando…" se quedaría puesto y el cuadre
+    // del contador no llegaría a ejecutarse nunca.
+    { includeMetadataChanges: true },
     (snap) => {
       const rows = snap.docs.map(
         (d) => ({ id: d.id, ...(d.data() as Omit<Attendance, 'id'>) }),
@@ -78,10 +82,14 @@ export async function markPresent(
 /**
  * Crea una persona nueva Y la marca presente en un SOLO lote atómico.
  *
- * Si se hicieran por separado y la sesión se hubiera finalizado entre medias
- * (otra coordinadora, otro celular), la persona quedaría creada en la base
- * pero sin asistencia: una "ficha fantasma" que después ensucia el buscador.
- * Con un único lote, o entra todo o no entra nada.
+ * La persona NO entra a la lista oficial: queda marcada como "por revisar"
+ * para que una administradora confirme o corrija el nombre (a menudo llega
+ * solo un nombre suelto, como "Sandra"). Su asistencia sí se registra, para
+ * que la lista de la reunión quede completa.
+ *
+ * Se hace en un único lote: si la sesión se hubiera finalizado entre medias
+ * (otra coordinadora, otro celular), se rechaza todo junto y no queda una
+ * ficha huérfana en la base.
  */
 export async function addWalkinAndMarkPresent(
   session: Session,
@@ -104,7 +112,12 @@ export async function addWalkinAndMarkPresent(
     active: true,
     createdAt: serverTimestamp(),
     createdBy: user.uid,
+    createdByName: user.displayName || user.email,
     pendingIdentify: input.pendingIdentify ?? false,
+    // Queda fuera de la lista oficial hasta que la administradora la revise.
+    pendingReview: true,
+    sourceSessionId: session.id,
+    sourceSessionDate: session.date,
   });
   batch.set(doc(db, 'sessions', session.id, 'attendance', memberRef.id), {
     memberId: memberRef.id,

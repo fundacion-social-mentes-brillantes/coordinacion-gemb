@@ -7,6 +7,7 @@ import {
   listenSession,
   setSessionStatus,
   setSessionCoordinator,
+  setSessionPresentCount,
 } from '../services/sessions';
 import {
   listenAttendance,
@@ -71,6 +72,7 @@ export function AttendancePage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [rows, setRows] = useState<Attendance[]>([]);
   const [pendingSync, setPendingSync] = useState(false);
+  const [rowsFromServer, setRowsFromServer] = useState(false);
   const [query, setQuery] = useState('');
   const [walkinOpen, setWalkinOpen] = useState(false);
   const [walkinName, setWalkinName] = useState('');
@@ -131,6 +133,9 @@ export function AttendancePage() {
       (list, meta) => {
         setRows(list);
         setPendingSync(meta.hasPendingWrites);
+        // `fromCache` distingue datos del servidor de los guardados en el
+        // teléfono: solo con los del servidor tiene sentido cuadrar el número.
+        setRowsFromServer(!meta.fromCache && !meta.hasPendingWrites);
       },
       (e) => console.error(e),
     );
@@ -185,10 +190,6 @@ export function AttendancePage() {
   const isPlaceholder = (memberId: string, name: string) =>
     membersById.get(memberId)?.pendingIdentify === true ||
     name.startsWith(UNKNOWN_PREFIX);
-  const placeholderCount = useMemo(
-    () => members.filter((m) => m.pendingIdentify).length,
-    [members],
-  );
 
   /** Identifica el contenido exacto de la imagen (para reusarla si no cambió). */
   const imageKey = session
@@ -208,6 +209,25 @@ export function AttendancePage() {
    * personas, poner nombres y cambiar quién coordina.
    */
   const canEdit = isOpen || isAdmin;
+
+  /**
+   * Cuadra el contador de presentes con la cantidad real de nombres.
+   *
+   * El contador se mantiene sumando de a uno, así que si dos coordinadoras
+   * marcan a la MISMA persona queda inflado (la asistencia es una sola, pero
+   * sumó dos veces). Aquí se corrige solo, con datos del servidor y mientras
+   * la sesión siga abierta (que es cuando hay permiso para tocarlo).
+   */
+  useEffect(() => {
+    if (!session || !isOpen || !rowsFromServer || !online) return;
+    if ((session.presentCount ?? 0) === rows.length) return;
+    const t = setTimeout(() => {
+      setSessionPresentCount(session.id, rows.length).catch((e) =>
+        console.warn('No se pudo cuadrar el contador de presentes', e),
+      );
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [session, isOpen, rowsFromServer, online, rows.length]);
 
   /**
    * Deja la imagen dibujada de antemano, en segundo plano, cada vez que
@@ -338,9 +358,28 @@ export function AttendancePage() {
    */
   const finishSession = () => {
     if (!session) return;
+    // Se lanzan las escrituras SIN esperar (sin señal, Firestore no resuelve
+    // la promesa y el botón se quedaría girando). Firestore respeta el orden,
+    // así que el contador se guarda mientras la sesión aún figura abierta
+    // —que es cuando la coordinadora puede tocarlo— y solo después se cierra.
+    //
+    // El número exacto solo se graba si estos datos vienen del servidor: con
+    // la lista de la caché podría faltar lo que marcó otra coordinadora y
+    // quedaría congelado un total equivocado.
+    if (online && rowsFromServer) {
+      setSessionPresentCount(session.id, rows.length).catch(() => {
+        /* si falla, el número se corrige al volver a abrir la sesión */
+      });
+    }
     setSessionStatus(session.id, 'closed').catch((e) => {
       console.error(e);
-      toast('No se pudo finalizar la sesión.', 'error');
+      // Si otra coordinadora la finalizó primero, la reunión SÍ quedó
+      // cerrada: no tiene sentido asustar con un error rojo.
+      if (esSesionCerrada(e)) {
+        toast('La sesión ya la había finalizado otra persona.', 'info');
+      } else {
+        toast('No se pudo finalizar la sesión.', 'error');
+      }
     });
     buzz(24);
     setFinishOpen(false);
@@ -361,7 +400,7 @@ export function AttendancePage() {
     try {
       await addWalkinAndMarkPresent(session, { fullName: name }, profile);
       buzz();
-      toast(`${name} agregada y marcada presente.`, 'success');
+      toast(`${name} quedó presente. La coordinación revisará el nombre.`, 'success');
       setWalkinName('');
       setWalkinOpen(false);
     } catch (e) {
@@ -390,8 +429,11 @@ export function AttendancePage() {
     setWalkinSaving(true);
     try {
       const desc = walkinDesc.trim();
-      const n = placeholderCount + 1;
-      const name = `${UNKNOWN_PREFIX} ${n}${desc ? ` (${desc})` : ''}`;
+      // Se identifica por la seña o, si no la dieron, por la hora de llegada.
+      // Un número correlativo se repetiría si dos coordinadoras marcan a la
+      // vez (o una está sin señal) y quedarían dos "Por identificar 1".
+      const marca = desc || `llegó ${fmtTime(new Date())}`;
+      const name = `${UNKNOWN_PREFIX} (${marca})`;
       await addWalkinAndMarkPresent(
         session,
         {
@@ -663,8 +705,13 @@ export function AttendancePage() {
                             )}
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[15px] font-semibold text-slate-800">
-                              {m.fullName}
+                            <span className="flex items-center gap-1.5 truncate text-[15px] font-semibold text-slate-800">
+                              <span className="truncate">{m.fullName}</span>
+                              {m.pendingReview && (
+                                <span className="chip shrink-0 bg-amber-100 py-0 text-[11px] text-amber-800">
+                                  sin revisar
+                                </span>
+                              )}
                             </span>
                             <span
                               className={`block text-xs ${
@@ -952,8 +999,10 @@ export function AttendancePage() {
           </div>
         ) : (
           <div className="space-y-4">
-            <p className="text-sm text-slate-500">
-              Se creará en la base y quedará marcada presente en esta sesión.
+            <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Quedará marcada presente en esta reunión. El nombre lo revisa
+              después la coordinación antes de sumarla a la lista oficial, así
+              que si solo sabes el nombre de pila, escríbelo igual.
             </p>
             <div>
               <label className="label">Nombre completo</label>

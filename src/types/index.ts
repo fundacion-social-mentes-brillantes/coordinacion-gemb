@@ -51,6 +51,17 @@ export interface Member {
    * Al ponerle el nombre real (o fusionarla con alguien existente) se limpia.
    */
   pendingIdentify?: boolean;
+  /**
+   * true = la registró una coordinadora en una reunión y todavía NO forma
+   * parte de la lista oficial: una administradora debe revisarla (muchas
+   * veces llega solo un nombre suelto, como "Sandra").
+   */
+  pendingReview?: boolean;
+  /** Nombre de quien la registró (para que la revisión tenga contexto). */
+  createdByName?: string;
+  /** Reunión en la que se registró por primera vez. */
+  sourceSessionId?: string;
+  sourceSessionDate?: Timestamp | null;
 }
 
 // --- Asistencia ---

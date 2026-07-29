@@ -9,6 +9,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { buildNameParts } from '../lib/normalize';
+import { UNKNOWN_PREFIX } from '../lib/constants';
 import { updateMember } from './members';
 import type { Attendance, Member } from '../types';
 
@@ -63,6 +64,78 @@ export async function resolvePlaceholderName(
     pendingIdentify: false,
   });
   return propagateNameToAttendance(memberId, parts.fullName);
+}
+
+/**
+ * La administradora APRUEBA a una persona que registró una coordinadora: pasa
+ * a formar parte de la lista oficial. Si de paso corrige el nombre (lo normal
+ * cuando llegó solo "Sandra"), el cambio se propaga a todo su historial.
+ */
+export async function approveMember(
+  memberId: string,
+  finalName: string,
+  currentName: string,
+): Promise<PropagateResult> {
+  const parts = buildNameParts(finalName);
+  const cambioNombre = parts.fullName !== currentName;
+  // Si se aprueba sin ponerle un nombre real, sigue "por identificar": no se
+  // puede dar por resuelta a alguien que se llama "Por identificar (…)".
+  const sigueSinNombre = parts.fullName.startsWith(UNKNOWN_PREFIX);
+  await updateMember(memberId, {
+    ...(cambioNombre ? { fullName: parts.fullName } : {}),
+    pendingReview: false,
+    pendingIdentify: sigueSinNombre,
+  });
+  // Se propaga SIEMPRE, aunque el nombre no cambie aquí: si una coordinadora
+  // ya lo había corregido y algún registro se quedó atrás, esto lo repara.
+  return propagateNameToAttendance(memberId, parts.fullName);
+}
+
+export interface DiscardResult {
+  attendanceDeleted: number;
+  failed: number;
+  memberDeleted: boolean;
+}
+
+/**
+ * DESCARTA a una persona por revisar: borra su ficha y las asistencias que
+ * se le hubieran registrado, y ajusta el contador de cada reunión afectada.
+ * Se usa cuando el registro fue un error (por ejemplo, se escribió dos veces).
+ */
+export async function discardPendingMember(
+  memberId: string,
+): Promise<DiscardResult> {
+  const { mine } = await attendanceDocsOf(memberId);
+  let attendanceDeleted = 0;
+  let failed = 0;
+
+  for (const d of mine) {
+    const data = d.data() as Omit<Attendance, 'id'>;
+    const sessionId = d.ref.parent.parent?.id ?? data.sessionId;
+    const batch = writeBatch(db);
+    batch.delete(d.ref);
+    batch.update(doc(db, 'sessions', sessionId), {
+      presentCount: increment(-1),
+    });
+    try {
+      await batch.commit();
+      attendanceDeleted++;
+    } catch (e) {
+      console.error('No se pudo borrar la asistencia de la sesión', sessionId, e);
+      failed++;
+    }
+  }
+
+  let memberDeleted = false;
+  if (failed === 0) {
+    try {
+      await deleteDoc(doc(db, 'members', memberId));
+      memberDeleted = true;
+    } catch (e) {
+      console.error('No se pudo borrar la ficha', e);
+    }
+  }
+  return { attendanceDeleted, failed, memberDeleted };
 }
 
 export interface MergeResult {

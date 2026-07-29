@@ -18,7 +18,11 @@ reuniones semanales de la fundación **Gimnasio Emocional Mentes Brillantes
   que tolera tildes, mayúsculas, orden de palabras y errores de tipeo) y se
   toca a la persona para marcarla presente. En tiempo real entre varios
   celulares y sin duplicados.
-- **Walk-in**: agregar a una persona nueva en el momento y marcarla presente.
+- **Walk-in con revisión**: la coordinadora agrega a alguien nuevo en el
+  momento y queda presente, pero **NO entra a la lista oficial**: pasa a una
+  bandeja de revisión. La administradora ve el nombre, la fecha y quién la
+  registró, y puede **aprobarla** (corrigiendo el nombre si llegó suelto, tipo
+  "Sandra"), **unirla** con alguien que ya existía o **descartarla**.
 - **¿No sabes su nombre?**: se puede marcar presente a alguien "Por
   identificar" anotando una seña ("saco rojo, vino con Marta"). Después, con
   **Poner nombre**, se corrige su ficha y todo su historial — o se fusiona con

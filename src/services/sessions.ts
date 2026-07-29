@@ -90,6 +90,18 @@ export async function setSessionCoordinator(id: string, name: string) {
   await updateDoc(doc(db, 'sessions', id), { coordinator: name.trim() });
 }
 
+/**
+ * Fija el número exacto de presentes.
+ *
+ * El contador se mantiene sumando y restando de a uno, y eso se desajusta si
+ * dos coordinadoras marcan a la MISMA persona (la asistencia queda una sola,
+ * pero el contador sumó dos veces). Con esto se vuelve a cuadrar con la
+ * cantidad real de nombres.
+ */
+export async function setSessionPresentCount(id: string, count: number) {
+  await updateDoc(doc(db, 'sessions', id), { presentCount: count });
+}
+
 /** Cierra una sesión importada y fija su conteo de presentes. */
 export async function finalizeImportedSession(id: string, presentCount: number) {
   await updateDoc(doc(db, 'sessions', id), { presentCount, status: 'closed' });

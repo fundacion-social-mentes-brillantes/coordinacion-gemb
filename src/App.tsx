@@ -25,6 +25,9 @@ const DashboardPage = lazy(() =>
 const MembersPage = lazy(() =>
   import('./pages/MembersPage').then((m) => ({ default: m.MembersPage })),
 );
+const ReviewPage = lazy(() =>
+  import('./pages/ReviewPage').then((m) => ({ default: m.ReviewPage })),
+);
 const ImportPage = lazy(() =>
   import('./pages/ImportPage').then((m) => ({ default: m.ImportPage })),
 );
@@ -62,6 +65,7 @@ export default function App() {
             <Route element={<RequireAuth allow={[...ADMIN]} />}>
               <Route path="/panel" element={<DashboardPage />} />
               <Route path="/personas" element={<MembersPage />} />
+              <Route path="/personas/revisar" element={<ReviewPage />} />
               <Route path="/personas/importar" element={<ImportPage />} />
               <Route path="/personas/historial" element={<ImportHistoryPage />} />
               <Route path="/usuarios" element={<UsersPage />} />

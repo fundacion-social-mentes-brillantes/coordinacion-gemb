@@ -135,11 +135,29 @@ service cloud.firestore {
     match /members/{memberId} {
       allow read: if canRead();
       // Crear: coordinador (walk-in) y admin (alta/importación).
-      allow create: if isStaff() && isActive();
-      // Editar / desactivar / borrar: admin. Excepción: las fichas
-      // provisionales "Por identificar" (pendingIdentify == true) también las
-      // puede corregir/fusionar una coordinadora (ponerles el nombre real).
-      allow update, delete: if isActive() && (
+      // Crear: la administradora sin restricciones (alta manual/importación).
+      // La coordinadora SOLO puede crear personas marcadas "por revisar":
+      // así nadie entra a la lista oficial sin que la coordinación lo apruebe.
+      allow create: if isActive() && (
+        isAdmin()
+        || (isStaff() && request.resource.data.get('pendingReview', false) == true)
+      );
+
+      // Editar: admin sin restricciones. Excepción: las fichas provisionales
+      // "Por identificar" también las puede corregir una coordinadora (para
+      // ponerles el nombre real), pero NO puede aprobarlas: la marca
+      // "por revisar" tiene que quedar como estaba.
+      allow update: if isActive() && (
+        isAdmin()
+        || (isStaff()
+          && resource.data.get('pendingIdentify', false) == true
+          && request.resource.data.get('pendingReview', false)
+             == resource.data.get('pendingReview', false))
+      );
+
+      // Borrar: admin; y la coordinadora solo fichas provisionales
+      // (al fusionarlas con una persona que ya existía).
+      allow delete: if isActive() && (
         isAdmin()
         || (isStaff() && resource.data.get('pendingIdentify', false) == true)
       );
