@@ -152,17 +152,27 @@ service cloud.firestore {
       allow create: if isStaff() && isActive();
       // Actualizar:
       allow update: if isActive() && (
-        // El admin puede todo (incluido abrir/cerrar).
+        // El admin puede todo (incluido reabrir y editar).
         isAdmin()
         ||
-        // El coordinador SOLO puede ajustar el contador de presentes
-        // (auto-mantenido al marcar/desmarcar) y asignar quién coordina.
-        // No puede cambiar el estado ni tocar ningún otro campo
-        // (fecha, tipo, createdBy, etc.).
-        (role() == 'coordinador'
-          && request.resource.data.status == resource.data.status
-          && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['presentCount', 'coordinator']))
+        (role() == 'coordinador' && (
+          // A) Mientras trabaja Y SOLO si la sesión sigue ABIERTA: ajustar el
+          //    contador de presentes (auto-mantenido al marcar/desmarcar) y
+          //    asignar quién coordina. No puede cambiar el estado ni ningún
+          //    otro campo. Sin la condición de "abierta", una sesión ya
+          //    finalizada seguiría siendo editable por esta rama.
+          (resource.data.status == 'open'
+            && request.resource.data.status == resource.data.status
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['presentCount', 'coordinator']))
+          ||
+          // B) FINALIZAR la sesión: solo de abierta a cerrada y sin tocar
+          //    nada más. Reabrir queda reservado a la administradora.
+          (resource.data.status == 'open'
+            && request.resource.data.status == 'closed'
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['status']))
+        ))
       );
       // Borrar sesión: solo admin.
       allow delete: if isAdmin() && isActive();

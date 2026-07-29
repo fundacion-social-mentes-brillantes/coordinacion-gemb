@@ -43,3 +43,39 @@ export function InstallButton({ className }: { className?: string }) {
     </button>
   );
 }
+
+/**
+ * En el iPhone no existe el evento de instalación: hay que explicarle a la
+ * persona los dos toques de Safari. Solo se muestra en iPhone/iPad y cuando
+ * la app todavía NO está instalada.
+ */
+export function IosInstallHelp({ className }: { className?: string }) {
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    const isIOS =
+      /iP(hone|ad|od)/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const installed =
+      window.matchMedia?.('(display-mode: standalone)').matches ||
+      (navigator as Navigator & { standalone?: boolean }).standalone === true;
+    setShow(isIOS && !installed);
+  }, []);
+
+  if (!show) return null;
+
+  return (
+    <div
+      className={
+        className ??
+        'rounded-2xl bg-primary-50 px-4 py-3 text-left text-sm text-primary-800'
+      }
+    >
+      <p className="font-semibold">📲 Para tenerla como app en tu iPhone</p>
+      <p className="mt-1">
+        Toca el botón <strong>Compartir</strong> (el cuadrito con la flecha ↑,
+        abajo en Safari) y luego <strong>«Agregar a inicio»</strong>.
+      </p>
+    </div>
+  );
+}

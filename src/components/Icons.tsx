@@ -22,6 +22,30 @@ function Svg({ children, ...props }: P & { children: ReactNode }) {
   );
 }
 
+export const ShareIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 16V4m0 0L8 8m4-4 4 4" />
+    <path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+  </Svg>
+);
+export const LockIcon = (p: P) => (
+  <Svg {...p}>
+    <rect x="4" y="10" width="16" height="11" rx="2" />
+    <path d="M8 10V7a4 4 0 1 1 8 0v3" />
+  </Svg>
+);
+export const ImageIcon = (p: P) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <circle cx="9" cy="10" r="2" />
+    <path d="m4 18 5-4 3 2 4-4 4 4" />
+  </Svg>
+);
+export const FlagIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M5 21V4m0 0h12l-2.5 4L17 12H5" />
+  </Svg>
+);
 export const SearchIcon = (p: P) => (
   <Svg {...p}>
     <circle cx="11" cy="11" r="7" />

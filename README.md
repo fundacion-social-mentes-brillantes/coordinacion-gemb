@@ -26,6 +26,15 @@ reuniones semanales de la fundación **Gimnasio Emocional Mentes Brillantes
 - **Sesiones**: crear reuniones (tipo + modalidad + fecha), abrirlas/cerrarlas,
   y asignar **quién coordina** (atajos con las coordinadoras habituales o
   cualquier otro nombre). Se ve en la lista, en el panel y en el PDF.
+- **Finalizar la sesión**: al terminar la reunión, la coordinadora la cierra.
+  Desde ese momento **ella ya no puede modificar nada** (ni marcar, ni quitar,
+  ni agregar); solo una **administradora** puede corregirla o reabrirla.
+- **Lista como imagen (PNG)**: genera una imagen bonita con la lista de
+  asistencia y la comparte directo a WhatsApp (o la descarga). Cada tipo de
+  reunión tiene su color, e incluye fecha, modalidad, coordinadora y total.
+- **Pensada para el celular**: áreas táctiles grandes, sin zoom accidental,
+  respeta el notch y la barra de gestos del iPhone, avisos que confirman cada
+  marcaje y confirmación en dos pasos para quitar a alguien.
 - **Panel / reportes**: por sesión, por persona (con % de asistencia) y
   resumen anual (totales, únicos, por tipo, por modalidad y gráfico por mes).
   Exportación a **CSV** y **PDF**.

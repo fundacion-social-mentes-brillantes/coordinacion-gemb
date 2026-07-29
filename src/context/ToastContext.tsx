@@ -32,27 +32,40 @@ const STYLES: Record<ToastType, string> = {
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
 
-  const toast = useCallback((message: string, type: ToastType = 'info') => {
-    const id = ++counter;
-    setItems((s) => [...s, { id, message, type }]);
-    setTimeout(() => {
-      setItems((s) => s.filter((t) => t.id !== id));
-    }, 3200);
-  }, []);
+  const dismiss = useCallback(
+    (id: number) => setItems((s) => s.filter((t) => t.id !== id)),
+    [],
+  );
+
+  const toast = useCallback(
+    (message: string, type: ToastType = 'info') => {
+      const id = ++counter;
+      // Máximo 3 avisos a la vez: en una reunión se marca muy seguido.
+      setItems((s) => [...s.slice(-2), { id, message, type }]);
+      // Los errores se quedan más tiempo para alcanzar a leerlos.
+      setTimeout(() => dismiss(id), type === 'error' ? 5000 : 2600);
+    },
+    [dismiss],
+  );
 
   return (
     <Ctx.Provider value={{ toast }}>
       {children}
-      <div className="fixed inset-x-0 bottom-24 z-[60] flex flex-col items-center gap-2 px-4 pointer-events-none">
+      <div
+        className="pointer-events-none fixed inset-x-0 z-[60] flex flex-col items-center gap-2 px-4"
+        style={{ bottom: 'calc(env(safe-area-inset-bottom) + 5.5rem)' }}
+      >
         {items.map((t) => (
-          <div
+          <button
             key={t.id}
+            type="button"
             role="status"
-            className="pointer-events-auto max-w-sm rounded-xl px-4 py-3 text-sm font-medium shadow-lifted"
+            onClick={() => dismiss(t.id)}
+            className="pointer-events-auto max-w-sm rounded-xl px-4 py-3 text-left text-sm font-medium shadow-lifted"
             style={{ background: STYLES[t.type], color: '#ffffff' }}
           >
             {t.message}
-          </div>
+          </button>
         ))}
       </div>
     </Ctx.Provider>

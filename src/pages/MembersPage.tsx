@@ -164,23 +164,25 @@ export function MembersPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-primary-900">Personas</h2>
-          <p className="text-xs text-slate-500">{activeCount} activas</p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => navigate('/personas/importar')}
-            className="btn-secondary py-2.5"
-          >
-            <UploadIcon className="text-lg" /> Importar
-          </button>
-          <button type="button" onClick={openAdd} className="btn-primary py-2.5">
-            <PlusIcon className="text-lg" /> Agregar
-          </button>
-        </div>
+      <div>
+        <h2 className="text-lg font-bold text-primary-900">Personas</h2>
+        <p className="text-xs text-slate-500">{activeCount} activas</p>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => navigate('/personas/importar')}
+          className="btn-secondary min-h-[48px] w-full"
+        >
+          <UploadIcon className="text-lg" /> Importar
+        </button>
+        <button
+          type="button"
+          onClick={openAdd}
+          className="btn-primary min-h-[48px] w-full"
+        >
+          <PlusIcon className="text-lg" /> Agregar
+        </button>
       </div>
 
       <div className="relative">
@@ -253,15 +255,24 @@ export function MembersPage() {
               <button
                 type="button"
                 onClick={() => openEdit(m)}
-                className="rounded-full p-2 text-slate-400 hover:bg-primary-50 hover:text-primary-600"
+                className="tap shrink-0 rounded-full text-slate-500 active:bg-primary-50 active:text-primary-600"
                 aria-label={`Editar ${m.fullName}`}
               >
-                <EditIcon className="text-lg" />
+                <EditIcon className="text-xl" />
               </button>
               <button
                 type="button"
-                onClick={() => toggleActive(m)}
-                className={`chip ${
+                onClick={() => {
+                  if (
+                    m.active &&
+                    !window.confirm(
+                      `¿Desactivar a ${m.fullName}? Dejará de aparecer al tomar asistencia (su historial se conserva).`,
+                    )
+                  )
+                    return;
+                  toggleActive(m);
+                }}
+                className={`min-h-[44px] shrink-0 rounded-full px-3 text-sm font-medium ${
                   m.active
                     ? 'bg-slate-100 text-slate-600'
                     : 'bg-primary-100 text-primary-700'

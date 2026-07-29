@@ -2,7 +2,7 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Logo } from '../components/Logo';
 import { Spinner, FullScreenSpinner } from '../components/Spinner';
-import { InstallButton } from '../components/InstallPrompt';
+import { InstallButton, IosInstallHelp } from '../components/InstallPrompt';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useState } from 'react';
 
@@ -44,7 +44,7 @@ export function LoginPage() {
           type="button"
           onClick={handleSignIn}
           disabled={busy}
-          className="btn-primary mt-6 w-full py-3.5 text-base"
+          className="btn-primary btn-lg mt-6"
         >
           {busy ? (
             <Spinner className="h-5 w-5 text-white" />
@@ -60,8 +60,9 @@ export function LoginPage() {
           </p>
         )}
 
-        <div className="mt-6">
-          <InstallButton className="btn-ghost mx-auto text-sm" />
+        <div className="mt-6 space-y-3">
+          <InstallButton className="btn-secondary mx-auto min-h-[48px] text-sm" />
+          <IosInstallHelp />
         </div>
 
         <div className="mt-6 flex items-center justify-center gap-3 border-t border-primary-100 pt-5">

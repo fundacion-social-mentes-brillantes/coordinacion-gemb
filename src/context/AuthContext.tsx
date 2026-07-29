@@ -172,6 +172,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(async () => {
     setAuthError(null);
+    // En el iPhone con la app INSTALADA, la ventana emergente de Google no
+    // abre y la promesa se queda colgada para siempre ("Conectando…").
+    // Ahí vamos directo al método por redirección, que sí funciona.
+    const isIOS =
+      /iP(hone|ad|od)/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isStandalone =
+      window.matchMedia?.('(display-mode: standalone)').matches ||
+      (navigator as Navigator & { standalone?: boolean }).standalone === true;
+    if (isIOS && isStandalone) {
+      try {
+        await signInWithRedirect(auth, googleProvider);
+      } catch (e) {
+        setAuthError(mapAuthError(e));
+      }
+      return;
+    }
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (e) {

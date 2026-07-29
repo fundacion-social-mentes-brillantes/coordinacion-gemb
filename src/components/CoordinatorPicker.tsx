@@ -21,13 +21,15 @@ export function CoordinatorPicker({
             <button
               key={n}
               type="button"
+              aria-pressed={selected}
               onClick={() => onChange(selected ? '' : n)}
-              className={`rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+              className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-full border-2 px-4 text-[15px] font-medium transition active:scale-[.98] ${
                 selected
-                  ? 'border-primary-500 bg-primary-50 text-primary-800'
-                  : 'border-slate-200 text-slate-600'
+                  ? 'border-primary-500 bg-primary-500 text-white shadow-sm'
+                  : 'border-slate-200 bg-white text-slate-700'
               }`}
             >
+              {selected && <span aria-hidden>✓</span>}
               {n}
             </button>
           );

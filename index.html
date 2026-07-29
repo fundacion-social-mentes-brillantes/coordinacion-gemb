@@ -4,9 +4,12 @@
     <meta charset="UTF-8" />
     <link rel="icon" href="/pwa-192x192.png" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- El zoom accidental (doble toque) se desactiva por CSS con
+         `touch-action: manipulation`, que NO rompe los toques. Aquí dejamos
+         vivo el pellizco para acercar, que es una ayuda de accesibilidad. -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+      content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover"
     />
     <meta name="theme-color" content="#2b9678" />
     <meta name="description" content="Control de asistencia — Gimnasio Emocional Mentes Brillantes" />
@@ -19,15 +22,22 @@
 
     <title>Asistencia GEMB</title>
 
-    <!-- Aplica el tema guardado antes de pintar (evita parpadeo). -->
+    <!-- Aplica el tema guardado antes de pintar (evita parpadeo) y deja la
+         barra del sistema del color del tema. -->
     <script>
-      try {
-        var t = localStorage.getItem('gemb-theme');
-        if (t !== 'light' && t !== 'pink' && t !== 'dark') t = 'light';
+      (function () {
+        var COLORS = { light: '#2b9678', pink: '#c83ab8', dark: '#0b1020' };
+        var t = 'light';
+        try {
+          var s = localStorage.getItem('gemb-theme');
+          if (s === 'light' || s === 'pink' || s === 'dark') t = s;
+        } catch (e) {}
         document.documentElement.setAttribute('data-theme', t);
-      } catch (e) {
-        document.documentElement.setAttribute('data-theme', 'light');
-      }
+        try {
+          var m = document.querySelector('meta[name="theme-color"]');
+          if (m) m.setAttribute('content', COLORS[t]);
+        } catch (e) {}
+      })();
     </script>
   </head>
   <body>

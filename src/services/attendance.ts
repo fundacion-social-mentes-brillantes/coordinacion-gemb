@@ -6,10 +6,12 @@ import {
   onSnapshot,
   writeBatch,
   increment,
+  serverTimestamp,
   Timestamp,
   type SnapshotMetadata,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { buildNameParts } from '../lib/normalize';
 import type { Attendance, Session, Member, SessionType, Modality } from '../types';
 import type { UserProfile } from '../types';
 
@@ -71,6 +73,57 @@ export async function markPresent(
     presentCount: increment(1),
   });
   await batch.commit();
+}
+
+/**
+ * Crea una persona nueva Y la marca presente en un SOLO lote atómico.
+ *
+ * Si se hicieran por separado y la sesión se hubiera finalizado entre medias
+ * (otra coordinadora, otro celular), la persona quedaría creada en la base
+ * pero sin asistencia: una "ficha fantasma" que después ensucia el buscador.
+ * Con un único lote, o entra todo o no entra nada.
+ */
+export async function addWalkinAndMarkPresent(
+  session: Session,
+  input: { fullName: string; notes?: string; pendingIdentify?: boolean },
+  user: UserProfile,
+): Promise<string> {
+  const parts = buildNameParts(input.fullName);
+  // ID generado en el cliente: permite referenciarlo antes de escribirlo.
+  const memberRef = doc(collection(db, 'members'));
+  const batch = writeBatch(db);
+
+  batch.set(memberRef, {
+    fullName: parts.fullName,
+    firstName: parts.firstName,
+    lastName: parts.lastName,
+    searchName: parts.searchName,
+    aliases: [],
+    phone: '',
+    notes: input.notes ?? '',
+    active: true,
+    createdAt: serverTimestamp(),
+    createdBy: user.uid,
+    pendingIdentify: input.pendingIdentify ?? false,
+  });
+  batch.set(doc(db, 'sessions', session.id, 'attendance', memberRef.id), {
+    memberId: memberRef.id,
+    fullName: parts.fullName,
+    status: 'present',
+    checkedInAt: Timestamp.now(),
+    checkedInBy: user.uid,
+    checkedInByName: user.displayName || user.email,
+    sessionId: session.id,
+    sessionType: session.type,
+    modality: session.modality,
+    sessionDate: session.date,
+  });
+  batch.update(doc(db, 'sessions', session.id), {
+    presentCount: increment(1),
+  });
+
+  await batch.commit();
+  return memberRef.id;
 }
 
 /** Desmarca (borra el documento de asistencia y ajusta el contador). */

@@ -41,20 +41,29 @@ export function PendingPage() {
               Tu acceso está pendiente de aprobación
             </h1>
             <p className="mt-2 text-sm text-slate-600">
-              Ya registramos tu ingreso. Una persona de la coordinación debe
-              aprobarte y asignarte un rol. Vuelve a intentarlo más tarde.
+              Ya quedó registrado tu ingreso. Escríbele a la coordinación para
+              que te dé acceso. <strong>No hace falta que cierres la app:</strong>{' '}
+              en cuanto te aprueben, esta pantalla se abre sola.
             </p>
           </>
         )}
 
-        <p className="mt-4 text-xs text-slate-400">
+        <p className="mt-4 text-xs text-slate-500">
           Ingresaste como <strong>{profile?.email}</strong>
         </p>
 
         <button
           type="button"
+          onClick={() => window.location.reload()}
+          className="btn-primary btn-lg mt-6"
+        >
+          Volver a comprobar
+        </button>
+
+        <button
+          type="button"
           onClick={handleLogout}
-          className="btn-secondary mt-6 w-full"
+          className="btn-ghost mt-2 min-h-[44px] w-full text-sm"
         >
           Cerrar sesión
         </button>

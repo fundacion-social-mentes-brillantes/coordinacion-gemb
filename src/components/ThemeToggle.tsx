@@ -18,6 +18,8 @@ export function ThemeToggle({ className = '' }: { className?: string }) {
       {OPTIONS.map((o) => {
         const active = theme === o.key;
         return (
+          // El círculo se ve pequeño, pero la zona que responde al dedo mide
+          // 40px de alto: así no se falla el toque ni se toca el de al lado.
           <button
             key={o.key}
             type="button"
@@ -25,15 +27,19 @@ export function ThemeToggle({ className = '' }: { className?: string }) {
             aria-label={`Tema ${o.label}`}
             aria-pressed={active}
             title={o.label}
-            className="h-6 w-6 rounded-full transition"
-            style={{
-              background: o.color,
-              transform: active ? 'scale(1.08)' : 'none',
-              boxShadow: active
-                ? '0 0 0 2px var(--app-bg-ring, var(--app-panel-solid)), 0 0 0 4px var(--app-accent)'
-                : 'inset 0 0 0 1px rgba(0,0,0,0.18)',
-            }}
-          />
+            className="flex h-10 w-8 items-center justify-center rounded-lg"
+          >
+            <span
+              className="block h-6 w-6 rounded-full transition"
+              style={{
+                background: o.color,
+                transform: active ? 'scale(1.08)' : 'none',
+                boxShadow: active
+                  ? '0 0 0 2px var(--app-panel-solid), 0 0 0 4px var(--app-accent)'
+                  : 'inset 0 0 0 1px rgba(0,0,0,0.18)',
+              }}
+            />
+          </button>
         );
       })}
     </div>

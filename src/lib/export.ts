@@ -4,16 +4,52 @@ import autoTable from 'jspdf-autotable';
 
 // Utilidades de exportación a CSV y PDF, reutilizables en todo el panel.
 
+/**
+ * Descarga un archivo. En el iPhone con la app instalada el atributo
+ * `download` no hace nada, así que allí se abre la hoja de Compartir
+ * (permite "Guardar en Archivos" o enviarlo por WhatsApp).
+ */
 export function downloadBlob(content: BlobPart, filename: string, type: string) {
   const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const nav = navigator as Navigator & {
+    canShare?: (d: unknown) => boolean;
+    share?: (d: unknown) => Promise<void>;
+  };
+
+  const isIOS =
+    /iP(hone|ad|od)/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  const guardarLocal = () => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  };
+
+  if (isIOS && nav.share && nav.canShare) {
+    try {
+      const file = new File([blob], filename, { type });
+      if (nav.canShare({ files: [file] })) {
+        void nav.share({ files: [file] }).catch((e) => {
+          // Si la usuaria cancela, no insistimos; si falló de verdad,
+          // al menos intentamos la descarga normal.
+          if (!(e instanceof DOMException && e.name === 'AbortError')) {
+            guardarLocal();
+          }
+        });
+        return;
+      }
+    } catch {
+      /* seguimos con la descarga normal */
+    }
+  }
+
+  guardarLocal();
 }
 
 function ensureExt(name: string, ext: string) {
@@ -71,5 +107,7 @@ export function exportPDF({
     margin: { left: marginX, right: marginX },
   });
 
-  doc.save(ensureExt(filename, 'pdf'));
+  // No se usa doc.save(): en el iPhone con la app instalada no descarga nada.
+  // downloadBlob sí ofrece la hoja de Compartir como alternativa.
+  downloadBlob(doc.output('blob'), ensureExt(filename, 'pdf'), 'application/pdf');
 }

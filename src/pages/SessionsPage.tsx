@@ -18,6 +18,7 @@ import {
 import { fmtDateLong, toDate, toInputDate, fromInputDate } from '../lib/dates';
 import { Modal } from '../components/Modal';
 import { CoordinatorPicker } from '../components/CoordinatorPicker';
+import { InstallButton, IosInstallHelp } from '../components/InstallPrompt';
 import { Spinner } from '../components/Spinner';
 import { EmptyState } from '../components/EmptyState';
 import { TypeBadge, ModalityBadge, StatusBadge } from '../components/badges';
@@ -135,23 +136,37 @@ export function SessionsPage() {
     }
   };
 
+  // ¿Es de hoy? Se resalta para encontrarla al instante.
+  const isToday = (s: Session) => {
+    const d = toDate(s.date);
+    const now = new Date();
+    return (
+      d.getDate() === now.getDate() &&
+      d.getMonth() === now.getMonth() &&
+      d.getFullYear() === now.getFullYear()
+    );
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-primary-900">Sesiones</h2>
-        <button type="button" onClick={openCreate} className="btn-primary py-2.5">
-          <PlusIcon className="text-lg" /> Nueva sesión
-        </button>
-      </div>
+      <h2 className="text-lg font-bold text-primary-900">Sesiones</h2>
+
+      <button type="button" onClick={openCreate} className="btn-primary btn-lg">
+        <PlusIcon className="text-xl" /> Nueva sesión
+      </button>
+
+      {/* Instalar la app (aquí sigue disponible tras iniciar sesión). */}
+      <InstallButton className="btn-secondary min-h-[48px] w-full text-sm" />
+      <IosInstallHelp />
 
       {/* Filtros */}
       <div className="card p-3">
         <button
           type="button"
           onClick={() => setShowFilters((v) => !v)}
-          className="flex w-full items-center justify-between text-sm font-medium text-slate-600"
+          className="flex min-h-[44px] w-full items-center justify-between text-[15px] font-medium text-slate-600"
         >
-          <span>Filtros</span>
+          <span>Buscar por fecha o tipo</span>
           <span className="text-primary-500">
             {showFilters ? 'Ocultar' : 'Mostrar'}
           </span>
@@ -230,50 +245,63 @@ export function SessionsPage() {
         />
       ) : (
         <ul className="space-y-3">
-          {filtered.map((s) => (
-            <li key={s.id} className="card overflow-hidden">
-              <button
-                type="button"
-                onClick={() => navigate(`/sesiones/${s.id}`)}
-                className="flex w-full items-center gap-3 p-4 text-left active:bg-primary-50"
+          {filtered.map((s) => {
+            const today = isToday(s);
+            return (
+              <li
+                key={s.id}
+                className={`card overflow-hidden ${
+                  today ? 'ring-2 ring-primary-400' : ''
+                }`}
               >
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold capitalize text-primary-900">
-                    {fmtDateLong(s.date)}
-                  </p>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                    <TypeBadge type={s.type} />
-                    <ModalityBadge modality={s.modality} />
-                    <StatusBadge status={s.status} />
+                <button
+                  type="button"
+                  onClick={() => navigate(`/sesiones/${s.id}`)}
+                  className="flex w-full items-center gap-3 p-4 text-left transition active:scale-[.985] active:bg-primary-100"
+                >
+                  <div className="min-w-0 flex-1">
+                    {today && (
+                      <span className="chip mb-1 bg-primary-500 text-white">
+                        Hoy
+                      </span>
+                    )}
+                    <p className="font-semibold capitalize text-primary-900">
+                      {fmtDateLong(s.date)}
+                    </p>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      <TypeBadge type={s.type} />
+                      <ModalityBadge modality={s.modality} />
+                      <StatusBadge status={s.status} />
+                    </div>
+                    <p className="mt-1.5 text-xs text-slate-500">
+                      {Math.max(0, s.presentCount ?? 0)} presente
+                      {Math.max(0, s.presentCount ?? 0) === 1 ? '' : 's'}
+                      {s.coordinator ? ` · Coordina: ${s.coordinator}` : ''}
+                    </p>
                   </div>
-                  <p className="mt-1.5 text-xs text-slate-500">
-                    {Math.max(0, s.presentCount ?? 0)} presente
-                    {Math.max(0, s.presentCount ?? 0) === 1 ? '' : 's'}
-                    {s.coordinator ? ` · Coordina: ${s.coordinator}` : ''}
-                  </p>
-                </div>
-                <ChevronRightIcon className="text-xl text-slate-300" />
-              </button>
-              {isAdmin && (
-                <div className="flex items-center gap-2 border-t border-primary-100 bg-primary-50/40 px-4 py-2">
-                  <button
-                    type="button"
-                    onClick={() => toggleStatus(s)}
-                    className="btn-ghost text-sm"
-                  >
-                    {s.status === 'open' ? 'Cerrar' : 'Reabrir'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => remove(s)}
-                    className="btn-ghost ml-auto text-sm text-rose-600"
-                  >
-                    <TrashIcon className="text-base" /> Eliminar
-                  </button>
-                </div>
-              )}
-            </li>
-          ))}
+                  <ChevronRightIcon className="text-xl text-slate-300" />
+                </button>
+                {isAdmin && (
+                  <div className="flex items-center gap-2 border-t border-primary-100 bg-primary-50/40 px-2 py-1">
+                    <button
+                      type="button"
+                      onClick={() => toggleStatus(s)}
+                      className="btn-ghost min-h-[44px] text-sm"
+                    >
+                      {s.status === 'open' ? 'Finalizar' : 'Reabrir'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => remove(s)}
+                      className="btn-ghost ml-auto min-h-[44px] text-sm text-rose-600"
+                    >
+                      <TrashIcon className="text-base" /> Eliminar
+                    </button>
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
 

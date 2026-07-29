@@ -149,8 +149,8 @@ export function DashboardPage() {
             key={key}
             type="button"
             onClick={() => setTab(key)}
-            className={`flex-1 rounded-lg py-2 font-medium transition ${
-              tab === key ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-500'
+            className={`flex min-h-[48px] flex-1 items-center justify-center rounded-lg px-1 font-medium transition ${
+              tab === key ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-600'
             }`}
           >
             {label}
@@ -277,10 +277,10 @@ function RankingView({
           </div>
 
           <div className="flex gap-2">
-            <button onClick={() => doExport('csv')} className="btn-secondary flex-1">
-              <DownloadIcon className="text-lg" /> CSV
+            <button onClick={() => doExport('csv')} className="btn-secondary min-h-[48px] flex-1">
+              <DownloadIcon className="text-lg" /> Excel
             </button>
-            <button onClick={() => doExport('pdf')} className="btn-secondary flex-1">
+            <button onClick={() => doExport('pdf')} className="btn-secondary min-h-[48px] flex-1">
               <DownloadIcon className="text-lg" /> PDF
             </button>
           </div>
@@ -304,20 +304,20 @@ function RankingView({
                       <p className="truncate font-semibold text-slate-800">
                         {p.fullName}
                       </p>
-                      <p className="text-xs text-slate-400">
+                      <p className="text-xs text-slate-500">
                         Pasos: {p.pasos} · Ego: {p.ego}
                       </p>
                     </div>
                     <div className="text-right">
                       <p className="text-xl font-bold text-primary-700">{p.total}</p>
-                      <p className="text-[10px] uppercase text-slate-400">veces</p>
+                      <p className="text-[11px] uppercase text-slate-500">veces</p>
                     </div>
                   </button>
                 </li>
               );
             })}
             {filtered.length === 0 && (
-              <p className="py-4 text-center text-sm text-slate-400">
+              <p className="py-4 text-center text-sm text-slate-500">
                 Nadie coincide con “{query}”.
               </p>
             )}
@@ -424,17 +424,22 @@ function ResumenView({
             Sin datos para {year}.
           </p>
         ) : (
-          <div className="flex items-end gap-1.5" style={{ height: 140 }}>
+          <div className="flex items-end gap-1.5" style={{ height: 165 }}>
             {byMonth.map((d, i) => (
               <div key={i} className="flex flex-1 flex-col items-center gap-1">
+                <span className="text-[11px] font-bold tabular-nums text-primary-700">
+                  {d.value || ''}
+                </span>
                 <div className="flex w-full flex-1 items-end">
                   <div
                     className="w-full rounded-t bg-primary-400"
-                    style={{ height: `${(d.value / maxMonth) * 100}%` }}
+                    style={{
+                      height: d.value === 0 ? 2 : `${(d.value / maxMonth) * 100}%`,
+                    }}
                     title={`${d.label}: ${d.value}`}
                   />
                 </div>
-                <span className="text-[10px] text-slate-400">{d.label}</span>
+                <span className="text-[11px] text-slate-500">{d.label}</span>
               </div>
             ))}
           </div>
@@ -442,10 +447,10 @@ function ResumenView({
       </div>
 
       <div className="flex gap-2">
-        <button onClick={() => doExport('csv')} className="btn-secondary flex-1">
-          <DownloadIcon className="text-lg" /> CSV
+        <button onClick={() => doExport('csv')} className="btn-secondary min-h-[48px] flex-1">
+          <DownloadIcon className="text-lg" /> Excel
         </button>
-        <button onClick={() => doExport('pdf')} className="btn-secondary flex-1">
+        <button onClick={() => doExport('pdf')} className="btn-secondary min-h-[48px] flex-1">
           <DownloadIcon className="text-lg" /> PDF
         </button>
       </div>
@@ -541,10 +546,10 @@ function BySessionView({
       </div>
 
       <div className="flex gap-2">
-        <button onClick={() => doExport('csv')} className="btn-secondary flex-1">
-          <DownloadIcon className="text-lg" /> CSV
+        <button onClick={() => doExport('csv')} className="btn-secondary min-h-[48px] flex-1">
+          <DownloadIcon className="text-lg" /> Excel
         </button>
-        <button onClick={() => doExport('pdf')} className="btn-secondary flex-1">
+        <button onClick={() => doExport('pdf')} className="btn-secondary min-h-[48px] flex-1">
           <DownloadIcon className="text-lg" /> PDF
         </button>
       </div>

@@ -15,6 +15,9 @@
 @layer base {
   :root,
   [data-theme='light'] {
+    /* Hace que el sistema pinte desplegables, calendario y teclado acordes
+       al tema (si no, en Noche Dorada salen blanco sobre blanco). */
+    color-scheme: light;
     /* Canales de color (R G B) */
     --c-surface: 245 250 248;
     --c-white: 255 255 255;
@@ -55,6 +58,7 @@
   }
 
   [data-theme='pink'] {
+    color-scheme: light;
     --c-surface: 255 242 255;
     --c-white: 255 255 255;
     --c-p-50: 253 240 251;
@@ -93,6 +97,7 @@
   }
 
   [data-theme='dark'] {
+    color-scheme: dark;
     --c-surface: 6 9 19;
     --c-white: 17 24 39; /* los "bg-white" se vuelven panel oscuro */
     --c-p-50: 20 27 48;
@@ -133,19 +138,47 @@
 
   html {
     -webkit-tap-highlight-color: transparent;
+    /* Evita que iOS reajuste el tamaño del texto al girar el teléfono. */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    /* Sin rebote ni "deslizar para recargar" en medio de una reunión. */
+    overscroll-behavior-y: none;
   }
   body {
     background: var(--app-bg-gradient);
     background-attachment: fixed;
     color: var(--app-strong);
     min-height: 100dvh;
+    overscroll-behavior-y: none;
+    /* manipulation = permite desplazar, pero desactiva el zoom por doble
+       toque, que es lo que hacía que la app "se ampliara" sola. */
+    touch-action: manipulation;
     @apply antialiased;
   }
-  /* font-size 16px evita el zoom automático de iOS al enfocar inputs. */
+  /* font-size 16px evita el zoom automático de iOS al enfocar campos. */
   input,
   select,
   textarea {
     font-size: 16px;
+  }
+  /* En los controles no queremos que se seleccione texto ni salga el menú
+     de copiar al mantener pulsado: en celular se siente "roto". */
+  button,
+  [role='button'],
+  a,
+  label,
+  nav {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: manipulation;
+  }
+  /* Los nombres sí se pueden seleccionar (por si quieren copiar uno). */
+  input,
+  textarea,
+  [data-selectable] {
+    -webkit-user-select: text;
+    user-select: text;
   }
   h1,
   h2,
@@ -215,7 +248,56 @@
     color: var(--app-muted);
   }
   .chip {
-    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium;
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-3 py-1 text-[13px] font-medium;
+  }
+  /* Área táctil mínima recomendada por Apple/Google: 44x44 px.
+     Se usa en los botones pequeños de icono para no fallar el toque. */
+  .tap {
+    @apply inline-flex items-center justify-center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  /* Botón grande de acción principal en celular. */
+  .btn-lg {
+    @apply w-full text-base;
+    min-height: 56px;
+  }
+}
+
+/* Respeta el notch / isla dinámica del iPhone y la barra de gestos.
+   Se usa max() para que el recorte SUME al margen normal en vez de
+   reemplazarlo (si no, el contenido queda pegado al borde). */
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.safe-x {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+/* Rebote del contador al marcar a alguien: confirma el toque de un vistazo. */
+@keyframes pop {
+  from {
+    transform: scale(1.28);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+.animate-pop {
+  animation: pop 0.25s ease-out;
+}
+
+/* Quien prefiera menos movimiento (ajuste de accesibilidad del sistema). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

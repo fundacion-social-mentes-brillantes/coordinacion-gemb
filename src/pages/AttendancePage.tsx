@@ -12,12 +12,19 @@ import {
   listenAttendance,
   markPresent,
   unmarkPresent,
+  addWalkinAndMarkPresent,
 } from '../services/attendance';
-import { listenMembers, createMember } from '../services/members';
+import { listenMembers } from '../services/members';
 import { resolvePlaceholderName, mergeMemberInto } from '../services/identify';
 import type { Attendance, Member, Session } from '../types';
 import { buildFuse, searchMembers, toSearchable } from '../lib/search';
-import { UNKNOWN_PREFIX } from '../lib/constants';
+import { UNKNOWN_PREFIX, SESSION_TYPE_LABELS } from '../lib/constants';
+import {
+  buildAttendanceImage,
+  attendanceImageName,
+  shareOrDownloadImage,
+  preloadLogo,
+} from '../lib/shareImage';
 import { fmtDateLong, fmtTime, toDate } from '../lib/dates';
 import { Spinner } from '../components/Spinner';
 import { EmptyState } from '../components/EmptyState';
@@ -33,7 +40,24 @@ import {
   UserPlusIcon,
   LeafIcon,
   EditIcon,
+  ShareIcon,
+  LockIcon,
+  FlagIcon,
 } from '../components/Icons';
+
+/** Vibración corta de confirmación (donde el teléfono lo permita). */
+function buzz(ms = 12) {
+  try {
+    navigator.vibrate?.(ms);
+  } catch {
+    /* iOS no lo soporta: se ignora */
+  }
+}
+
+/** ¿El error viene de que la sesión ya se finalizó desde otro dispositivo? */
+function esSesionCerrada(e: unknown) {
+  return (e as { code?: string })?.code === 'permission-denied';
+}
 
 export function AttendancePage() {
   const { id = '' } = useParams();
@@ -63,8 +87,17 @@ export function AttendancePage() {
     id: string;
     name: string;
   } | null>(null);
+  // Confirmación en dos pasos para quitar a alguien (evita borrados por
+  // rozar el botón mientras se desplaza la lista).
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  // Finalizar la sesión y compartir la lista como imagen.
+  const [finishOpen, setFinishOpen] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [justFinished, setJustFinished] = useState(false);
 
   const searchRef = useRef<HTMLInputElement>(null);
+  // Imagen ya dibujada y lista para compartir (ver el efecto de más abajo).
+  const imageCache = useRef<{ key: string; blob: Blob } | null>(null);
 
   // --- Suscripciones en vivo ---
   useEffect(() => {
@@ -104,9 +137,26 @@ export function AttendancePage() {
     return unsub;
   }, [id]);
 
-  // Enfoca la búsqueda al abrir.
+  // Deja el logo listo para que "Compartir" arme la imagen al instante.
   useEffect(() => {
-    searchRef.current?.focus();
+    void preloadLogo();
+  }, []);
+
+  // La confirmación de "Quitar" se desarma sola: si la coordinadora se
+  // distrae, la fila no puede quedar lista para borrar de un solo toque.
+  useEffect(() => {
+    if (!confirmRemove) return;
+    const t = setTimeout(() => setConfirmRemove(null), 5000);
+    return () => clearTimeout(t);
+  }, [confirmRemove]);
+
+  // Enfoca la búsqueda solo en computador: en el celular abriría el teclado
+  // de golpe y taparía media pantalla.
+  useEffect(() => {
+    const isTouch =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(pointer: coarse)').matches;
+    if (!isTouch) searchRef.current?.focus();
   }, []);
 
   // --- Búsqueda difusa ---
@@ -140,48 +190,188 @@ export function AttendancePage() {
     [members],
   );
 
+  /** Identifica el contenido exacto de la imagen (para reusarla si no cambió). */
+  const imageKey = session
+    ? [
+        session.id,
+        session.type,
+        session.modality,
+        session.coordinator ?? '',
+        presentByArrival.map((r) => r.memberId).join(','),
+      ].join('|')
+    : '';
+
   const isOpen = session?.status === 'open';
+  /**
+   * Una vez finalizada la sesión, la coordinadora ya no puede tocar nada:
+   * solo una administradora puede corregirla. Esto vale para marcar, agregar
+   * personas, poner nombres y cambiar quién coordina.
+   */
+  const canEdit = isOpen || isAdmin;
+
+  /**
+   * Deja la imagen dibujada de antemano, en segundo plano, cada vez que
+   * cambia la lista. Así, al tocar "Compartir", el menú del teléfono se abre
+   * al instante (el iPhone lo bloquea si se tarda demasiado desde el toque).
+   */
+  useEffect(() => {
+    if (!session || !imageKey) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const blob = await buildAttendanceImage({
+          type: session.type,
+          modality: session.modality,
+          dateLabel: fmtDateLong(session.date),
+          coordinator: session.coordinator,
+          names: presentByArrival.map((r) => r.fullName),
+        });
+        if (!cancelled) imageCache.current = { key: imageKey, blob };
+      } catch (e) {
+        console.warn('No se pudo preparar la imagen por adelantado.', e);
+      }
+    }, 700);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // presentByArrival se refleja en imageKey; se omite para no redibujar de más.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageKey, session]);
 
   const toggle = async (member: Pick<Member, 'id' | 'fullName'>) => {
     if (!session || !profile) return;
-    if (!isOpen) {
-      toast('La sesión está cerrada. Reábrela para marcar.', 'info');
+    if (!canEdit) {
+      toast(
+        'La sesión ya se finalizó. Solo una administradora puede modificarla.',
+        'info',
+      );
       return;
     }
+    const wasPresent = presentIds.has(member.id);
     try {
-      if (presentIds.has(member.id)) {
+      if (wasPresent) {
         await unmarkPresent(session.id, member.id);
+        buzz(20);
+        toast(`Quitaste a ${member.fullName}.`, 'info');
       } else {
         await markPresent(session, member, profile);
+        buzz();
+        toast(`${member.fullName} · presente ✓`, 'success');
       }
     } catch (e) {
       console.error(e);
-      toast('No se pudo guardar. Se reintentará al reconectar.', 'error');
+      if (esSesionCerrada(e)) {
+        // No mentir con "se reintentará": ese cambio NO se va a guardar nunca.
+        toast(
+          `${member.fullName} NO quedó guardada: alguien finalizó la sesión. Pide a una administradora que la reabra.`,
+          'error',
+        );
+      } else {
+        toast('No se pudo guardar. Se reintentará al reconectar.', 'error');
+      }
     }
   };
 
-  // Al elegir a alguien desde el buscador: márcalo y limpia la búsqueda para
-  // pasar rápido al siguiente nombre (el foco vuelve al buscador).
+  /**
+   * Al elegir a alguien desde el buscador SOLO se marca, nunca se quita: si
+   * la coordinadora la busca para comprobar que ya estaba, un toque de más
+   * no puede borrarle la asistencia. Quitar se hace desde la hoja.
+   */
   const pickFromSearch = (member: Pick<Member, 'id' | 'fullName'>) => {
-    toggle(member);
+    if (presentIds.has(member.id)) {
+      toast(`${member.fullName} ya estaba presente.`, 'info');
+    } else {
+      toggle(member);
+    }
     setQuery('');
     searchRef.current?.focus();
   };
 
+  /** Arma el PNG de la lista y lo comparte (WhatsApp) o lo descarga. */
+  const shareList = async () => {
+    if (!session) return;
+    setSharing(true);
+    try {
+      const dateLabel = fmtDateLong(session.date);
+      // Si ya está preparado se usa tal cual: en el iPhone, esperar aquí a
+      // que se dibuje la imagen haría que el sistema bloquee el menú de
+      // compartir por "tardar demasiado desde el toque".
+      const blob =
+        imageCache.current?.key === imageKey
+          ? imageCache.current.blob
+          : await buildAttendanceImage({
+              type: session.type,
+              modality: session.modality,
+              dateLabel,
+              coordinator: session.coordinator,
+              names: presentByArrival.map((r) => r.fullName),
+            });
+      const outcome = await shareOrDownloadImage(
+        blob,
+        attendanceImageName(session.type, dateLabel),
+        `${SESSION_TYPE_LABELS[session.type]} — ${dateLabel} · ${rows.length} presentes`,
+      );
+      if (outcome === 'downloaded') {
+        toast('Imagen descargada. Búscala en tus Descargas o Fotos.', 'success');
+      } else if (outcome === 'opened') {
+        toast(
+          'Se abrió la imagen: mantén pulsado sobre ella para guardarla o enviarla.',
+          'info',
+        );
+      }
+    } catch (e) {
+      console.error(e);
+      toast('No se pudo crear la imagen.', 'error');
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  /**
+   * Finaliza la sesión (la coordinadora ya no podrá modificarla).
+   *
+   * No se espera la confirmación del servidor: sin señal, Firestore deja la
+   * promesa colgada indefinidamente y el botón se quedaría girando toda la
+   * reunión. La caché local ya cierra la sesión, así que la pantalla avanza y
+   * solo se vigila el fallo.
+   */
+  const finishSession = () => {
+    if (!session) return;
+    setSessionStatus(session.id, 'closed').catch((e) => {
+      console.error(e);
+      toast('No se pudo finalizar la sesión.', 'error');
+    });
+    buzz(24);
+    setFinishOpen(false);
+    setJustFinished(true);
+  };
+
   const handleWalkin = async () => {
     if (!session || !profile) return;
+    // La sesión pudo cerrarse desde otro dispositivo con este modal abierto.
+    if (!canEdit) {
+      toast('La sesión ya se finalizó. Solo una administradora puede modificarla.', 'info');
+      setWalkinOpen(false);
+      return;
+    }
     const name = walkinName.trim();
     if (!name) return;
     setWalkinSaving(true);
     try {
-      const memberId = await createMember({ fullName: name }, profile.uid);
-      await markPresent(session, { id: memberId, fullName: name }, profile);
+      await addWalkinAndMarkPresent(session, { fullName: name }, profile);
+      buzz();
       toast(`${name} agregada y marcada presente.`, 'success');
       setWalkinName('');
       setWalkinOpen(false);
     } catch (e) {
       console.error(e);
-      toast('No se pudo agregar la persona.', 'error');
+      toast(
+        esSesionCerrada(e)
+          ? 'No se agregó: la sesión ya se finalizó desde otro dispositivo.'
+          : 'No se pudo agregar la persona.',
+        'error',
+      );
     } finally {
       setWalkinSaving(false);
     }
@@ -191,20 +381,27 @@ export function AttendancePage() {
   // "Por identificar N — seña" y después se corrige con "Poner nombre".
   const handleUnknownWalkin = async () => {
     if (!session || !profile) return;
+    if (!canEdit) {
+      toast('La sesión ya se finalizó. Solo una administradora puede modificarla.', 'info');
+      setWalkinOpen(false);
+      setWalkinUnknown(false);
+      return;
+    }
     setWalkinSaving(true);
     try {
       const desc = walkinDesc.trim();
       const n = placeholderCount + 1;
       const name = `${UNKNOWN_PREFIX} ${n}${desc ? ` (${desc})` : ''}`;
-      const memberId = await createMember(
+      await addWalkinAndMarkPresent(
+        session,
         {
           fullName: name,
           notes: desc ? `Señas: ${desc}` : '',
           pendingIdentify: true,
         },
-        profile.uid,
+        profile,
       );
-      await markPresent(session, { id: memberId, fullName: name }, profile);
+      buzz();
       toast(
         'Quedó presente. Cuando sepas su nombre, usa "Poner nombre" en la hoja.',
         'success',
@@ -214,7 +411,12 @@ export function AttendancePage() {
       setWalkinOpen(false);
     } catch (e) {
       console.error(e);
-      toast('No se pudo agregar la persona.', 'error');
+      toast(
+        esSesionCerrada(e)
+          ? 'No se agregó: la sesión ya se finalizó desde otro dispositivo.'
+          : 'No se pudo agregar la persona.',
+        'error',
+      );
     } finally {
       setWalkinSaving(false);
     }
@@ -222,6 +424,11 @@ export function AttendancePage() {
 
   const saveCoordinator = async () => {
     if (!session) return;
+    if (!canEdit) {
+      toast('La sesión ya se finalizó. Solo una administradora puede modificarla.', 'info');
+      setCoordOpen(false);
+      return;
+    }
     setCoordSaving(true);
     try {
       await setSessionCoordinator(session.id, coordDraft);
@@ -241,11 +448,11 @@ export function AttendancePage() {
   };
 
   const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // Enter con un único resultado = marcar rápido.
+    // Enter con un único resultado = marcar rápido. Usa pickFromSearch para
+    // que, igual que al tocar, nunca pueda desmarcar por error.
     if (e.key === 'Enter' && results.length === 1) {
       e.preventDefault();
-      toggle(results[0]);
-      setQuery('');
+      pickFromSearch(results[0]);
     }
   };
 
@@ -284,7 +491,7 @@ export function AttendancePage() {
         <button
           type="button"
           onClick={() => navigate('/sesiones')}
-          className="btn-ghost -ml-2 mb-1 text-sm"
+          className="btn-ghost -ml-2 mb-1 min-h-[44px] text-sm"
         >
           <ArrowLeftIcon className="text-lg" /> Sesiones
         </button>
@@ -296,23 +503,31 @@ export function AttendancePage() {
           <ModalityBadge modality={session.modality} />
           <StatusBadge status={session.status} />
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setCoordDraft(session.coordinator ?? '');
-            setCoordOpen(true);
-          }}
-          className="mt-2 flex items-center gap-1.5 text-sm text-primary-700"
-        >
-          <EditIcon className="text-base" />
-          {session.coordinator ? (
-            <span>
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={() => {
+              setCoordDraft(session.coordinator ?? '');
+              setCoordOpen(true);
+            }}
+            className="mt-1 flex min-h-[44px] items-center gap-1.5 text-sm text-primary-700"
+          >
+            <EditIcon className="text-base" />
+            {session.coordinator ? (
+              <span>
+                Coordina: <strong>{session.coordinator}</strong>
+              </span>
+            ) : (
+              <span className="underline">Asignar quién coordina</span>
+            )}
+          </button>
+        ) : (
+          session.coordinator && (
+            <p className="mt-2 text-sm text-slate-500">
               Coordina: <strong>{session.coordinator}</strong>
-            </span>
-          ) : (
-            <span className="underline">Asignar quién coordina</span>
-          )}
-        </button>
+            </p>
+          )
+        )}
       </div>
 
       {/* Avisos de conexión / cierre */}
@@ -327,18 +542,42 @@ export function AttendancePage() {
         </div>
       )}
       {!isOpen && (
-        <div className="flex items-center justify-between rounded-xl bg-slate-100 px-4 py-2.5 text-sm text-slate-600">
-          <span>La sesión está cerrada; no se puede marcar.</span>
+        <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-600">
+          <p className="flex items-center gap-2 font-semibold text-slate-700">
+            <LockIcon className="text-base" /> Sesión finalizada
+          </p>
+          <p className="mt-1">
+            {isAdmin
+              ? 'Como administradora sí puedes corregirla o reabrirla.'
+              : 'Ya no se puede modificar. Si hay un error, avisa a una administradora.'}
+          </p>
           {isAdmin && (
-            <button onClick={reopenAndMark} className="btn-ghost text-sm">
-              Reabrir
+            <button
+              onClick={reopenAndMark}
+              className="btn-secondary mt-3 w-full py-2.5 text-sm"
+            >
+              Reabrir sesión
             </button>
           )}
         </div>
       )}
 
+      {/* Compartir la lista como imagen (siempre disponible) */}
+      <button
+        type="button"
+        onClick={shareList}
+        disabled={sharing}
+        className="btn-secondary w-full py-3"
+      >
+        {sharing ? <Spinner className="h-5 w-5" /> : <ShareIcon className="text-lg" />}
+        Compartir lista como imagen
+      </button>
+
       {/* Buscador */}
-      <div className="sticky top-[61px] z-30 -mx-4 bg-surface px-4 pb-2 pt-1">
+      <div
+        className="sticky z-30 -mx-4 bg-surface px-4 pb-2 pt-1"
+        style={{ top: 'var(--header-h, 57px)' }}
+      >
         <div className="relative">
           <SearchIcon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xl text-slate-400" />
           <input
@@ -361,94 +600,110 @@ export function AttendancePage() {
                 setQuery('');
                 searchRef.current?.focus();
               }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-slate-400 hover:bg-slate-100"
+              className="tap absolute right-1 top-1/2 -translate-y-1/2 rounded-full text-slate-400 active:bg-slate-100"
               aria-label="Limpiar búsqueda"
             >
               <XIcon className="text-lg" />
             </button>
           )}
+
+          {/* Resultados: van ANCLADOS al buscador. Si estuvieran más abajo en
+              la página, con la hoja larga se dibujarían fuera de la pantalla
+              y parecería que la búsqueda no hace nada. */}
+          {query.trim().length >= 2 && (
+            <div
+              className="absolute inset-x-0 top-full z-40 mt-2 max-h-[46dvh] overflow-y-auto overscroll-contain rounded-2xl border p-2 shadow-lg"
+              style={{
+                background: 'var(--app-panel-solid)',
+                borderColor: 'var(--app-border)',
+              }}
+            >
+              {results.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-500">
+                  Nadie coincide con “{query}”.
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWalkinName(query.trim());
+                        setWalkinOpen(true);
+                      }}
+                      className="mt-2 block min-h-[44px] w-full text-primary-600 underline"
+                    >
+                      Agregar “{query.trim()}” como persona nueva
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <ul className="space-y-2">
+                  {results.map((m) => {
+                    const present = presentIds.has(m.id);
+                    return (
+                      <li key={m.id}>
+                        <button
+                          type="button"
+                          onClick={() => pickFromSearch(m)}
+                          className={`flex min-h-[68px] w-full items-center gap-3 rounded-2xl border-2 p-3 text-left transition active:scale-[.98] ${
+                            present
+                              ? 'border-primary-500 bg-primary-50'
+                              : 'border-slate-200 bg-white'
+                          }`}
+                        >
+                          <span
+                            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
+                              present
+                                ? 'bg-primary-500 text-white'
+                                : 'bg-slate-100 text-slate-400'
+                            }`}
+                          >
+                            {present ? (
+                              <CheckIcon className="text-2xl" />
+                            ) : (
+                              <PlusIcon className="text-2xl" />
+                            )}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[15px] font-semibold text-slate-800">
+                              {m.fullName}
+                            </span>
+                            <span
+                              className={`block text-xs ${
+                                present
+                                  ? 'font-semibold text-primary-600'
+                                  : 'text-slate-500'
+                              }`}
+                            >
+                              {present
+                                ? '✓ Ya está presente'
+                                : 'Toca para marcar presente'}
+                            </span>
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
-        <div className="mt-2 flex items-center justify-between">
-          <span className="chip bg-primary-100 text-primary-700">
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span
+            key={rows.length}
+            className="chip animate-pop bg-primary-100 text-sm font-bold text-primary-700"
+          >
             Presentes: {rows.length}
           </span>
           <button
             type="button"
             onClick={() => setWalkinOpen(true)}
-            disabled={!isOpen}
-            className="btn-ghost text-sm"
+            disabled={!canEdit}
+            className="btn-ghost min-h-[44px] text-sm"
           >
             <UserPlusIcon className="text-lg" /> Agregar persona
           </button>
         </div>
       </div>
-
-      {/* Resultados de búsqueda */}
-      {query.trim().length >= 2 && (
-        <section>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-            Resultados
-          </h3>
-          {results.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-500">
-              Nadie coincide con “{query}”.
-              <button
-                type="button"
-                onClick={() => {
-                  setWalkinName(query.trim());
-                  setWalkinOpen(true);
-                }}
-                className="mt-2 block w-full text-primary-600 underline"
-              >
-                Agregar “{query.trim()}” como persona nueva
-              </button>
-            </div>
-          ) : (
-            <ul className="space-y-2">
-              {results.map((m) => {
-                const present = presentIds.has(m.id);
-                return (
-                  <li key={m.id}>
-                    <button
-                      type="button"
-                      onClick={() => pickFromSearch(m)}
-                      className={`flex min-h-[56px] w-full items-center gap-3 rounded-xl border p-3 text-left transition active:scale-[.99] ${
-                        present
-                          ? 'border-primary-500 bg-primary-50'
-                          : 'border-slate-200 bg-white'
-                      }`}
-                    >
-                      <span
-                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                          present
-                            ? 'bg-primary-500 text-white'
-                            : 'bg-slate-100 text-slate-400'
-                        }`}
-                      >
-                        {present ? (
-                          <CheckIcon className="text-lg" />
-                        ) : (
-                          <PlusIcon className="text-lg" />
-                        )}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium text-slate-800">
-                          {m.fullName}
-                        </span>
-                        {present && (
-                          <span className="block text-xs text-primary-600">
-                            Presente
-                          </span>
-                        )}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-      )}
 
       {/* Hoja de asistencia — en orden de llegada */}
       <section
@@ -487,11 +742,11 @@ export function AttendancePage() {
             {presentByArrival.map((r, i) => (
               <li
                 key={r.id}
-                className="flex items-center gap-3 border-t px-4 py-3"
+                className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t px-4 py-3"
                 style={{ borderColor: 'var(--app-border)' }}
               >
                 <span
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold"
                   style={{
                     background: 'var(--app-soft-solid)',
                     color: 'var(--app-accent)',
@@ -503,42 +758,151 @@ export function AttendancePage() {
                   <p
                     className="truncate font-medium"
                     style={{ color: 'var(--app-strong)' }}
+                    data-selectable
                   >
                     {r.fullName}
                   </p>
-                  <p
-                    className="truncate text-xs"
-                    style={{ color: 'var(--app-faint)' }}
-                  >
-                    Llegó {fmtTime(r.checkedInAt)} · {r.checkedInByName}
+                  <p className="text-xs" style={{ color: 'var(--app-faint)' }}>
+                    Llegó {fmtTime(r.checkedInAt)}
                   </p>
                 </div>
-                {isPlaceholder(r.memberId, r.fullName) && (
+                {canEdit && isPlaceholder(r.memberId, r.fullName) && (
                   <button
                     type="button"
                     onClick={() =>
                       setResolveTarget({ id: r.memberId, name: r.fullName })
                     }
-                    className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1.5 text-xs font-semibold text-amber-800"
+                    className="order-last min-h-[44px] w-full rounded-xl bg-amber-100 px-3 text-sm font-semibold text-amber-800"
                   >
-                    Poner nombre
+                    ¿Quién es? Poner nombre
                   </button>
                 )}
-                {isOpen && (
-                  <button
-                    type="button"
-                    onClick={() => toggle({ id: r.memberId, fullName: r.fullName })}
-                    className="rounded-full p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-500"
-                    aria-label={`Quitar a ${r.fullName}`}
-                  >
-                    <XIcon className="text-lg" />
-                  </button>
-                )}
+                {canEdit &&
+                  (confirmRemove === r.memberId ? (
+                    <span className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          toggle({ id: r.memberId, fullName: r.fullName });
+                          setConfirmRemove(null);
+                        }}
+                        className="h-11 rounded-full bg-rose-500 px-3 text-sm font-bold text-white"
+                      >
+                        Quitar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmRemove(null)}
+                        className="h-11 rounded-full px-3 text-sm font-semibold text-slate-500"
+                      >
+                        No
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmRemove(r.memberId)}
+                      className="tap shrink-0 rounded-full text-slate-400 active:bg-rose-50 active:text-rose-500"
+                      aria-label={`Quitar a ${r.fullName}`}
+                    >
+                      <XIcon className="text-xl" />
+                    </button>
+                  ))}
               </li>
             ))}
           </ol>
         )}
       </section>
+
+      {/* Finalizar la sesión */}
+      {isOpen && (
+        <div className="card p-4">
+          <p className="text-sm text-slate-600">
+            Cuando termine la reunión, finalízala para que la lista quede
+            guardada y nadie la cambie por accidente.
+          </p>
+          <button
+            type="button"
+            onClick={() => setFinishOpen(true)}
+            className="btn-primary btn-lg mt-3"
+          >
+            <FlagIcon className="text-xl" /> Finalizar sesión
+          </button>
+        </div>
+      )}
+
+      {/* Confirmación de finalizar */}
+      <Modal
+        open={finishOpen}
+        onClose={() => setFinishOpen(false)}
+        title="¿Finalizar la sesión?"
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl bg-primary-50 p-4 text-center">
+            <p className="text-4xl font-bold text-primary-700">{rows.length}</p>
+            <p className="text-sm text-slate-600">
+              {rows.length === 1 ? 'persona presente' : 'personas presentes'}
+            </p>
+          </div>
+          <p className="text-sm text-slate-600">
+            Después de finalizar, <strong>ya no podrás marcar ni quitar a
+            nadie</strong>. Si hace falta corregir algo, una administradora
+            puede reabrirla.
+          </p>
+          <button
+            type="button"
+            onClick={finishSession}
+            className="btn-primary btn-lg"
+          >
+            Sí, finalizar
+          </button>
+          <button
+            type="button"
+            onClick={() => setFinishOpen(false)}
+            className="btn-ghost min-h-[44px] w-full text-sm"
+          >
+            No, seguir marcando
+          </button>
+        </div>
+      </Modal>
+
+      {/* Listo: compartir la imagen */}
+      <Modal
+        open={justFinished}
+        onClose={() => setJustFinished(false)}
+        title="¡Sesión finalizada!"
+      >
+        <div className="space-y-4 text-center">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary-100">
+            <CheckIcon className="text-3xl text-primary-600" />
+          </div>
+          <p className="text-sm text-slate-600">
+            Quedaron <strong>{rows.length}</strong>{' '}
+            {rows.length === 1 ? 'persona registrada' : 'personas registradas'}.
+            Ya puedes enviar la lista al grupo de coordinadoras.
+          </p>
+          <button
+            type="button"
+            onClick={shareList}
+            disabled={sharing}
+            className="btn-primary btn-lg"
+          >
+            {sharing ? (
+              <Spinner className="h-5 w-5 text-white" />
+            ) : (
+              <ShareIcon className="text-xl" />
+            )}
+            Compartir lista (imagen)
+          </button>
+          <button
+            type="button"
+            onClick={() => setJustFinished(false)}
+            className="btn-ghost min-h-[44px] w-full text-sm"
+          >
+            Cerrar
+          </button>
+        </div>
+      </Modal>
 
       {/* Modal walk-in (con nombre o sin saberlo todavía) */}
       <Modal
