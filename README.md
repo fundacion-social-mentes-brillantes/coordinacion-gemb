@@ -130,6 +130,51 @@ Cuando Vercel te dé la URL (p. ej. `coordinacion-gemb.vercel.app`):
 > Sin esto, el login de Google **fallará en producción** (en `localhost` ya
 > funciona).
 
+### 4b) Registrar el dominio en Google Cloud  ⚠️ imprescindible para el iPhone
+
+Esto es lo que hace que **el iPhone pueda entrar**. Es un solo campo y se hace
+una única vez.
+
+Para entrar con Google, Firebase usa una página "ayudante" en
+`/__/auth/handler`. Si esa página vive en otro dominio
+(`coordinacion-gemb.firebaseapp.com`), **Safari/iOS le bloquea el
+almacenamiento** por ser "de un tercero": la sesión se pierde en el camino y el
+iPhone vuelve a la pantalla de ingreso como si nada. Por eso la app ahora usa
+el ayudante en **su propio dominio** (`vercel.json` reenvía `/__/auth/*` a
+Firebase), y Google exige que ese dominio esté registrado:
+
+> **El orden importa:** este paso va **ANTES** de publicar el cambio. Si se
+> despliega primero, Google responde «Error 400: redirect_uri_mismatch» y el
+> ingreso se cae en PC, Android e iPhone a la vez.
+
+1. Entra a
+   [Google Cloud → Clientes de OAuth](https://console.cloud.google.com/auth/clients?project=coordinacion-gemb)
+   (si ese menú no aparece, sirve también
+   [APIs y servicios → Credenciales](https://console.cloud.google.com/apis/credentials?project=coordinacion-gemb)).
+2. En **ID de clientes de OAuth 2.0**, abre el que se llama
+   **Web client (auto created by Google Service)**.
+3. En **Orígenes autorizados de JavaScript** → **Agregar URI**:
+
+   ```
+   https://coordinacion-gemb.vercel.app
+   ```
+
+4. En **URI de redireccionamiento autorizados** → **Agregar URI**:
+
+   ```
+   https://coordinacion-gemb.vercel.app/__/auth/handler
+   ```
+
+5. **Guardar**. Puede tardar unos minutos en tomar efecto.
+
+> No borres los URI que ya estaban (`...firebaseapp.com/__/auth/handler`): se
+> suman, no se reemplazan.
+>
+> Si algún día la app cambia de dominio, hay que repetir este paso con el nuevo
+> dominio y añadirlo a `APP_HOSTS` en
+> [`src/lib/firebase.ts`](./src/lib/firebase.ts). Si falta una de las dos
+> cosas, el iPhone deja de poder entrar (la consola del navegador avisa).
+
 ### 5) Primer uso
 
 1. Entra a la app con **fundacionsocial@gimnasioemocionalmb.com** → quedas

@@ -52,7 +52,10 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
-        // No interceptar el handler de autenticación de Firebase.
+        // NO TOCAR: el ayudante de login de Google vive en /__/auth/ y ahora
+        // se sirve desde NUESTRO propio dominio (ver src/lib/firebase.ts). Si
+        // se quita esta línea, el service worker le responde con el index.html
+        // de la app y el ingreso se rompe para todo el mundo.
         navigateFallbackDenylist: [/^\/__\/auth\//],
       },
       // El SW no se registra en desarrollo para evitar cachés molestas.

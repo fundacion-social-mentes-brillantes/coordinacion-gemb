@@ -30,9 +30,28 @@ const updateSW = registerSW({
   },
 });
 
-// La usa el aviso de "Actualizar" del Layout.
+// La usa el aviso de "Actualizar" del Layout y la pantalla de ingreso.
 window.addEventListener('gemb:do-update', () => {
   void updateSW(true);
+});
+
+/**
+ * Red de seguridad para pantallas en blanco tras una actualización.
+ *
+ * Las pantallas se cargan por partes. Si el celular tiene guardada una
+ * versión vieja, puede pedir un trozo que ya no existe y quedarse en blanco.
+ * Aquí se recarga la app una sola vez (más veces sería un bucle).
+ */
+window.addEventListener('vite:preloadError', (event) => {
+  const YA = 'gemb:recarga-por-trozo-perdido';
+  try {
+    if (sessionStorage.getItem(YA)) return;
+    sessionStorage.setItem(YA, '1');
+  } catch {
+    return;
+  }
+  event.preventDefault();
+  window.location.reload();
 });
 
 createRoot(document.getElementById('root')!).render(

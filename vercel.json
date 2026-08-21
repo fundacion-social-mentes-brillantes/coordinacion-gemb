@@ -9,6 +9,10 @@
       "destination": "https://coordinacion-gemb.firebaseapp.com/__/auth/:path*"
     },
     {
+      "source": "/__/firebase/:path*",
+      "destination": "https://coordinacion-gemb.firebaseapp.com/__/firebase/:path*"
+    },
+    {
       "source": "/.well-known/oauth-authorization-server",
       "destination": "/api/oauth?ruta=as-metadata"
     },

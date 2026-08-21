@@ -3,14 +3,68 @@ import { useAuth } from '../context/AuthContext';
 import { Logo } from '../components/Logo';
 import { Spinner, FullScreenSpinner } from '../components/Spinner';
 import { InstallButton, IosInstallHelp } from '../components/InstallPrompt';
+import { AuthStuck } from '../components/AuthStuck';
 import { ThemeToggle } from '../components/ThemeToggle';
-import { useState } from 'react';
+import { isUpdateReady } from '../lib/swUpdate';
+import { useEffect, useState } from 'react';
+
+/**
+ * ¿La app se está abriendo DENTRO de otra app (Facebook, Instagram…)?
+ * Google bloquea el ingreso en esos navegadores incrustados, así que hay que
+ * avisar en vez de dejar a la persona intentándolo sin explicación.
+ */
+function isInAppBrowser(): boolean {
+  const ua = navigator.userAgent || '';
+  return /FBAN|FBAV|FB_IAB|Instagram|Line\/|MicroMessenger|TikTok/i.test(ua);
+}
 
 export function LoginPage() {
-  const { user, profile, loading, signIn, authError } = useAuth();
+  const { user, profile, loading, signIn, authError, stuck } = useAuth();
   const [busy, setBusy] = useState(false);
 
-  if (loading) return <FullScreenSpinner />;
+  // OJO: los hooks van ANTES de cualquier `return`. Si se ponen después,
+  // React se rompe ("Rendered more hooks than during the previous render").
+
+  // El botón de "Ingresar" navega hacia Google y no vuelve a resolver. Si el
+  // iPhone/Android restaura esta página desde su caché al volver "atrás", el
+  // botón se quedaría muerto en "Conectando…". Esto lo revive.
+  useEffect(() => {
+    const revive = () => setBusy(false);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') revive();
+    };
+    window.addEventListener('pageshow', revive);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('pageshow', revive);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
+  /**
+   * El aviso de "hay versión nueva" vive en la barra de dentro de la app, que
+   * solo existe DESPUÉS de entrar. Quien se quede atascado en esta pantalla
+   * nunca recibiría un arreglo. Aquí, como nadie está en mitad de una reunión,
+   * la versión nueva se aplica sola (una sola vez, para no ciclar).
+   */
+  useEffect(() => {
+    const YA = 'gemb:auto-actualizado';
+    const apply = () => {
+      try {
+        if (sessionStorage.getItem(YA)) return;
+        sessionStorage.setItem(YA, '1');
+      } catch {
+        /* si no hay almacenamiento, se actualiza igual */
+      }
+      window.dispatchEvent(new CustomEvent('gemb:do-update'));
+    };
+    if (isUpdateReady()) apply();
+    window.addEventListener('gemb:update-ready', apply);
+    return () => window.removeEventListener('gemb:update-ready', apply);
+  }, []);
+
+  if (loading) return <FullScreenSpinner label="Comprobando tu sesión…" />;
+  if (user && stuck && !profile) return <AuthStuck />;
   if (user && !profile)
     return <FullScreenSpinner label="Preparando tu cuenta…" />;
   if (user && profile) {
@@ -57,6 +111,14 @@ export function LoginPage() {
         {authError && (
           <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">
             {authError}
+          </p>
+        )}
+
+        {isInAppBrowser() && (
+          <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-left text-sm text-amber-800">
+            Estás abriendo la app <strong>dentro de otra aplicación</strong> y
+            Google no permite ingresar así. Toca el menú (··· o ⇗) y elige{' '}
+            <strong>«Abrir en Safari»</strong> o <strong>«Abrir en Chrome»</strong>.
           </p>
         )}
 
