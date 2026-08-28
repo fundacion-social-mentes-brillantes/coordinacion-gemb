@@ -42,6 +42,13 @@ reuniones semanales de la fundación **Gimnasio Emocional Mentes Brillantes
 - **Panel / reportes**: por sesión, por persona (con % de asistencia) y
   resumen anual (totales, únicos, por tipo, por modalidad y gráfico por mes).
   Exportación a **CSV** y **PDF**.
+- **¿Cómo vamos?**: responde de un vistazo *cuántas personas están viniendo
+  últimamente* (no en todo el año). Muestra la cifra en grande, si subió o
+  bajó frente al período anterior, el promedio de presentes por reunión, y
+  reparte a la gente en cuatro grupos con sus nombres: **Firmes**, **Nuevas**,
+  **Van y vienen** y **Se están alejando** (más las que hace rato no
+  aparecen). La ventana se mide en **reuniones** (últimas 4, 8 o 12), no en
+  días: así una semana sin reunión o las vacaciones no dan un susto falso.
 - **Gestión de personas** (admin): importar desde CSV/Excel con limpieza de
   acentos dañados y detección de duplicados; editar/activar/desactivar.
 - **Gestión de usuarios** (admin): aprobar pendientes, asignar roles, y

@@ -33,6 +33,10 @@ export const fmtDate = (v: unknown) =>
 export const fmtDateShort = (v: unknown) =>
   format(toDate(v), 'dd/MM/yyyy', { locale: es });
 
+/** "12 ago" — sin año, para listas cortas donde el año se sobreentiende. */
+export const fmtDayMonth = (v: unknown) =>
+  format(toDate(v), 'd MMM', { locale: es });
+
 export const fmtTime = (v: unknown) => format(toDate(v), 'HH:mm', { locale: es });
 
 export const fmtDateTime = (v: unknown) =>
