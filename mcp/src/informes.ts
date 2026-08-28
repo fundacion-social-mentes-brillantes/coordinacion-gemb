@@ -1,4 +1,4 @@
-import { buildActivityReport, type ActivityGroup } from '../../src/lib/activity';
+import { buildActivityReport, resumenActividad } from '../../src/lib/activity';
 import { toDate, fmtDate } from '../../src/lib/dates';
 import { normalizeText } from '../../src/lib/normalize';
 import { SESSION_TYPE_LABELS, MODALITY_LABELS } from '../../src/lib/constants';
@@ -20,14 +20,6 @@ export const TIPOS: Record<TipoCorto, SessionType> = {
   ego: 'reduccion_ego',
 };
 
-const GRUPO_TITULO: Record<ActivityGroup, string> = {
-  firmes: 'Firmes',
-  nuevas: 'Nuevas',
-  irregulares: 'Van y vienen',
-  alejandose: 'Se están alejando',
-  dormidas: 'Hace rato no vienen',
-};
-
 /** Reuniones que ya ocurrieron a la fecha dada. */
 function realizadas(sessions: Session[], hoy: Date) {
   const t = hoy.getTime();
@@ -42,62 +34,13 @@ export function informeComoVamos(
   conNombres: boolean,
   hoy: Date = new Date(),
 ): string {
-  const type = TIPOS[tipo];
-  const r = buildActivityReport(sessions, attendance, type, ventana, hoy);
-
-  if (r.recientes.length === 0) {
-    return `Todavía no hay reuniones registradas de ${SESSION_TYPE_LABELS[type]}.`;
-  }
-
-  const n = r.recientes.length;
-  const cmp = (actual: number, previo: number) => {
-    if (r.previasCount === 0) return ' (no hay período anterior con qué comparar)';
-    const d = Math.round((actual - previo) * 10) / 10;
-    if (d === 0) return ' (igual que en el período anterior)';
-    return ` (${d > 0 ? '+' : ''}${d} frente al período anterior)`;
-  };
-
-  const lineas = [
-    `${SESSION_TYPE_LABELS[type]} — últimas ${n} reuniones (${fmtDate(r.desde)} a ${fmtDate(r.hasta)})`,
-    '',
-    `PERSONAS DISTINTAS QUE VINIERON: ${r.activas}${cmp(r.activas, r.activasPrevias)}`,
-    `Promedio de presentes por reunión: ${Math.round(r.promedio * 10) / 10}${cmp(
-      r.promedio,
-      r.promedioPrevio,
-    )}`,
-    '',
-    'Grupos:',
-    `  Firmes (vinieron ${r.umbralFirmes}+ de ${n}): ${r.grupos.firmes}`,
-    `  Nuevas (primera vez y siguen viniendo): ${r.grupos.nuevas}${
-      r.puedeDetectarNuevas ? '' : ' — sin historial anterior, no se puede saber'
-    }`,
-    `  Van y vienen: ${r.grupos.irregulares}`,
-    `  Se están alejando (venían antes, ahora no): ${r.grupos.alejandose}`,
-    `  Hace rato no vienen: ${r.grupos.dormidas}`,
-    '',
-    'Asistentes por reunión:',
-    ...r.recientes.map(
-      ({ session, presentes }) =>
-        `  ${fmtDate(session.date)} (${MODALITY_LABELS[session.modality]}): ${presentes}`,
-    ),
-  ];
-
-  if (conNombres) {
-    for (const g of ['firmes', 'nuevas', 'irregulares', 'alejandose'] as ActivityGroup[]) {
-      const gente = r.personas.filter((p) => p.grupo === g);
-      if (gente.length === 0) continue;
-      lineas.push('', `${GRUPO_TITULO[g]}:`);
-      for (const p of gente) {
-        lineas.push(
-          p.recientes > 0
-            ? `  - ${p.fullName} — vino ${p.recientes} de ${n}`
-            : `  - ${p.fullName} — última vez ${fmtDate(p.ultima)}`,
-        );
-      }
-    }
-  }
-
-  return lineas.join('\n');
+  // El texto lo arma la app (src/lib/activity.ts), no este servidor: es el
+  // mismo que produce el boton "Copiar resumen" del Panel, asi que Claude y
+  // la pantalla no pueden decir cosas distintas.
+  return resumenActividad(
+    buildActivityReport(sessions, attendance, TIPOS[tipo], ventana, hoy),
+    conNombres,
+  );
 }
 
 export function informeConteos(

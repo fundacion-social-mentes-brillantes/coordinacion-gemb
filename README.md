@@ -49,6 +49,8 @@ reuniones semanales de la fundación **Gimnasio Emocional Mentes Brillantes
   **Van y vienen** y **Se están alejando** (más las que hace rato no
   aparecen). La ventana se mide en **reuniones** (últimas 4, 8 o 12), no en
   días: así una semana sin reunión o las vacaciones no dan un susto falso.
+  Tiene un botón **"Copiar resumen como texto"** para mandarlo por WhatsApp
+  (o pegárselo a Claude) de un solo toque.
 - **Gestión de personas** (admin): importar desde CSV/Excel con limpieza de
   acentos dañados y detección de duplicados; editar/activar/desactivar.
 - **Gestión de usuarios** (admin): aprobar pendientes, asignar roles, y

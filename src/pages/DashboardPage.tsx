@@ -12,7 +12,7 @@ import {
 import { fmtDate, fmtDateLong, fmtDayMonth, toDate, MONTH_NAMES } from '../lib/dates';
 import { exportCSV, exportPDF } from '../lib/export';
 import { normalizeText } from '../lib/normalize';
-import { buildActivityReport } from '../lib/activity';
+import { buildActivityReport, resumenActividad } from '../lib/activity';
 import type { ActivityGroup, ActivityReport } from '../lib/activity';
 import { Spinner } from '../components/Spinner';
 import { EmptyState } from '../components/EmptyState';
@@ -23,6 +23,7 @@ import {
   ChartIcon,
   SearchIcon,
   ChevronRightIcon,
+  ClipboardIcon,
 } from '../components/Icons';
 
 type Tab = 'actividad' | 'ranking' | 'resumen' | 'sesion';
@@ -339,9 +340,13 @@ function ActividadView({
   sessions: Session[];
   attendance: Attendance[];
 }) {
+  const { toast } = useToast();
   const [type, setType] = useState<SessionType>('entrega_pasos');
   const [ventana, setVentana] = useState(4);
   const [abierto, setAbierto] = useState<ActivityGroup | null>(null);
+  // Texto del resumen cuando el portapapeles no está disponible (Safari sin
+  // https, permisos denegados…): se muestra para copiarlo a mano.
+  const [textoManual, setTextoManual] = useState<string | null>(null);
 
   const rep = useMemo(
     () => buildActivityReport(sessions, attendance, type, ventana),
@@ -569,6 +574,25 @@ function ActividadView({
         </p>
       </div>
 
+      {/* Copiar el resumen en texto: la forma más rápida de pasárselo a
+          alguien por WhatsApp — o de pegárselo a Claude para que lo lea. */}
+      <button
+        type="button"
+        onClick={async () => {
+          const texto = resumenActividad(rep, true);
+          try {
+            await navigator.clipboard.writeText(texto);
+            toast('Resumen copiado. Ya lo puedes pegar donde quieras.', 'success');
+          } catch {
+            // Sin permiso de portapapeles: se muestra para copiarlo a mano.
+            setTextoManual(texto);
+          }
+        }}
+        className="btn-secondary min-h-[48px] w-full"
+      >
+        <ClipboardIcon className="text-lg" /> Copiar resumen como texto
+      </button>
+
       <div className="flex gap-2">
         <button onClick={() => doExport('csv')} className="btn-secondary min-h-[48px] flex-1">
           <DownloadIcon className="text-lg" /> Excel
@@ -577,6 +601,25 @@ function ActividadView({
           <DownloadIcon className="text-lg" /> PDF
         </button>
       </div>
+
+      <Modal
+        open={textoManual !== null}
+        onClose={() => setTextoManual(null)}
+        title="Copia el resumen"
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-slate-500">
+            Tu navegador no dejó copiarlo solo. Mantén pulsado el texto,
+            selecciónalo todo y cópialo.
+          </p>
+          <textarea
+            readOnly
+            value={textoManual ?? ''}
+            onFocus={(e) => e.currentTarget.select()}
+            className="input h-64 w-full font-mono text-xs"
+          />
+        </div>
+      </Modal>
     </div>
   );
 }

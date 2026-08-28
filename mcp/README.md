@@ -5,6 +5,12 @@ como *"¿cuántas personas están haciendo Pasos últimamente?"*, *"¿quién dej
 venir?"* o *"¿cuántas fueron el jueves pasado?"* — sin que tengas que entrar,
 exportar nada ni contar a mano.
 
+> **Dónde funciona:** en Claude Code corriendo **en tu computador**. En Claude
+> Code web (claude.ai/code) el servidor arranca dentro de un contenedor
+> desechable que no tiene tu sesión de Google ni sobrevive a la sesión, así que
+> ahí no puede leer nada. Para esos casos está el botón **"Copiar resumen como
+> texto"** del apartado ¿Cómo vamos?: un toque y se lo pegas a Claude.
+
 > **Solo lee. Nunca escribe.** La app tiene reglas cuidadas sobre quién puede
 > marcar asistencia y cuándo (sesión abierta o cerrada, el rol de cada quien,
 > la bandeja de revisión de personas nuevas). Escribir desde aquí se las

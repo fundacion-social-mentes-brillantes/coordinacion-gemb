@@ -1,5 +1,6 @@
 import type { Attendance, Session, SessionType } from '../types';
-import { toDate } from './dates';
+import { toDate, fmtDate } from './dates';
+import { SESSION_TYPE_LABELS, MODALITY_LABELS } from './constants';
 
 // ---------------------------------------------------------------------------
 //  ¿Quiénes están viniendo últimamente?
@@ -247,4 +248,76 @@ export function buildActivityReport(
     personas,
     grupos,
   };
+}
+
+// ---------------------------------------------------------------------------
+//  El mismo informe, en texto plano.
+//
+//  Lo usan el boton "Copiar resumen" de la app y el servidor MCP, para que
+//  digan exactamente lo mismo: si algun dia cambia una cifra o una etiqueta,
+//  cambia en los dos a la vez.
+// ---------------------------------------------------------------------------
+
+const GRUPO_TITULO: Record<ActivityGroup, string> = {
+  firmes: 'Firmes',
+  nuevas: 'Nuevas',
+  irregulares: 'Van y vienen',
+  alejandose: 'Se están alejando',
+  dormidas: 'Hace rato no vienen',
+};
+
+export function resumenActividad(r: ActivityReport, conNombres = true): string {
+  if (r.recientes.length === 0) {
+    return `Todavía no hay reuniones registradas de ${SESSION_TYPE_LABELS[r.type]}.`;
+  }
+
+  const n = r.recientes.length;
+  const cmp = (actual: number, previo: number) => {
+    if (r.previasCount === 0) return ' (no hay período anterior con qué comparar)';
+    const d = Math.round((actual - previo) * 10) / 10;
+    if (d === 0) return ' (igual que en el período anterior)';
+    return ` (${d > 0 ? '+' : ''}${d} frente al período anterior)`;
+  };
+
+  const lineas = [
+    `${SESSION_TYPE_LABELS[r.type]} — últimas ${n} reuniones (${fmtDate(r.desde)} a ${fmtDate(r.hasta)})`,
+    '',
+    `PERSONAS DISTINTAS QUE VINIERON: ${r.activas}${cmp(r.activas, r.activasPrevias)}`,
+    `Promedio de presentes por reunión: ${Math.round(r.promedio * 10) / 10}${cmp(
+      r.promedio,
+      r.promedioPrevio,
+    )}`,
+    '',
+    'Grupos:',
+    `  Firmes (vinieron ${r.umbralFirmes}+ de ${n}): ${r.grupos.firmes}`,
+    `  Nuevas (primera vez y siguen viniendo): ${r.grupos.nuevas}${
+      r.puedeDetectarNuevas ? '' : ' — sin historial anterior, no se puede saber'
+    }`,
+    `  Van y vienen: ${r.grupos.irregulares}`,
+    `  Se están alejando (venían antes, ahora no): ${r.grupos.alejandose}`,
+    `  Hace rato no vienen: ${r.grupos.dormidas}`,
+    '',
+    'Asistentes por reunión:',
+    ...r.recientes.map(
+      ({ session, presentes }) =>
+        `  ${fmtDate(session.date)} (${MODALITY_LABELS[session.modality]}): ${presentes}`,
+    ),
+  ];
+
+  if (conNombres) {
+    for (const g of ['firmes', 'nuevas', 'irregulares', 'alejandose'] as ActivityGroup[]) {
+      const gente = r.personas.filter((p) => p.grupo === g);
+      if (gente.length === 0) continue;
+      lineas.push('', `${GRUPO_TITULO[g]}:`);
+      for (const p of gente) {
+        lineas.push(
+          p.recientes > 0
+            ? `  - ${p.fullName} — vino ${p.recientes} de ${n}`
+            : `  - ${p.fullName} — última vez ${fmtDate(p.ultima)}`,
+        );
+      }
+    }
+  }
+
+  return lineas.join('\n');
 }
