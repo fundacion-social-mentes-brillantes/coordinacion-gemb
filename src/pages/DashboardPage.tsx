@@ -2,22 +2,31 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useToast } from '../context/ToastContext';
 import { listenSessions } from '../services/sessions';
 import { listenAllAttendance } from '../services/attendance';
-import type { Attendance, Session } from '../types';
+import type { Attendance, Session, SessionType } from '../types';
 import {
   SESSION_TYPE_LABELS,
   SESSION_TYPE_SHORT,
+  SESSION_TYPES,
   MODALITY_LABELS,
 } from '../lib/constants';
-import { fmtDate, fmtDateLong, toDate, MONTH_NAMES } from '../lib/dates';
+import { fmtDate, fmtDateLong, fmtDayMonth, toDate, MONTH_NAMES } from '../lib/dates';
 import { exportCSV, exportPDF } from '../lib/export';
 import { normalizeText } from '../lib/normalize';
+import { buildActivityReport, resumenActividad } from '../lib/activity';
+import type { ActivityGroup, ActivityReport } from '../lib/activity';
 import { Spinner } from '../components/Spinner';
 import { EmptyState } from '../components/EmptyState';
 import { Modal } from '../components/Modal';
 import { TypeBadge, ModalityBadge } from '../components/badges';
-import { DownloadIcon, ChartIcon, SearchIcon } from '../components/Icons';
+import {
+  DownloadIcon,
+  ChartIcon,
+  SearchIcon,
+  ChevronRightIcon,
+  ClipboardIcon,
+} from '../components/Icons';
 
-type Tab = 'ranking' | 'resumen' | 'sesion';
+type Tab = 'actividad' | 'ranking' | 'resumen' | 'sesion';
 
 interface PersonAgg {
   memberId: string;
@@ -29,7 +38,7 @@ interface PersonAgg {
 
 export function DashboardPage() {
   const { toast } = useToast();
-  const [tab, setTab] = useState<Tab>('ranking');
+  const [tab, setTab] = useState<Tab>('actividad');
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
@@ -137,9 +146,12 @@ export function DashboardPage() {
     <div className="space-y-4">
       <h2 className="text-lg font-bold text-primary-900">Panel de asistencia</h2>
 
-      <div className="flex gap-1 rounded-xl bg-primary-100/60 p-1 text-sm">
+      {/* Cuatro apartados: en el celular van en dos filas para que ninguna
+          etiqueta se corte. */}
+      <div className="grid grid-cols-2 gap-1 rounded-xl bg-primary-100/60 p-1 text-sm sm:grid-cols-4">
         {(
           [
+            ['actividad', '📍 ¿Cómo vamos?'],
             ['ranking', '🏆 Ranking'],
             ['resumen', 'Resumen'],
             ['sesion', 'Por sesión'],
@@ -149,7 +161,7 @@ export function DashboardPage() {
             key={key}
             type="button"
             onClick={() => setTab(key)}
-            className={`flex min-h-[48px] flex-1 items-center justify-center rounded-lg px-1 font-medium transition ${
+            className={`flex min-h-[48px] items-center justify-center rounded-lg px-1 text-center font-medium transition ${
               tab === key ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-600'
             }`}
           >
@@ -162,6 +174,8 @@ export function DashboardPage() {
         <div className="flex justify-center py-12">
           <Spinner className="h-8 w-8" />
         </div>
+      ) : tab === 'actividad' ? (
+        <ActividadView sessions={sessions} attendance={attendance} />
       ) : tab === 'ranking' ? (
         <RankingView
           perPerson={perPerson}
@@ -200,6 +214,412 @@ function StatCard({ label, value }: { label: string; value: string | number }) {
     <div className="card p-4 text-center">
       <p className="text-2xl font-bold text-primary-700">{value}</p>
       <p className="text-xs text-slate-500">{label}</p>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* ¿CÓMO VAMOS? — quiénes están viniendo últimamente                   */
+/* ------------------------------------------------------------------ */
+
+/** Cuántas reuniones hacia atrás se puede mirar. */
+const VENTANAS = [4, 8, 12];
+
+const GRUPO_LABEL: Record<ActivityGroup, string> = {
+  firmes: 'Firme',
+  nuevas: 'Nueva',
+  irregulares: 'Va y viene',
+  alejandose: 'Se está alejando',
+  dormidas: 'Hace rato no viene',
+};
+
+interface GrupoInfo {
+  key: ActivityGroup;
+  emoji: string;
+  titulo: string;
+  explica: (r: ActivityReport) => string;
+}
+
+const GRUPOS: GrupoInfo[] = [
+  {
+    key: 'firmes',
+    emoji: '💪',
+    titulo: 'Firmes',
+    explica: (r) =>
+      r.recientes.length <= 1
+        ? 'Vinieron a la última reunión'
+        : `Vinieron a ${r.umbralFirmes} o más de las ${r.recientes.length}`,
+  },
+  {
+    key: 'nuevas',
+    emoji: '🌱',
+    titulo: 'Nuevas',
+    explica: () => 'Es la primera vez que vienen',
+  },
+  {
+    key: 'irregulares',
+    emoji: '🔄',
+    titulo: 'Van y vienen',
+    explica: (r) =>
+      r.umbralFirmes <= 1
+        ? 'Vinieron alguna vez, pero poco'
+        : `Vinieron entre 1 y ${r.umbralFirmes - 1} de las ${r.recientes.length}`,
+  },
+  {
+    key: 'alejandose',
+    emoji: '⚠️',
+    titulo: 'Se están alejando',
+    explica: () => 'Antes venían y ahora no',
+  },
+];
+
+/** Flecha con la comparación contra el período anterior, en palabras. */
+function Delta({
+  diff,
+  previasCount,
+  sufijo,
+}: {
+  diff: number;
+  previasCount: number;
+  sufijo?: string;
+}) {
+  if (previasCount === 0) return null;
+  const cola = `que en las ${previasCount} reuniones anteriores`;
+  if (Math.abs(diff) < 0.05) {
+    return <p className="text-sm font-medium text-slate-500">Igual {cola}</p>;
+  }
+  const sube = diff > 0;
+  const n = Math.abs(diff);
+  const txt = Number.isInteger(n) ? n : n.toFixed(1).replace('.', ',');
+  return (
+    <p
+      className={`text-sm font-semibold ${sube ? 'text-emerald-600' : 'text-rose-600'}`}
+    >
+      {sube ? '▲' : '▼'} {txt}
+      {sufijo ?? ''} {sube ? 'más' : 'menos'} {cola}
+    </p>
+  );
+}
+
+function ListaGrupo({ rep, grupo }: { rep: ActivityReport; grupo: ActivityGroup }) {
+  const gente = rep.personas.filter((p) => p.grupo === grupo);
+  const n = rep.recientes.length;
+
+  if (gente.length === 0) {
+    return (
+      <p className="card p-4 text-center text-sm text-slate-500">
+        Nadie está en este grupo ahora mismo.
+      </p>
+    );
+  }
+  return (
+    <ul className="space-y-2">
+      {gente.map((p) => (
+        <li
+          key={p.memberId}
+          className="flex items-center gap-3 rounded-xl border border-primary-100 bg-white px-3 py-2.5"
+        >
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700">
+            {p.fullName}
+          </span>
+          <span className="shrink-0 text-xs text-slate-500">
+            {p.recientes > 0
+              ? `Vino ${p.recientes} de ${n}`
+              : `Última vez: ${fmtDate(p.ultima)}`}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ActividadView({
+  sessions,
+  attendance,
+}: {
+  sessions: Session[];
+  attendance: Attendance[];
+}) {
+  const { toast } = useToast();
+  const [type, setType] = useState<SessionType>('entrega_pasos');
+  const [ventana, setVentana] = useState(4);
+  const [abierto, setAbierto] = useState<ActivityGroup | null>(null);
+  // Texto del resumen cuando el portapapeles no está disponible (Safari sin
+  // https, permisos denegados…): se muestra para copiarlo a mano.
+  const [textoManual, setTextoManual] = useState<string | null>(null);
+
+  const rep = useMemo(
+    () => buildActivityReport(sessions, attendance, type, ventana),
+    [sessions, attendance, type, ventana],
+  );
+
+  const nReuniones = rep.recientes.length;
+  const promedio = Math.round(rep.promedio * 10) / 10;
+  const maxPresentes = Math.max(1, ...rep.recientes.map((r) => r.presentes));
+
+  const selectores = (
+    <div className="flex gap-2">
+      <select
+        className="input min-h-[48px] flex-1 py-2"
+        value={type}
+        onChange={(e) => {
+          setType(e.target.value as SessionType);
+          setAbierto(null);
+        }}
+      >
+        {SESSION_TYPES.map((t) => (
+          <option key={t} value={t}>
+            {SESSION_TYPE_LABELS[t]}
+          </option>
+        ))}
+      </select>
+      <select
+        className="input min-h-[48px] w-36 py-2"
+        value={ventana}
+        onChange={(e) => {
+          setVentana(Number(e.target.value));
+          setAbierto(null);
+        }}
+      >
+        {VENTANAS.map((v) => (
+          <option key={v} value={v}>
+            Últimas {v}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  if (nReuniones === 0) {
+    return (
+      <div className="space-y-4">
+        {selectores}
+        <EmptyState
+          icon={<ChartIcon />}
+          title={`Todavía no hay reuniones de ${SESSION_TYPE_SHORT[type]}`}
+        />
+      </div>
+    );
+  }
+
+  const doExport = (kind: 'csv' | 'pdf') => {
+    const rango = `${fmtDate(rep.desde)} – ${fmtDate(rep.hasta)}`;
+    const subtitulo = `${rep.activas} personas en las últimas ${nReuniones} reuniones (${rango})`;
+    const nombre = `como-vamos-${SESSION_TYPE_SHORT[type].toLowerCase()}-${nReuniones}`;
+
+    if (kind === 'csv') {
+      exportCSV(
+        nombre,
+        rep.personas.map((p) => ({
+          Nombre: p.fullName,
+          Situación: GRUPO_LABEL[p.grupo],
+          [`Vino (de ${nReuniones})`]: p.recientes,
+          Antes: p.previas,
+          'Última vez': fmtDate(p.ultima),
+        })),
+      );
+    } else {
+      exportPDF({
+        title: `¿Cómo vamos? — ${SESSION_TYPE_LABELS[type]}`,
+        subtitle: subtitulo,
+        columns: ['Nombre', 'Situación', `Vino (de ${nReuniones})`, 'Antes', 'Última vez'],
+        rows: rep.personas.map((p) => [
+          p.fullName,
+          GRUPO_LABEL[p.grupo],
+          p.recientes,
+          p.previas,
+          fmtDate(p.ultima),
+        ]),
+        filename: nombre,
+      });
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {selectores}
+
+      {/* La respuesta, en grande. */}
+      <div className="card p-5 text-center">
+        <p className="text-sm text-slate-500">
+          Están viniendo a <strong>{SESSION_TYPE_LABELS[type]}</strong>
+        </p>
+        <p className="my-1 text-5xl font-bold leading-none text-primary-700">
+          {rep.activas}
+        </p>
+        <p className="text-sm font-medium text-slate-600">
+          {rep.activas === 1 ? 'persona distinta' : 'personas distintas'}
+        </p>
+        <p className="mt-1 text-xs text-slate-500">
+          en las últimas {nReuniones}{' '}
+          {nReuniones === 1 ? 'reunión' : 'reuniones'} · {fmtDate(rep.desde)} –{' '}
+          {fmtDate(rep.hasta)}
+        </p>
+        <div className="mt-2">
+          <Delta
+            diff={rep.activas - rep.activasPrevias}
+            previasCount={rep.previasCount}
+          />
+        </div>
+      </div>
+
+      {/* Promedio por reunión. */}
+      <div className="card p-4 text-center">
+        <p className="text-sm text-slate-500">Promedio de presentes por reunión</p>
+        <p className="text-3xl font-bold text-primary-700">
+          {String(promedio).replace('.', ',')}
+        </p>
+        <Delta
+          diff={rep.promedio - rep.promedioPrevio}
+          previasCount={rep.previasCount}
+        />
+      </div>
+
+      {/* Los cuatro grupos. Se tocan para ver los nombres. */}
+      <div className="grid grid-cols-2 gap-3">
+        {GRUPOS.map((g) => {
+          const activo = abierto === g.key;
+          return (
+            <button
+              key={g.key}
+              type="button"
+              onClick={() => setAbierto(activo ? null : g.key)}
+              className={`card p-3 text-left transition active:scale-[.99] ${
+                activo ? 'ring-2 ring-primary-400' : ''
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xl">{g.emoji}</span>
+                <span className="text-2xl font-bold text-primary-700">
+                  {rep.grupos[g.key]}
+                </span>
+              </div>
+              <p className="mt-1 text-sm font-semibold text-slate-700">{g.titulo}</p>
+              <p className="text-[11px] leading-tight text-slate-500">
+                {g.explica(rep)}
+              </p>
+              <p className="mt-1.5 flex items-center gap-0.5 text-[11px] font-semibold text-primary-600">
+                {activo ? 'Ocultar' : 'Ver nombres'}
+                <ChevronRightIcon
+                  className={`text-sm transition-transform ${
+                    activo ? 'rotate-90' : ''
+                  }`}
+                />
+              </p>
+            </button>
+          );
+        })}
+      </div>
+
+      <p className="px-1 text-[11px] leading-snug text-slate-400">
+        {rep.puedeDetectarNuevas
+          ? 'Cada persona cuenta en un solo grupo. Quien viene por primera vez está en 🌱 Nuevas, aunque haya venido a todas.'
+          : 'Cada persona cuenta en un solo grupo. Todavía no hay reuniones anteriores con qué comparar, así que aún no se puede saber quién es nueva.'}
+      </p>
+
+      {abierto && <ListaGrupo rep={rep} grupo={abierto} />}
+
+      {/* Las que se perdieron del todo: ni ahora ni en el período anterior. */}
+      {rep.grupos.dormidas > 0 && (
+        <button
+          type="button"
+          onClick={() => setAbierto(abierto === 'dormidas' ? null : 'dormidas')}
+          className={`card w-full p-3 text-left text-sm text-slate-600 transition active:scale-[.99] ${
+            abierto === 'dormidas' ? 'ring-2 ring-primary-400' : ''
+          }`}
+        >
+          💤 <strong className="text-slate-700">{rep.grupos.dormidas}</strong>{' '}
+          {rep.grupos.dormidas === 1 ? 'persona vino' : 'personas vinieron'} alguna
+          vez, pero no {rep.grupos.dormidas === 1 ? 'aparece' : 'aparecen'} en las
+          últimas {nReuniones + rep.previasCount} reuniones.{' '}
+          <span className="font-semibold text-primary-600">
+            {abierto === 'dormidas' ? 'Ocultar' : 'Ver nombres'}
+          </span>
+        </button>
+      )}
+
+      {/* Tendencia reunión por reunión. */}
+      <div className="card p-4">
+        <h3 className="mb-3 text-sm font-semibold text-slate-600">
+          Cuántas vinieron a cada reunión
+        </h3>
+        <div className="space-y-1.5">
+          {rep.recientes.map(({ session, presentes }) => (
+            <div key={session.id} className="flex items-center gap-2">
+              <span className="w-[52px] shrink-0 text-[11px] text-slate-500">
+                {fmtDayMonth(session.date)}
+              </span>
+              <span
+                className="w-4 shrink-0 text-center text-[10px] font-bold text-slate-400"
+                title={MODALITY_LABELS[session.modality]}
+              >
+                {session.modality === 'presencial' ? 'P' : 'V'}
+              </span>
+              <div className="h-5 flex-1 overflow-hidden rounded bg-primary-50">
+                <div
+                  className="h-full rounded bg-primary-400"
+                  style={{
+                    width: `${Math.max(3, (presentes / maxPresentes) * 100)}%`,
+                  }}
+                />
+              </div>
+              <span className="w-6 shrink-0 text-right text-sm font-bold tabular-nums text-primary-700">
+                {presentes}
+              </span>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-[11px] text-slate-400">
+          P = presencial · V = virtual
+        </p>
+      </div>
+
+      {/* Copiar el resumen en texto: la forma más rápida de pasárselo a
+          alguien por WhatsApp — o de pegárselo a Claude para que lo lea. */}
+      <button
+        type="button"
+        onClick={async () => {
+          const texto = resumenActividad(rep, true);
+          try {
+            await navigator.clipboard.writeText(texto);
+            toast('Resumen copiado. Ya lo puedes pegar donde quieras.', 'success');
+          } catch {
+            // Sin permiso de portapapeles: se muestra para copiarlo a mano.
+            setTextoManual(texto);
+          }
+        }}
+        className="btn-secondary min-h-[48px] w-full"
+      >
+        <ClipboardIcon className="text-lg" /> Copiar resumen como texto
+      </button>
+
+      <div className="flex gap-2">
+        <button onClick={() => doExport('csv')} className="btn-secondary min-h-[48px] flex-1">
+          <DownloadIcon className="text-lg" /> Excel
+        </button>
+        <button onClick={() => doExport('pdf')} className="btn-secondary min-h-[48px] flex-1">
+          <DownloadIcon className="text-lg" /> PDF
+        </button>
+      </div>
+
+      <Modal
+        open={textoManual !== null}
+        onClose={() => setTextoManual(null)}
+        title="Copia el resumen"
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-slate-500">
+            Tu navegador no dejó copiarlo solo. Mantén pulsado el texto,
+            selecciónalo todo y cópialo.
+          </p>
+          <textarea
+            readOnly
+            value={textoManual ?? ''}
+            onFocus={(e) => e.currentTarget.select()}
+            className="input h-64 w-full font-mono text-xs"
+          />
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -1,17 +1,20 @@
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Timestamp } from 'firebase/firestore';
 
 /**
  * Convierte a Date cualquier valor de fecha que venga de Firestore.
  * Soporta Timestamp, Date, número (ms) o el sentinel pendiente (null) de
  * serverTimestamp(), en cuyo caso usa "ahora" como aproximación.
+ *
+ * No importa `Timestamp` del SDK a propósito: la rama de abajo ya lo cubre
+ * (cualquier objeto con `toDate()`), y así este módulo —y `activity.ts`, que
+ * depende de él— sirve igual en el navegador y en el servidor MCP, que usa
+ * el SDK de administración con otra clase Timestamp.
  */
 export function toDate(value: unknown): Date {
   if (!value) return new Date();
-  if (value instanceof Timestamp) return value.toDate();
   if (value instanceof Date) return value;
-  // Objeto tipo Timestamp con método toDate (por si acaso).
+  // Objeto tipo Timestamp (cliente o admin): tiene toDate().
   if (typeof value === 'object' && value !== null && 'toDate' in value) {
     try {
       return (value as { toDate: () => Date }).toDate();
@@ -32,6 +35,10 @@ export const fmtDate = (v: unknown) =>
 
 export const fmtDateShort = (v: unknown) =>
   format(toDate(v), 'dd/MM/yyyy', { locale: es });
+
+/** "12 ago" — sin año, para listas cortas donde el año se sobreentiende. */
+export const fmtDayMonth = (v: unknown) =>
+  format(toDate(v), 'd MMM', { locale: es });
 
 export const fmtTime = (v: unknown) => format(toDate(v), 'HH:mm', { locale: es });
 

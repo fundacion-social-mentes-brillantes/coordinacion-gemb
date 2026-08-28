@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "coordinacion-gemb": {
+      "command": "node",
+      "args": ["mcp/dist/index.js"]
+    }
+  }
+}

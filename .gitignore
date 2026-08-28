@@ -36,3 +36,10 @@ pnpm-debug.log*
 .claude/scheduled_tasks.lock
 
 .vercel
+
+# Llaves de cuenta de servicio de Firebase. NUNCA se suben: abren la base de
+# datos entera saltandose las reglas de seguridad.
+*serviceaccount*.json
+*service-account*.json
+*firebase-adminsdk*.json
+coordinacion-gemb-*.json
