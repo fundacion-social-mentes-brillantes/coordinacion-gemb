@@ -82,17 +82,33 @@ desde la web, desde donde sea.
 
 ---
 
-## Comprobar que funciona
+## Comprobar en qué vas
 
-Abre en el navegador `https://TU-APP.vercel.app/api/mcp`. Debe responder:
+Abre en el navegador **`https://coordinacion-gemb.vercel.app/api/mcp`**. Te
+dice qué falta, paso por paso:
 
 ```json
-{"nombre":"coordinacion-gemb","mcp":"2024-11-05","estado":"en pie"}
+{
+  "estado": "en pie",
+  "configuracion": [
+    { "paso": "1. Cuenta de consultas configurada (GEMB_EMAIL / GEMB_PASSWORD)",
+      "listo": false,
+      "falta": "Agrégalas en Vercel → Settings → Environment Variables…" },
+    { "paso": "2. Token que protege este servidor (GEMB_MCP_TOKEN)",
+      "listo": false, "falta": "…" }
+  ]
+}
 ```
 
-Eso confirma que el servidor está desplegado. Que además pueda leer los datos
-depende de los pasos 1 a 4; si algo falta, la propia herramienta te dice cuál
-al preguntarle.
+Cuando todo esté puesto, intenta entrar y leer de verdad, y lo dice:
+
+```json
+{ "estado": "en pie y funcionando",
+  "3. Acceso a los datos": { "listo": true,
+    "detalle": "Entra y lee correctamente (37 reuniones a la vista)." } }
+```
+
+Nunca muestra el valor de nada: solo si está puesto o no.
 
 ---
 

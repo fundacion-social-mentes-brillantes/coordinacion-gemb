@@ -2702,7 +2702,45 @@ async function atender(p) {
 async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   if (req.method === "GET") {
-    res.status(200).json({ nombre: "coordinacion-gemb", mcp: VERSION_PROTOCOLO, estado: "en pie" });
+    const pasos = [
+      {
+        paso: "1. Cuenta de consultas configurada (GEMB_EMAIL / GEMB_PASSWORD)",
+        listo: !!(process.env.GEMB_EMAIL && process.env.GEMB_PASSWORD),
+        falta: "Agr\xE9galas en Vercel \u2192 Settings \u2192 Environment Variables y vuelve a desplegar."
+      },
+      {
+        paso: "2. Token que protege este servidor (GEMB_MCP_TOKEN)",
+        listo: !!process.env.GEMB_MCP_TOKEN,
+        falta: "Inventa una contrase\xF1a larga y agr\xE9gala igual que las anteriores."
+      }
+    ];
+    let lectura;
+    if (pasos.every((p) => p.listo)) {
+      try {
+        const s = await cargarSesiones();
+        lectura = {
+          listo: true,
+          detalle: `Entra y lee correctamente (${s.length} reuniones a la vista).`
+        };
+      } catch (e) {
+        lectura = {
+          listo: false,
+          detalle: e instanceof ConfigError || e instanceof AccesoError ? e.message : `No se pudo leer: ${e instanceof Error ? e.message : String(e)}`
+        };
+      }
+    }
+    const todoListo = pasos.every((p) => p.listo) && lectura?.listo === true;
+    res.status(200).json({
+      nombre: "coordinacion-gemb",
+      mcp: VERSION_PROTOCOLO,
+      estado: todoListo ? "en pie y funcionando" : "en pie",
+      configuracion: pasos.map((p) => ({
+        paso: p.paso,
+        listo: p.listo,
+        ...p.listo ? {} : { falta: p.falta }
+      })),
+      ...lectura ? { "3. Acceso a los datos": lectura } : {}
+    });
     return;
   }
   if (req.method !== "POST") {

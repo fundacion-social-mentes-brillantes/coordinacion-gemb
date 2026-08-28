@@ -2,7 +2,7 @@ import {
   CATALOGO,
   buscarHerramienta,
 } from './herramientas';
-import { AccesoError, ConfigError } from './rest';
+import { AccesoError, ConfigError, cargarSesiones } from './rest';
 
 // ---------------------------------------------------------------------------
 //  Servidor MCP por HTTP, desplegado junto a la app en Vercel.
@@ -101,8 +101,54 @@ export default async function handler(req: Req, res: Res) {
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {
-    // Sonda de vida: no revela nada ni exige credenciales.
-    res.status(200).json({ nombre: 'coordinacion-gemb', mcp: VERSION_PROTOCOLO, estado: 'en pie' });
+    // Sonda de vida, y una lista de comprobación para saber qué falta por
+    // configurar. Solo dice SI cada pieza está puesta, nunca su valor, y los
+    // mensajes son los mismos que ya devuelve la herramienta.
+    const pasos: { paso: string; listo: boolean; falta?: string }[] = [
+      {
+        paso: '1. Cuenta de consultas configurada (GEMB_EMAIL / GEMB_PASSWORD)',
+        listo: !!(process.env.GEMB_EMAIL && process.env.GEMB_PASSWORD),
+        falta: 'Agrégalas en Vercel → Settings → Environment Variables y vuelve a desplegar.',
+      },
+      {
+        paso: '2. Token que protege este servidor (GEMB_MCP_TOKEN)',
+        listo: !!process.env.GEMB_MCP_TOKEN,
+        falta: 'Inventa una contraseña larga y agrégala igual que las anteriores.',
+      },
+    ];
+
+    // Si lo anterior está puesto, se prueba de verdad: entrar y leer algo.
+    let lectura: { listo: boolean; detalle: string } | undefined;
+    if (pasos.every((p) => p.listo)) {
+      try {
+        const s = await cargarSesiones();
+        lectura = {
+          listo: true,
+          detalle: `Entra y lee correctamente (${s.length} reuniones a la vista).`,
+        };
+      } catch (e) {
+        lectura = {
+          listo: false,
+          detalle:
+            e instanceof ConfigError || e instanceof AccesoError
+              ? e.message
+              : `No se pudo leer: ${e instanceof Error ? e.message : String(e)}`,
+        };
+      }
+    }
+
+    const todoListo = pasos.every((p) => p.listo) && lectura?.listo === true;
+    res.status(200).json({
+      nombre: 'coordinacion-gemb',
+      mcp: VERSION_PROTOCOLO,
+      estado: todoListo ? 'en pie y funcionando' : 'en pie',
+      configuracion: pasos.map((p) => ({
+        paso: p.paso,
+        listo: p.listo,
+        ...(p.listo ? {} : { falta: p.falta }),
+      })),
+      ...(lectura ? { '3. Acceso a los datos': lectura } : {}),
+    });
     return;
   }
   if (req.method !== 'POST') {
