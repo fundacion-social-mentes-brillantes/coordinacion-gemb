@@ -22,7 +22,18 @@ import { AccesoError, ConfigError, abrirSesion, type Cliente } from './rest';
 //  carpetas.
 // ---------------------------------------------------------------------------
 
-const VERSION_PROTOCOLO = '2024-11-05';
+/**
+ * Versiones del protocolo que se saben hablar, de la más nueva a la más
+ * vieja. Hay que responder la que pide el cliente: si se le contesta con otra,
+ * los clientes estrictos cortan la conexión ("no se pudo conectar").
+ */
+const VERSIONES = ['2025-06-18', '2025-03-26', '2024-11-05'];
+const VERSION_PROTOCOLO = VERSIONES[0];
+
+function versionAcordada(params?: Record<string, unknown>): string {
+  const pedida = typeof params?.protocolVersion === 'string' ? params.protocolVersion : '';
+  return VERSIONES.includes(pedida) ? pedida : VERSION_PROTOCOLO;
+}
 
 interface Peticion {
   jsonrpc?: string;
@@ -48,7 +59,7 @@ function saludo(p: Peticion): object | null | undefined {
   switch (p.method) {
     case 'initialize':
       return ok(p.id, {
-        protocolVersion: VERSION_PROTOCOLO,
+        protocolVersion: versionAcordada(p.params),
         capabilities: { tools: {} },
         serverInfo: { name: 'coordinacion-gemb', version: '3.0.0' },
       });
@@ -180,6 +191,34 @@ interface Res {
 
 export default async function handler(req: Req, res: Res) {
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, Mcp-Session-Id, Mcp-Protocol-Version',
+  );
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Expose-Headers', 'WWW-Authenticate, Mcp-Session-Id');
+
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+
+  if (req.method === 'GET') {
+    // Un cliente MCP abre un GET para escuchar mensajes que empiece el
+    // servidor. Aquí no se empieza ninguno (cada consulta va y vuelve por
+    // POST), así que hay que decirlo con un 405 limpio: devolverle JSON lo
+    // deja esperando algo que nunca llega y la conexión se da por fallida.
+    const acepta = req.headers.accept;
+    const quiereFlujo = (Array.isArray(acepta) ? acepta.join(',') : acepta ?? '').includes(
+      'text/event-stream',
+    );
+    if (quiereFlujo) {
+      res.setHeader('Allow', 'POST, OPTIONS');
+      res.status(405).json(fallo(null, -32600, 'Este servidor solo atiende por POST.'));
+      return;
+    }
+  }
 
   if (req.method === 'GET') {
     // Sonda de vida. No revela nada: quién puede consultar depende de la llave

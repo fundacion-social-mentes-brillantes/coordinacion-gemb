@@ -2979,7 +2979,12 @@ function permitida(h, c) {
 }
 
 // mcp/src/http.ts
-var VERSION_PROTOCOLO = "2024-11-05";
+var VERSIONES = ["2025-06-18", "2025-03-26", "2024-11-05"];
+var VERSION_PROTOCOLO = VERSIONES[0];
+function versionAcordada(params) {
+  const pedida = typeof params?.protocolVersion === "string" ? params.protocolVersion : "";
+  return VERSIONES.includes(pedida) ? pedida : VERSION_PROTOCOLO;
+}
 var ok = (id, result) => ({ jsonrpc: "2.0", id, result });
 var fallo = (id, code, message2) => ({
   jsonrpc: "2.0",
@@ -2991,7 +2996,7 @@ function saludo(p) {
   switch (p.method) {
     case "initialize":
       return ok(p.id, {
-        protocolVersion: VERSION_PROTOCOLO,
+        protocolVersion: versionAcordada(p.params),
         capabilities: { tools: {} },
         serverInfo: { name: "coordinacion-gemb", version: "3.0.0" }
       });
@@ -3075,6 +3080,28 @@ function llaveDe(req) {
 }
 async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, Mcp-Session-Id, Mcp-Protocol-Version"
+  );
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Expose-Headers", "WWW-Authenticate, Mcp-Session-Id");
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+  if (req.method === "GET") {
+    const acepta = req.headers.accept;
+    const quiereFlujo = (Array.isArray(acepta) ? acepta.join(",") : acepta ?? "").includes(
+      "text/event-stream"
+    );
+    if (quiereFlujo) {
+      res.setHeader("Allow", "POST, OPTIONS");
+      res.status(405).json(fallo(null, -32600, "Este servidor solo atiende por POST."));
+      return;
+    }
+  }
   if (req.method === "GET") {
     res.status(200).json({
       nombre: "coordinacion-gemb",
