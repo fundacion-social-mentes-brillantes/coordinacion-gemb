@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { cert, applicationDefault, initializeApp, getApps } from 'firebase-admin/app';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import type { Attendance, Member, Session } from '../../src/types';
@@ -7,6 +9,29 @@ const PROJECT_ID = 'coordinacion-gemb';
 
 /** Error con instrucciones en castellano llano, para que se pueda arreglar. */
 export class ConfigError extends Error {}
+
+/**
+ * Dónde guarda gcloud las credenciales de aplicación por defecto (ADC) tras
+ * `gcloud auth application-default login`.
+ */
+function rutaADC(): string {
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA;
+    return appData
+      ? join(appData, 'gcloud', 'application_default_credentials.json')
+      : '';
+  }
+  return join(homedir(), '.config', 'gcloud', 'application_default_credentials.json');
+}
+
+/** ¿Hay credenciales de aplicación por defecto disponibles? */
+function hayADC(): boolean {
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return true;
+  // Dentro de Google Cloud (Cloud Run, GCE…) las da la propia máquina.
+  if (process.env.GCE_METADATA_HOST || process.env.K_SERVICE) return true;
+  const p = rutaADC();
+  return !!p && existsSync(p);
+}
 
 function credencial() {
   const inline = process.env.GEMB_SERVICE_ACCOUNT?.trim();
@@ -48,12 +73,24 @@ function credencial() {
       );
     }
   }
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return applicationDefault();
+  // Camino recomendado: credenciales de aplicación por defecto (ADC), o sea
+  // tu propia cuenta de Google. No hay ningún archivo de llave que descargar
+  // ni que se pueda filtrar, y funciona aunque la organización tenga
+  // prohibido crear claves de cuenta de servicio.
+  if (hayADC()) return applicationDefault();
 
   throw new ConfigError(
-    'Falta la llave de acceso a Firebase. Define GEMB_SERVICE_ACCOUNT con la ruta ' +
-      'al archivo .json de la cuenta de servicio (Firebase → Configuración del proyecto → ' +
-      'Cuentas de servicio → "Generar nueva clave privada"). Ver mcp/README.md.',
+    'No hay credenciales para entrar a Firebase. La forma más sencilla, y la ' +
+      'única que funciona si tu organización no deja "Generar nueva clave privada", ' +
+      'es entrar con tu propia cuenta de Google:\n\n' +
+      '  1. Instala gcloud: https://cloud.google.com/sdk/docs/install\n' +
+      '  2. gcloud auth application-default login\n' +
+      `  3. gcloud auth application-default set-quota-project ${PROJECT_ID}\n\n` +
+      'Se abre el navegador, inicias sesión con la cuenta de la fundación y listo: ' +
+      'el permiso queda en tu computador, no hay archivo que compartir. ' +
+      'Después reinicia Claude Code.\n\n' +
+      'Si en cambio SÍ puedes descargar una llave de cuenta de servicio, define ' +
+      'GEMB_SERVICE_ACCOUNT con su ruta. Ver mcp/README.md.',
   );
 }
 

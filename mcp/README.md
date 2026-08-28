@@ -33,23 +33,46 @@ nunca van a decir números distintos.
 
 ## Puesta en marcha (una sola vez)
 
-### 1) Descargar la llave de acceso
+### 1) Dar permiso de entrada — **con tu propia cuenta** (recomendado)
 
-Este servidor entra a Firebase como *administrador*, así que necesita una
-llave propia:
+No hace falta descargar ninguna llave. Entras una vez con tu cuenta de Google
+y el permiso se queda guardado en tu computador.
 
-1. Entra a la [consola de Firebase](https://console.firebase.google.com/) →
-   proyecto **coordinacion-gemb**.
-2. Rueda dentada (arriba a la izquierda) → **Configuración del proyecto**.
-3. Pestaña **Cuentas de servicio**.
-4. Botón **Generar nueva clave privada** → **Generar clave**.
-5. Se descarga un archivo `.json`. **Guárdalo fuera de la carpeta del
-   proyecto** (por ejemplo en tu carpeta personal) y no se lo pases a nadie.
+1. Instala la herramienta `gcloud`:
+   [cloud.google.com/sdk/docs/install](https://cloud.google.com/sdk/docs/install)
+2. En la terminal:
 
-> ⚠️ Esa llave abre la base de datos entera saltándose las reglas de seguridad.
-> Trátala como una contraseña: **nunca** la subas a GitHub ni la mandes por
-> WhatsApp. Si se te escapa, vuelve a esa pantalla y bórrala (puedes generar
-> otra cuando quieras).
+```bash
+gcloud auth application-default login
+gcloud auth application-default set-quota-project coordinacion-gemb
+```
+
+Se abre el navegador, inicias sesión con la cuenta de la fundación y ya está.
+
+**Por qué así y no con una "clave privada":** muchas organizaciones tienen
+prohibido crear claves de cuenta de servicio (el botón *Generar nueva clave
+privada* no funciona), y con razón: ese archivo abre la base de datos entera
+y cualquiera que lo consiga entra. Con este método **no existe ningún archivo
+que se pueda filtrar ni compartir por error**, y puedes revocar el permiso
+cuando quieras con `gcloud auth application-default revoke`.
+
+> Necesitas que tu cuenta tenga permiso de lectura en el proyecto de Firebase.
+> Si eres quien administra **coordinacion-gemb**, ya lo tienes.
+
+<details>
+<summary>Alternativa: llave de cuenta de servicio (solo si tu organización la permite)</summary>
+
+1. [Consola de Firebase](https://console.firebase.google.com/) → proyecto
+   **coordinacion-gemb** → rueda dentada → **Configuración del proyecto** →
+   **Cuentas de servicio** → **Generar nueva clave privada**.
+2. Guarda el `.json` **fuera** de la carpeta del proyecto.
+3. `export GEMB_SERVICE_ACCOUNT="/ruta/a/la-llave.json"`
+
+⚠️ Ese archivo se salta las reglas de seguridad de Firestore. Trátalo como una
+contraseña: nunca lo subas a GitHub ni lo mandes por WhatsApp. Si se te escapa,
+bórralo desde esa misma pantalla.
+
+</details>
 
 ### 2) Instalar y compilar
 
@@ -61,21 +84,7 @@ npm install
 npm run build
 ```
 
-### 3) Decirle a Claude dónde está la llave
-
-En la misma terminal, antes de abrir Claude Code:
-
-```bash
-export GEMB_SERVICE_ACCOUNT="/ruta/donde/guardaste/la-llave.json"
-```
-
-Para no repetirlo cada vez, añade esa línea al final de tu `~/.zshrc` (Mac) o
-`~/.bashrc` (Linux).
-
-> También acepta `GOOGLE_APPLICATION_CREDENTIALS`, si ya lo usas para otras
-> herramientas de Google.
-
-### 4) Listo
+### 3) Listo
 
 El archivo [`.mcp.json`](../.mcp.json) de la raíz del proyecto ya deja el
 servidor registrado. Al abrir Claude Code dentro de esta carpeta, aparece
@@ -89,13 +98,13 @@ claude mcp add coordinacion-gemb -- node /ruta/al/proyecto/mcp/dist/index.js
 
 ---
 
-> **Ojo con el orden.** El servidor hereda las variables de la terminal desde
-> la que abres Claude Code. Si exportas la variable *después* de tener Claude
-> abierto, no se entera: ciérralo y vuelve a abrirlo.
+> **Ojo con el orden.** Si haces `gcloud auth …` (o exportas la variable de la
+> llave) *después* de tener Claude Code abierto, no se entera: ciérralo y
+> vuelve a abrirlo.
 >
-> Por eso el `.mcp.json` **no** declara la llave en un bloque `env`: si lo
-> hiciera, pisaría la que tienes exportada. (Lo intenté así al principio y
-> rompía justo el caso que quería facilitar.)
+> Por eso el `.mcp.json` **no** declara nada en un bloque `env`: si lo hiciera,
+> pisaría lo que tengas en tu terminal. (Lo intenté así al principio y rompía
+> justo el caso que quería facilitar.)
 
 ---
 
@@ -103,10 +112,17 @@ claude mcp add coordinacion-gemb -- node /ruta/al/proyecto/mcp/dist/index.js
 
 | Lo que dice | Qué hacer |
 | ----------- | --------- |
+| *"No hay credenciales para entrar a Firebase"* | Falta el paso 1, o lo hiciste con Claude Code ya abierto. Ejecuta `gcloud auth application-default login` y reinicia Claude Code. |
 | *"La variable GEMB_SERVICE_ACCOUNT llegó sin sustituir"* | Alguien puso un bloque `env` con `${...}` en el `.mcp.json`. Quítalo. |
 | *"No se pudo leer la llave en …"* | La ruta no existe o está mal escrita. Comprueba dónde guardaste el `.json`. |
-| *"no contiene un JSON … válido"* | El archivo no es la llave de Firebase (o se dañó al copiarlo). Genera otra. |
-| *"Falta la llave de acceso a Firebase"* | No exportaste la variable, o la exportaste después de abrir Claude Code. |
+| *"no contiene un JSON … válido"* | El archivo no es la llave de Firebase (o se dañó al copiarlo). |
+| *PERMISSION_DENIED* al consultar | Tu cuenta de Google no tiene permiso de lectura en el proyecto **coordinacion-gemb**, o falta el `set-quota-project` del paso 1. |
+
+Para revocar el permiso en cualquier momento:
+
+```bash
+gcloud auth application-default revoke
+```
 
 ---
 
@@ -114,7 +130,7 @@ claude mcp add coordinacion-gemb -- node /ruta/al/proyecto/mcp/dist/index.js
 
 ```bash
 cd mcp
-GEMB_SERVICE_ACCOUNT=/ruta/a/la-llave.json npm start
+npm start
 ```
 
 Si la llave está bien, se queda esperando en silencio (es lo normal: habla por

@@ -238,8 +238,10 @@ Claude nunca dan números distintos. **No escribe nada**: las reglas sobre quié
 marca asistencia y cuándo se respetan porque solo se consulta. Tampoco devuelve
 teléfonos ni notas privadas.
 
-La puesta en marcha (descargar la llave de Firebase, instalar y registrarlo)
-está en [`mcp/README.md`](./mcp/README.md).
+La puesta en marcha no necesita descargar ninguna llave: se entra una vez con
+la propia cuenta de Google (`gcloud auth application-default login`) y el
+permiso queda en el computador. El paso a paso está en
+[`mcp/README.md`](./mcp/README.md).
 
 ---
 
