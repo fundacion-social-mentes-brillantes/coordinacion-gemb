@@ -16,18 +16,22 @@ async function entrar() {
       "Faltan GEMB_EMAIL y GEMB_PASSWORD: son los datos de la cuenta de solo lectura que la app usa para consultar. Ver mcp/README.md."
     );
   }
-  const r = await fetch(
-    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, returnSecureToken: true })
+  let data = await llamarAuth("signInWithPassword", email, password);
+  const codigoEntrada = data.error?.message ?? "";
+  if (!data.idToken && (codigoEntrada.startsWith("EMAIL_NOT_FOUND") || codigoEntrada.startsWith("INVALID_LOGIN_CREDENTIALS"))) {
+    const alta = await llamarAuth("signUp", email, password);
+    if (alta.idToken) {
+      data = alta;
+    } else if ((alta.error?.message ?? "").startsWith("EMAIL_EXISTS")) {
+      throw new ConfigError(
+        `La cuenta ${email} ya existe pero la contrase\xF1a guardada no coincide. Corrige GEMB_PASSWORD en Vercel, o cambia la contrase\xF1a desde Firebase \u2192 Authentication \u2192 Users.`
+      );
+    } else {
+      throw new ConfigError(mensajeDeEntrada(alta.error?.message ?? codigoEntrada, email));
     }
-  );
-  const data = await r.json();
-  if (!r.ok || !data.idToken) {
-    const codigo = data.error?.message ?? `HTTP ${r.status}`;
-    throw new ConfigError(mensajeDeEntrada(codigo, email));
+  }
+  if (!data.idToken) {
+    throw new ConfigError(mensajeDeEntrada(codigoEntrada || "ERROR", email));
   }
   sesion = {
     idToken: data.idToken,
@@ -37,12 +41,26 @@ async function entrar() {
   };
   return sesion;
 }
+async function llamarAuth(metodo, email, password) {
+  const r = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:${metodo}?key=${API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, returnSecureToken: true })
+    }
+  );
+  return await r.json();
+}
 function mensajeDeEntrada(codigo, email) {
-  if (codigo.startsWith("PASSWORD_LOGIN_DISABLED")) {
+  if (codigo.startsWith("PASSWORD_LOGIN_DISABLED") || codigo.startsWith("OPERATION_NOT_ALLOWED") || codigo.startsWith("ADMIN_ONLY_OPERATION")) {
     return "Falta activar el ingreso por correo y contrase\xF1a en Firebase: consola de Firebase \u2192 Authentication \u2192 Sign-in method \u2192 Email/Password \u2192 Habilitar. (Es un interruptor; no tiene nada que ver con las claves de cuenta de servicio que tu organizaci\xF3n bloquea.)";
   }
-  if (codigo.startsWith("EMAIL_NOT_FOUND") || codigo.startsWith("INVALID_LOGIN_CREDENTIALS") || codigo.startsWith("INVALID_PASSWORD")) {
-    return `No se pudo entrar como ${email}. Comprueba que la cuenta existe (Firebase \u2192 Authentication \u2192 Users \u2192 Add user) y que la contrase\xF1a guardada coincide.`;
+  if (codigo.startsWith("INVALID_PASSWORD")) {
+    return `La contrase\xF1a guardada para ${email} no coincide. Corrige GEMB_PASSWORD en Vercel \u2192 Settings \u2192 Environment Variables.`;
+  }
+  if (codigo.startsWith("WEAK_PASSWORD")) {
+    return "La contrase\xF1a es demasiado corta para crear la cuenta: usa al menos 6 caracteres (mejor si es larga) en GEMB_PASSWORD.";
   }
   if (codigo.startsWith("USER_DISABLED")) {
     return `La cuenta ${email} est\xE1 deshabilitada en Firebase.`;

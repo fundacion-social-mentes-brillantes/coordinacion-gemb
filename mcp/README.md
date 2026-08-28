@@ -28,7 +28,7 @@ Esto es a propósito, y es mejor que la alternativa habitual:
 
 ---
 
-## Puesta en marcha (una sola vez, ~10 minutos)
+## Puesta en marcha (una sola vez, ~5 minutos)
 
 ### Paso 1 — Activar el ingreso por correo en Firebase
 
@@ -39,37 +39,29 @@ Esto es a propósito, y es mejor que la alternativa habitual:
 > Es un interruptor. No tiene nada que ver con las claves de cuenta de servicio
 > que tu organización bloquea.
 
-### Paso 2 — Crear la cuenta de consultas
-
-En la misma pantalla de **Authentication** → pestaña **Users** → **Add user**:
-
-- Correo: `consultas@gimnasioemocionalmb.com` (o el que prefieras)
-- Contraseña: una larga y que no uses en ningún otro sitio
-
-Anótala: la vas a pegar una vez en el paso 4 y no la necesitas más.
-
-### Paso 3 — Darle permiso dentro de la app
+### Paso 2 — Darle permiso dentro de la app
 
 Abre la app como administradora → **Usuarios** → **Pre-autorizar por correo**
-→ escribe ese mismo correo → rol **Coordinador(a)** → guardar.
+→ escribe `consultas@gimnasioemocionalmb.com` (o el correo que prefieras usar)
+→ rol **Coordinador(a)** → guardar.
 
 Sin esto, la cuenta entra a Firebase pero las reglas no la dejan leer nada.
 
-### Paso 4 — Guardar los datos en Vercel
+### Paso 3 — Guardar los datos en Vercel
 
 [vercel.com](https://vercel.com) → proyecto **coordinacion-gemb** → **Settings**
 → **Environment Variables**. Agrega tres:
 
 | Nombre | Valor |
 | ------ | ----- |
-| `GEMB_EMAIL` | el correo del paso 2 |
-| `GEMB_PASSWORD` | la contraseña del paso 2 |
+| `GEMB_EMAIL` | el mismo correo del paso 2 |
+| `GEMB_PASSWORD` | una contraseña larga que inventes (mínimo 6 caracteres) |
 | `GEMB_MCP_TOKEN` | una contraseña larga que inventes; es la que protege el servidor |
 
 Luego **Deployments** → en el último, menú `···` → **Redeploy** (para que tome
 las variables nuevas).
 
-### Paso 5 — Conectarlo a Claude
+### Paso 4 — Conectarlo a Claude
 
 En [claude.ai](https://claude.ai) → **Configuración** → **Conectores** →
 **Agregar conector personalizado**:
@@ -124,14 +116,23 @@ Cada mensaje dice qué arreglar:
 | Lo que dice | Qué hacer |
 | ----------- | --------- |
 | *"Falta activar el ingreso por correo…"* | Paso 1. |
-| *"No se pudo entrar como …"* | Paso 2: la cuenta no existe o la contraseña guardada no coincide. |
-| *"…todavía no tiene permiso dentro de la app"* | Paso 3: falta pre-autorizar ese correo. |
-| *"Faltan GEMB_EMAIL y GEMB_PASSWORD"* | Paso 4, y acuérdate de volver a desplegar. |
-| *"Token inválido o ausente"* | El `Bearer` del paso 5 no coincide con `GEMB_MCP_TOKEN`. |
+| *"…ya existe pero la contraseña no coincide"* | Corrige `GEMB_PASSWORD`, o cámbiala en Firebase → Authentication → Users. |
+| *"…todavía no tiene permiso dentro de la app"* | Paso 2: falta pre-autorizar ese correo. |
+| *"Faltan GEMB_EMAIL y GEMB_PASSWORD"* | Paso 3, y acuérdate de volver a desplegar. |
+| *"Token inválido o ausente"* | El `Bearer` del paso 4 no coincide con `GEMB_MCP_TOKEN`. |
 | *PERMISSION_DENIED* | La cuenta quedó desactivada en la app (Usuarios) o le quitaron el rol. |
 
 **Para cortarle el acceso en cualquier momento:** app → **Usuarios** →
 desactiva esa cuenta. Deja de leer al instante, sin tocar nada más.
+
+---
+
+## La cuenta se crea sola
+
+No hay que crearla a mano en Firebase: la primera vez que el servidor intenta
+entrar, si esa cuenta no existe **la crea** con el correo y la contraseña que
+pusiste en Vercel. Si ya existía y la contraseña no coincide, lo dice en vez de
+tocar nada.
 
 ---
 

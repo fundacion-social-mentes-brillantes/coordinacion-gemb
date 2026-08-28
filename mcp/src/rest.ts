@@ -51,24 +51,35 @@ async function entrar(): Promise<Sesion> {
     );
   }
 
-  const r = await fetch(
-    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, returnSecureToken: true }),
-    },
-  );
-  const data = (await r.json()) as {
-    idToken?: string;
-    localId?: string;
-    expiresIn?: string;
-    error?: { message?: string };
-  };
+  let data = await llamarAuth('signInWithPassword', email, password);
 
-  if (!r.ok || !data.idToken) {
-    const codigo = data.error?.message ?? `HTTP ${r.status}`;
-    throw new ConfigError(mensajeDeEntrada(codigo, email));
+  // Si la cuenta todavía no existe, se crea sola con estos mismos datos: así
+  // no hay que ir a crearla a mano a la consola de Firebase. (El mensaje de
+  // "credenciales inválidas" tapa a propósito si el correo existe o no, así
+  // que intentar crearla es también la forma de distinguirlo: si ya existía,
+  // Firebase responde EMAIL_EXISTS y entonces sí es la contraseña.)
+  const codigoEntrada = data.error?.message ?? '';
+  if (
+    !data.idToken &&
+    (codigoEntrada.startsWith('EMAIL_NOT_FOUND') ||
+      codigoEntrada.startsWith('INVALID_LOGIN_CREDENTIALS'))
+  ) {
+    const alta = await llamarAuth('signUp', email, password);
+    if (alta.idToken) {
+      data = alta;
+    } else if ((alta.error?.message ?? '').startsWith('EMAIL_EXISTS')) {
+      throw new ConfigError(
+        `La cuenta ${email} ya existe pero la contraseña guardada no coincide. ` +
+          'Corrige GEMB_PASSWORD en Vercel, o cambia la contraseña desde ' +
+          'Firebase → Authentication → Users.',
+      );
+    } else {
+      throw new ConfigError(mensajeDeEntrada(alta.error?.message ?? codigoEntrada, email));
+    }
+  }
+
+  if (!data.idToken) {
+    throw new ConfigError(mensajeDeEntrada(codigoEntrada || 'ERROR', email));
   }
 
   sesion = {
@@ -80,9 +91,36 @@ async function entrar(): Promise<Sesion> {
   return sesion;
 }
 
+interface RespuestaAuth {
+  idToken?: string;
+  localId?: string;
+  expiresIn?: string;
+  error?: { message?: string };
+}
+
+async function llamarAuth(
+  metodo: 'signInWithPassword' | 'signUp',
+  email: string,
+  password: string,
+): Promise<RespuestaAuth> {
+  const r = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:${metodo}?key=${API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, returnSecureToken: true }),
+    },
+  );
+  return (await r.json()) as RespuestaAuth;
+}
+
 /** Traduce los códigos de Firebase a algo que se pueda arreglar. */
 function mensajeDeEntrada(codigo: string, email: string): string {
-  if (codigo.startsWith('PASSWORD_LOGIN_DISABLED')) {
+  if (
+    codigo.startsWith('PASSWORD_LOGIN_DISABLED') ||
+    codigo.startsWith('OPERATION_NOT_ALLOWED') ||
+    codigo.startsWith('ADMIN_ONLY_OPERATION')
+  ) {
     return (
       'Falta activar el ingreso por correo y contraseña en Firebase: ' +
       'consola de Firebase → Authentication → Sign-in method → ' +
@@ -90,15 +128,16 @@ function mensajeDeEntrada(codigo: string, email: string): string {
       'con las claves de cuenta de servicio que tu organización bloquea.)'
     );
   }
-  if (
-    codigo.startsWith('EMAIL_NOT_FOUND') ||
-    codigo.startsWith('INVALID_LOGIN_CREDENTIALS') ||
-    codigo.startsWith('INVALID_PASSWORD')
-  ) {
+  if (codigo.startsWith('INVALID_PASSWORD')) {
     return (
-      `No se pudo entrar como ${email}. Comprueba que la cuenta existe ` +
-      '(Firebase → Authentication → Users → Add user) y que la contraseña ' +
-      'guardada coincide.'
+      `La contraseña guardada para ${email} no coincide. Corrige ` +
+      'GEMB_PASSWORD en Vercel → Settings → Environment Variables.'
+    );
+  }
+  if (codigo.startsWith('WEAK_PASSWORD')) {
+    return (
+      'La contraseña es demasiado corta para crear la cuenta: usa al menos 6 ' +
+      'caracteres (mejor si es larga) en GEMB_PASSWORD.'
     );
   }
   if (codigo.startsWith('USER_DISABLED')) {
