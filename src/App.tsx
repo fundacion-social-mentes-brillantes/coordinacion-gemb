@@ -39,6 +39,9 @@ const ImportHistoryPage = lazy(() =>
 const UsersPage = lazy(() =>
   import('./pages/UsersPage').then((m) => ({ default: m.UsersPage })),
 );
+const AuthorizePage = lazy(() =>
+  import('./pages/AuthorizePage').then((m) => ({ default: m.AuthorizePage })),
+);
 const ConnectPage = lazy(() =>
   import('./pages/ConnectPage').then((m) => ({ default: m.ConnectPage })),
 );
@@ -56,6 +59,8 @@ export default function App() {
         {/* Públicas */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/pendiente" element={<PendingPage />} />
+        {/* Aquí llega quien conecta Claude: entra con Google y vuelve. */}
+        <Route path="/autorizar" element={<AuthorizePage />} />
 
         {/* Requieren sesión con rol activo */}
         <Route element={<RequireAuth allow={[...ALL]} />}>

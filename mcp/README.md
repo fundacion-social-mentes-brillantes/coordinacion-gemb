@@ -67,27 +67,35 @@ una fundación no debería poder pasar por un malentendido en una frase.
 
 ---
 
-## Puesta en marcha (cada persona, una vez, ~2 minutos)
+## Puesta en marcha (cada persona, una vez, ~30 segundos)
 
-**No hay que configurar nada en Firebase, ni en Vercel, ni pedirle permiso a
-nadie.** Si ya entras a la app, ya puedes conectarlo.
+**No hay llaves que copiar ni nada que configurar.** Se entra con Google, como
+en cualquier otro conector.
 
-1. Entra a la app → **Sesiones** (o **Panel**) → **🤖 Conectar con Claude**
-2. Toca **Copiar mi enlace** (lleva tu llave dentro)
-3. En [claude.ai](https://claude.ai) → Configuración → **Conectores** →
-   *Agregar conector personalizado* → pega el enlace → Agregar
+1. En [claude.ai](https://claude.ai) → Configuración → **Conectores** →
+   *Agregar conector personalizado*
+2. Pega la dirección: `https://coordinacion-gemb.vercel.app/api/mcp`
+3. Toca **Conectar**. Se abre una pantalla, entras con tu Google —el mismo de
+   la app— y le das a **Permitir**.
 4. Pregúntale *"¿con qué cuenta estás conectado?"* — debe responder con tu
    nombre y tu rol.
 
-> **Por qué el enlace lleva la llave dentro.** La pantalla de conectores de
-> Claude solo pide una dirección: no tiene dónde poner cabeceras. Si tu cliente
-> sí las admite (Claude Code, por ejemplo), puedes usar la dirección limpia con
-> la cabecera `Authorization: Bearer <llave>`; el servidor acepta las dos.
->
-> Trátalo como una contraseña: quien tenga ese enlace entra como tú.
+Eso es todo. Tu rol viene con tu cuenta, así que **no hay nada que ajustar por
+persona**: una coordinadora que haga estos mismos pasos queda en solo lectura
+automáticamente.
 
 Funciona en **cualquier Claude**: el del celular, el de la web, el de
-escritorio, Claude Code. Es el mismo conector.
+escritorio, Claude Code. Es la misma dirección para todo el mundo.
+
+<details>
+<summary>Alternativa sin entrar con Google (para clientes que no hagan OAuth)</summary>
+
+La app también entrega un enlace con la llave dentro (**Panel → Conectar con
+Claude → Copiar mi enlace**), y el servidor acepta además la cabecera
+`Authorization: Bearer <llave>`. Sirve para clientes que no hagan el ingreso
+con Google. Trátalo como una contraseña: quien lo tenga entra como tú.
+
+</details>
 
 ### Para cortar el acceso
 
@@ -122,8 +130,8 @@ comprometido, no habría nada que robar.
 
 | Lo que dice | Qué hacer |
 | ----------- | --------- |
-| *"El conector no tiene herramientas disponibles"* | Lo agregaste con la dirección sin la llave. Desconéctalo y vuelve a agregarlo con **tu enlace** de la app. |
-| *"Falta la llave personal"* | Lo mismo: el enlace se pegó sin el `?k=…` del final. |
+| *"El conector no tiene herramientas disponibles"* | Falta entrar con Google: toca **Conectar** en el conector. Si lo agregaste antes de esto, desconéctalo y vuelve a agregarlo. |
+| *"Hay que entrar con Google"* | Lo mismo: no se completó el ingreso. |
 | *"La llave ya no sirve"* | Saliste de la app. Entra otra vez y copia una nueva. |
 | *"Tu acceso está desactivado"* | La administración desactivó tu cuenta en Usuarios. |
 | *"Tu acceso está pendiente"* | Todavía no te han aprobado en la app. |

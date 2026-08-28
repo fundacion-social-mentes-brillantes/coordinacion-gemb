@@ -201,6 +201,28 @@ export default async function handler(req: Req, res: Res) {
 
   const llave = llaveDe(req);
 
+  // Sin llave: se responde 401 diciendo dónde se entra con Google. Eso es lo
+  // que hace que el cliente ofrezca "Conectar" en vez de quedarse mudo.
+  // Excepción: initialize y las notificaciones, para que el saludo no falle.
+  if (!llave) {
+    const cuerpoPrevio = req.body;
+    const lista: Peticion[] = Array.isArray(cuerpoPrevio)
+      ? (cuerpoPrevio as Peticion[])
+      : [(cuerpoPrevio ?? {}) as Peticion];
+    const soloSaludo = lista.every((p) => saludo(p) !== undefined);
+    if (!soloSaludo) {
+      res.setHeader(
+        'WWW-Authenticate',
+        'Bearer realm="coordinacion-gemb", ' +
+          'resource_metadata="https://coordinacion-gemb.vercel.app/.well-known/oauth-protected-resource"',
+      );
+      res.status(401).json(
+        fallo(null, -32001, 'Hay que entrar con Google. Conecta el conector desde Claude.'),
+      );
+      return;
+    }
+  }
+
   // Se abre una sola vez por petición aunque vengan varias llamadas juntas.
   let abierta: Promise<Cliente> | null = null;
   const obtener = () => (abierta ??= abrirSesion(llave));

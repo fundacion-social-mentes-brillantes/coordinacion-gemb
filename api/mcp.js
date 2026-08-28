@@ -3089,6 +3089,21 @@ async function handler(req, res) {
     return;
   }
   const llave = llaveDe(req);
+  if (!llave) {
+    const cuerpoPrevio = req.body;
+    const lista = Array.isArray(cuerpoPrevio) ? cuerpoPrevio : [cuerpoPrevio ?? {}];
+    const soloSaludo = lista.every((p) => saludo(p) !== void 0);
+    if (!soloSaludo) {
+      res.setHeader(
+        "WWW-Authenticate",
+        'Bearer realm="coordinacion-gemb", resource_metadata="https://coordinacion-gemb.vercel.app/.well-known/oauth-protected-resource"'
+      );
+      res.status(401).json(
+        fallo(null, -32001, "Hay que entrar con Google. Conecta el conector desde Claude.")
+      );
+      return;
+    }
+  }
   let abierta = null;
   const obtener = () => abierta ??= abrirSesion(llave);
   const cuerpo = req.body;
