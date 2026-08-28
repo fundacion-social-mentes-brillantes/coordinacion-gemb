@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
 import { listenSessions } from '../services/sessions';
 import { listenAllAttendance } from '../services/attendance';
@@ -144,7 +145,12 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-bold text-primary-900">Panel de asistencia</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-lg font-bold text-primary-900">Panel de asistencia</h2>
+        <Link to="/conectar" className="chip bg-primary-100 text-primary-700">
+          🤖 Conectar con Claude
+        </Link>
+      </div>
 
       {/* Cuatro apartados: en el celular van en dos filas para que ninguna
           etiqueta se corte. */}

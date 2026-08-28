@@ -39,6 +39,9 @@ const ImportHistoryPage = lazy(() =>
 const UsersPage = lazy(() =>
   import('./pages/UsersPage').then((m) => ({ default: m.UsersPage })),
 );
+const ConnectPage = lazy(() =>
+  import('./pages/ConnectPage').then((m) => ({ default: m.ConnectPage })),
+);
 const NotFoundPage = lazy(() =>
   import('./pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })),
 );
@@ -60,6 +63,9 @@ export default function App() {
             <Route index element={<Navigate to="/sesiones" replace />} />
             <Route path="/sesiones" element={<SessionsPage />} />
             <Route path="/sesiones/:id" element={<AttendancePage />} />
+            {/* Conectar con Claude: cada quien saca su propia llave, y lo que
+                Claude puede hacer depende de su rol. También las coordinadoras. */}
+            <Route path="/conectar" element={<ConnectPage />} />
 
             {/* Solo administración (las coordinadoras solo usan Sesiones) */}
             <Route element={<RequireAuth allow={[...ADMIN]} />}>

@@ -1,193 +1,167 @@
 # MCP de Coordinación GEMB
 
-Para que **Claude pueda consultar la app** y responder preguntas como *"¿cuántas
-personas están haciendo Pasos últimamente?"*, *"¿quién dejó de venir?"* o
-*"¿cuántas fueron el jueves pasado?"* — sin que tengas que entrar, exportar nada
-ni contar a mano.
+Para poder preguntarle a Claude por la asistencia sin entrar a la app:
+*"¿cuántas personas están haciendo Pasos últimamente?"*, *"¿quién dejó de
+venir?"*, *"¿cuántas fueron el jueves?"*.
 
-> **Solo lee.** No crea sesiones, no marca asistencia, no corrige fichas.
-> Tampoco devuelve teléfonos ni las notas privadas de las personas.
-> (La única excepción está explicada abajo, en "La única escritura".)
+**Cada persona lo conecta a su propio Claude con su propia llave.** Lo que
+Claude puede hacer depende de quién es esa persona en la app.
+
+---
+
+## 🔑 Quién puede qué
+
+| | **Coordinador(a)** | **Administrador(a)** |
+| --- | :-: | :-: |
+| Ver reuniones y asistencia | ✅ | ✅ |
+| Ver cómo va el grupo (*¿Cómo vamos?*) | ✅ | ✅ |
+| Ver el historial de UNA persona | ❌ | ✅ |
+| Ver la bandeja de revisión | ❌ | ✅ |
+| Ver conteos generales | ❌ | ✅ |
+| **Crear reuniones** | ❌ | ✅ |
+| **Marcar / quitar asistencia** | ❌ | ✅ |
+| **Cerrar o reabrir reuniones** | ❌ | ✅ |
+| **Aprobar personas nuevas** | ❌ | ✅ |
+
+> ### Coordinación: **SOLO LECTURA**
+> Puede consultar, pero **no puede cambiar absolutamente nada** desde Claude.
+> Ni marcar asistencia, ni crear reuniones, ni tocar fichas. Eso se sigue
+> haciendo en la app, como siempre.
+>
+> ### Administración: **LECTURA Y ESCRITURA**
+> Puede consultar todo y además registrar y corregir — siempre con una
+> confirmación de por medio (ver abajo).
+
+Nadie ve teléfonos ni las notas privadas de las fichas. Ningún rol, nunca.
+
+### Esto se sostiene en dos puertas, no en una
+
+1. **El rol filtra las herramientas.** A una coordinadora ni siquiera se le
+   ofrecen las de escritura: no aparecen en su lista.
+2. **Las reglas de Firestore filtran los datos.** Aunque alguien se saltara la
+   primera puerta, seguiría pudiendo hacer exactamente lo que su cuenta puede
+   hacer en la app, ni más ni menos. No hay permisos duplicados aquí que se
+   puedan desincronizar con los de la app.
+
+---
+
+## ✍️ Las escrituras van en dos pasos
+
+Ninguna operación cambia nada de golpe. Primero se prepara un **borrador**:
+
+```
+BORRADOR — todavía no se ha guardado nada.
+
+MARCAR como presente:
+  María Fernanda Rodríguez
+  en Entrega de Pasos del 20 ago 2026 (Virtual)
+
+Si está bien, confírmalo con "confirmar_operacion" usando:
+confirmacion_id: eyJvcCI6Im1hcmNhcl9wcmVzZW50ZSIs…
+
+Caduca en 15 minutos.
+```
+
+Solo después de que la persona lo aprueba se ejecuta. Escribir en la base de
+una fundación no debería poder pasar por un malentendido en una frase.
+
+---
+
+## Puesta en marcha (cada persona, una vez, ~2 minutos)
+
+**No hay que configurar nada en Firebase, ni en Vercel, ni pedirle permiso a
+nadie.** Si ya entras a la app, ya puedes conectarlo.
+
+1. Entra a la app → **Sesiones** (o **Panel**) → **🤖 Conectar con Claude**
+2. Toca **Copiar mi llave**
+3. En [claude.ai](https://claude.ai) → Configuración → Conectores → *Agregar
+   conector personalizado*:
+   - URL: `https://coordinacion-gemb.vercel.app/api/mcp`
+   - Cabecera `Authorization` con valor `Bearer ` + tu llave
+4. Pregúntale *"¿con qué cuenta estás conectado?"* — debe responder con tu
+   nombre y tu rol.
+
+Funciona en **cualquier Claude**: el del celular, el de la web, el de
+escritorio, Claude Code. Es el mismo conector.
+
+### Para cortar el acceso
+
+- **Tú mismo:** sal de la app con el botón de salir. La llave deja de servir al
+  instante.
+- **La administración:** app → **Usuarios** → desactivar esa cuenta. Deja de
+  funcionar de inmediato, porque las reglas exigen `active == true`.
 
 ---
 
 ## Cómo entra a los datos, y por qué así
 
-Entra **como una usuaria más de la app**, con correo y contraseña, y por lo
-tanto **pasa por tus reglas de seguridad de Firestore** igual que cualquier
-coordinadora.
+Entra **como la propia persona**, reutilizando la sesión que ya abrió con
+Google en la app. Comparado con lo habitual (una llave de administrador del
+proyecto):
 
-Esto es a propósito, y es mejor que la alternativa habitual:
-
-| | Llave de cuenta de servicio | Cuenta de la app (lo que usamos) |
+| | Llave de cuenta de servicio | Cuenta de cada persona (lo que usamos) |
 | --- | --- | --- |
-| ¿La deja crear tu organización? | ❌ No (está bloqueada) | ✅ Sí |
+| ¿La deja crear tu organización? | ❌ No, está bloqueada | ✅ No hace falta |
 | ¿Respeta las reglas de Firestore? | ❌ Se las salta todas | ✅ Pasa por ellas |
-| ¿Cómo se revoca? | Consola de Google | ✅ Desde la app: Usuarios → desactivar |
-| ¿Hay un archivo que se pueda filtrar? | ⚠️ Sí | ✅ No |
+| ¿Distingue coordinación de administración? | ❌ Todos verían todo | ✅ Sí, por sí solo |
+| ¿Hay secretos guardados en el servidor? | ⚠️ Sí | ✅ Ninguno |
+| ¿Cómo se revoca? | Consola de Google | ✅ Desde la app |
 
----
-
-## Puesta en marcha (una sola vez, ~5 minutos)
-
-### Paso 1 — Activar el ingreso por correo en Firebase
-
-[Consola de Firebase](https://console.firebase.google.com/) → proyecto
-**coordinacion-gemb** → **Authentication** → pestaña **Sign-in method** →
-**Email/Password** → **Habilitar** → Guardar.
-
-> Es un interruptor. No tiene nada que ver con las claves de cuenta de servicio
-> que tu organización bloquea.
-
-### Paso 2 — Darle permiso dentro de la app
-
-Abre la app como administradora → **Usuarios** → **Pre-autorizar por correo**
-→ escribe `consultas@gimnasioemocionalmb.com` (o el correo que prefieras usar)
-→ rol **Coordinador(a)** → guardar.
-
-Sin esto, la cuenta entra a Firebase pero las reglas no la dejan leer nada.
-
-### Paso 3 — Guardar los datos en Vercel
-
-[vercel.com](https://vercel.com) → proyecto **coordinacion-gemb** → **Settings**
-→ **Environment Variables**. Agrega tres:
-
-| Nombre | Valor |
-| ------ | ----- |
-| `GEMB_EMAIL` | el mismo correo del paso 2 |
-| `GEMB_PASSWORD` | una contraseña larga que inventes (mínimo 6 caracteres) |
-| `GEMB_MCP_TOKEN` | una contraseña larga que inventes; es la que protege el servidor |
-
-Luego **Deployments** → en el último, menú `···` → **Redeploy** (para que tome
-las variables nuevas).
-
-### Paso 4 — Conectarlo a Claude
-
-En [claude.ai](https://claude.ai) → **Configuración** → **Conectores** →
-**Agregar conector personalizado**:
-
-- URL: `https://coordinacion-gemb.vercel.app/api/mcp`
-- Autenticación: cabecera `Authorization` con valor `Bearer TU_GEMB_MCP_TOKEN`
-
-Listo. A partir de ahí funciona **en cualquier conversación**: desde el celular,
-desde la web, desde donde sea.
-
----
-
-## Comprobar en qué vas
-
-Abre en el navegador **`https://coordinacion-gemb.vercel.app/api/mcp`**. Te
-dice qué falta, paso por paso:
-
-```json
-{
-  "estado": "en pie",
-  "configuracion": [
-    { "paso": "1. Ingreso por correo activado en Firebase",
-      "listo": false,
-      "falta": "Consola de Firebase → Authentication → Sign-in method…" },
-    { "paso": "2. Cuenta de consultas configurada (GEMB_EMAIL / GEMB_PASSWORD)",
-      "listo": false, "falta": "…" },
-    { "paso": "3. Token que protege este servidor (GEMB_MCP_TOKEN)",
-      "listo": false, "falta": "…" }
-  ]
-}
-```
-
-Cuando todo esté puesto, intenta entrar y leer de verdad, y lo dice:
-
-```json
-{ "estado": "en pie y funcionando",
-  "4. Acceso a los datos": { "listo": true,
-    "detalle": "Entra y lee correctamente (37 reuniones a la vista)." } }
-```
-
-El paso 1 se comprueba **contra Firebase de verdad**, sin necesitar ninguna
-credencial: se ve en verde en cuanto actives el interruptor, aunque todavía no
-hayas hecho nada más. Nunca muestra el valor de ninguna variable, solo si está
-puesta o no.
+El servidor **no guarda ningún secreto**: la llave llega en cada consulta, se
+canjea por un permiso de una hora y se descarta. Si el servidor se viera
+comprometido, no habría nada que robar.
 
 ---
 
 ## Si algo no funciona
 
-Cada mensaje dice qué arreglar:
-
 | Lo que dice | Qué hacer |
 | ----------- | --------- |
-| *"Falta activar el ingreso por correo…"* | Paso 1. |
-| *"…ya existe pero la contraseña no coincide"* | Corrige `GEMB_PASSWORD`, o cámbiala en Firebase → Authentication → Users. |
-| *"…todavía no tiene permiso dentro de la app"* | Paso 2: falta pre-autorizar ese correo. |
-| *"Faltan GEMB_EMAIL y GEMB_PASSWORD"* | Paso 3, y acuérdate de volver a desplegar. |
-| *"Token inválido o ausente"* | El `Bearer` del paso 4 no coincide con `GEMB_MCP_TOKEN`. |
-| *PERMISSION_DENIED* | La cuenta quedó desactivada en la app (Usuarios) o le quitaron el rol. |
+| *"Falta la llave personal"* | No pegaste la cabecera `Authorization`, o le falta el `Bearer `. |
+| *"La llave ya no sirve"* | Saliste de la app. Entra otra vez y copia una nueva. |
+| *"Tu acceso está desactivado"* | La administración desactivó tu cuenta en Usuarios. |
+| *"Tu acceso está pendiente"* | Todavía no te han aprobado en la app. |
+| *"… es solo para administración"* | Correcto: entras como coordinador(a). |
+| *"El borrador caducó"* | Pasaron más de 15 minutos. Prepáralo de nuevo. |
 
-**Para cortarle el acceso en cualquier momento:** app → **Usuarios** →
-desactiva esa cuenta. Deja de leer al instante, sin tocar nada más.
-
----
-
-## La cuenta se crea sola
-
-No hay que crearla a mano en Firebase: la primera vez que el servidor intenta
-entrar, si esa cuenta no existe **la crea** con el correo y la contraseña que
-pusiste en Vercel. Si ya existía y la contraseña no coincide, lo dice en vez de
-tocar nada.
-
----
-
-## La única escritura
-
-Las reglas exigen que exista `users/{uid}` con un rol para poder leer. Esta
-cuenta nunca entra por la pantalla de la app, así que ese documento no se crea
-solo: **el servidor lo crea una única vez**, la primera vez que consulta, y solo
-funciona si antes hiciste el paso 3. Es la única escritura de todo el proyecto y
-está en `rest.ts` (`registrarse`).
+Comprueba que el servidor está en pie abriendo
+`https://coordinacion-gemb.vercel.app/api/mcp` en el navegador.
 
 ---
 
 ## Lo que puede responder
 
-| Herramienta | Para qué sirve |
-| ----------- | -------------- |
-| `como_vamos` | **La principal.** Cuántas personas vienen últimamente, si subió o bajó, promedio por reunión y los grupos con nombres. |
-| `conteos` | Totales: personas en la lista, reuniones hechas, cuántas esperan revisión. |
-| `reuniones` | Las últimas reuniones con fecha, modalidad, coordinadora y asistentes. |
-| `asistencia_reunion` | La lista de presentes de una reunión concreta. |
-| `buscar_persona` | Encuentra a alguien por nombre (tolera tildes y orden de palabras). |
-| `historial_persona` | Todas sus asistencias y su porcentaje. |
-| `por_revisar` | Personas que agregó una coordinadora y aún no entran a la lista oficial. |
-| `refrescar` | Vuelve a leer todo, por si acaban de tomar asistencia. |
+**Consulta (todos los roles):** `quien_soy`, `como_vamos`, `reuniones`,
+`asistencia_reunion`, `refrescar`.
 
-Es **el mismo cálculo** que muestra el apartado "¿Cómo vamos?" del Panel: vive
-en un solo sitio (`src/lib/activity.ts`), así que la app y Claude no pueden
-decir números distintos.
+**Consulta (solo administración):** `conteos`, `buscar_persona`,
+`historial_persona`, `por_revisar`.
+
+**Escritura (solo administración, en dos pasos):**
+`preparar_crear_reunion`, `preparar_marcar_presente`,
+`preparar_quitar_presente`, `preparar_cerrar_reunion`,
+`preparar_aprobar_persona`, y `confirmar_operacion` para ejecutar.
+
+Los informes usan **el mismo cálculo** que el apartado "¿Cómo vamos?" del
+Panel: vive en un solo sitio (`src/lib/activity.ts`), así que la app y Claude
+no pueden decir números distintos.
 
 ---
 
 ## Para quien mantenga esto
 
-- `mcp/src/http.ts` — el servidor por HTTP. JSON-RPC a mano y sin estado, que
-  es lo que encaja con una función que se apaga entre llamadas.
-- `api/mcp.js` — **generado**, no se edita a mano: es http.ts empaquetado con
-  todo dentro (`npm run build:api`, incluido en `npm run build`). Va versionado
-  porque Vercel compila cada archivo de api/ por separado y no arrastra los
-  módulos de otras carpetas.
-- `mcp/src/rest.ts` — entrada por Firebase Auth y lectura de Firestore por su
-  API REST. **Sin dependencias**: solo `fetch`.
-- `mcp/src/herramientas.ts` — el registro de herramientas, definido una vez y
-  compartido por los dos servidores.
+- `mcp/src/rest.ts` — entrada por Firebase Auth (canjea la llave de la persona)
+  y lectura/escritura de Firestore por su API REST. **Sin dependencias**: solo
+  `fetch`. Las coordinadoras no pasan de `exigirAdmin`.
+- `mcp/src/herramientas.ts` — el registro de herramientas y su alcance
+  (`todos` / `admin` / `escribir`).
+- `mcp/src/escrituras.ts` — las operaciones que modifican, con el borrador y la
+  confirmación. El borrador viaja dentro del `confirmacion_id`, así que el
+  servidor no recuerda nada entre llamadas.
 - `mcp/src/informes.ts` — el texto de cada respuesta. Lógica pura, probada con
   datos armados a mano.
-- `mcp/src/index.ts` — el mismo servidor por terminal, para desarrollar.
-
-Alternativa por terminal (útil para desarrollar):
-
-```bash
-cd mcp && npm install && npm run build
-GEMB_EMAIL=… GEMB_PASSWORD=… node dist/index.js
-```
-
-El [`.mcp.json`](../.mcp.json) de la raíz lo deja registrado para Claude Code
-local. Recuerda exportar las variables **antes** de abrir Claude Code: el
-servidor las hereda de la terminal al arrancar.
+- `mcp/src/http.ts` — el servidor HTTP. **Fuente**; lo que se despliega es
+  `api/mcp.js`, generado con `npm run build:api` (Vercel compila cada archivo
+  de `api/` por separado y no arrastra módulos de otras carpetas).
+- `mcp/src/index.ts` — el mismo servidor por terminal (`GEMB_LLAVE=… node
+  dist/index.js`), para desarrollar.

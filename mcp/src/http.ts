@@ -1,31 +1,25 @@
-import {
-  CATALOGO,
-  buscarHerramienta,
-} from './herramientas';
-import {
-  AccesoError,
-  ConfigError,
-  cargarSesiones,
-  ingresoPorCorreoActivado,
-} from './rest';
+import { buscarHerramienta, catalogoPara, permitida } from './herramientas';
+import { AccesoError, ConfigError, abrirSesion, type Cliente } from './rest';
 
 // ---------------------------------------------------------------------------
 //  Servidor MCP por HTTP, desplegado junto a la app en Vercel.
 //
-//  Existe para que las consultas funcionen desde CUALQUIER sitio —el celular,
-//  Claude Code web, otro computador— y no solo desde la máquina donde alguien
-//  dejó unas credenciales. Los datos de la cuenta de lectura viven en las
-//  variables de entorno de Vercel; nunca viajan por el chat.
+//  Cada persona lo conecta a SU Claude con SU propia llave, sacada de la app.
+//  El servidor no guarda ningún secreto: la llave llega en cada petición, se
+//  canjea por un permiso de una hora y se descarta. Si el servidor se ve
+//  comprometido, no hay nada que robar.
+//
+//  Quién ve qué lo deciden dos capas, no este archivo:
+//    1. El rol de la persona en la app filtra la lista de herramientas.
+//    2. Las reglas de Firestore filtran los datos de verdad.
 //
 //  Protocolo JSON-RPC escrito a mano y sin estado: es lo que encaja con una
-//  función que se apaga entre llamada y llamada, y evita arrastrar
-//  dependencias que harían lento el arranque en frío.
+//  función que se apaga entre llamada y llamada.
 //
 //  Este archivo es la FUENTE. Lo que Vercel despliega es api/mcp.js, que se
-//  genera empaquetando todo en uno solo (npm run build:api). Hace falta
-//  porque Vercel compila cada archivo de api/ por separado y no arrastra los
-//  módulos de otras carpetas: al desplegarlo sin empaquetar, la función
-//  arrancaba y moría con ERR_MODULE_NOT_FOUND.
+//  genera empaquetando todo en uno solo (npm run build:api): Vercel compila
+//  cada archivo de api/ por separado y no arrastra los módulos de otras
+//  carpetas.
 // ---------------------------------------------------------------------------
 
 const VERSION_PROTOCOLO = '2024-11-05';
@@ -43,45 +37,88 @@ const fallo = (id: Peticion['id'], code: number, message: string) => ({
   id,
   error: { code, message },
 });
+const respuestaTexto = (id: Peticion['id'], texto: string, esError = false) =>
+  ok(id, { content: [{ type: 'text', text: texto }], ...(esError ? { isError: true } : {}) });
 
-async function atender(p: Peticion): Promise<object | null> {
+/**
+ * Métodos que se atienden ANTES de validar la llave, para que añadir el
+ * conector no falle en el saludo inicial y el error salga donde se lee.
+ */
+function saludo(p: Peticion): object | null | undefined {
   switch (p.method) {
     case 'initialize':
       return ok(p.id, {
         protocolVersion: VERSION_PROTOCOLO,
         capabilities: { tools: {} },
-        serverInfo: { name: 'coordinacion-gemb', version: '2.0.0' },
+        serverInfo: { name: 'coordinacion-gemb', version: '3.0.0' },
       });
-
-    // Las notificaciones no llevan respuesta.
     case 'notifications/initialized':
     case 'notifications/cancelled':
       return null;
-
     case 'ping':
       return ok(p.id, {});
+    default:
+      return undefined;
+  }
+}
 
+async function atender(p: Peticion, obtener: () => Promise<Cliente>): Promise<object | null> {
+  const previo = saludo(p);
+  if (previo !== undefined) return previo;
+
+  let cliente: Cliente;
+  try {
+    cliente = await obtener();
+  } catch (e) {
+    const mensaje =
+      e instanceof ConfigError || e instanceof AccesoError
+        ? e.message
+        : `No se pudo validar la llave: ${e instanceof Error ? e.message : String(e)}`;
+    // Como texto y no como fallo de protocolo: así el mensaje (que dice cómo
+    // arreglarlo) llega a la persona en vez de morir en el transporte.
+    if (p.method === 'tools/list') return ok(p.id, { tools: [] });
+    return respuestaTexto(p.id, mensaje, true);
+  }
+
+  switch (p.method) {
     case 'tools/list':
-      return ok(p.id, { tools: CATALOGO });
+      return ok(p.id, { tools: catalogoPara(cliente) });
 
     case 'tools/call': {
       const nombre = String(p.params?.name ?? '');
       const herramienta = buscarHerramienta(nombre);
       if (!herramienta) return fallo(p.id, -32602, `No existe la herramienta "${nombre}".`);
 
-      const args = (p.params?.arguments ?? {}) as Record<string, unknown>;
+      if (!permitida(herramienta, cliente)) {
+        return respuestaTexto(
+          p.id,
+          `"${nombre}" es solo para administración, y tu cuenta (${cliente.email}) ` +
+            'entra como coordinador(a). Puedes consultar las reuniones y cómo va ' +
+            'el grupo; el detalle de una persona concreta y la bandeja de revisión, no.',
+          true,
+        );
+      }
+
       try {
-        const texto = await herramienta.ejecutar(args);
-        return ok(p.id, { content: [{ type: 'text', text: texto }] });
+        const texto = await herramienta.ejecutar(
+          cliente,
+          (p.params?.arguments ?? {}) as Record<string, unknown>,
+        );
+        return respuestaTexto(p.id, texto);
       } catch (e) {
-        // Los problemas de configuración o de permisos se devuelven como
-        // resultado con isError, no como fallo del protocolo: así el mensaje
-        // (que dice cómo arreglarlo) llega a quien puede hacerlo.
+        if (e instanceof AccesoError && e.message === 'PERMISSION_DENIED') {
+          return respuestaTexto(
+            p.id,
+            'Las reglas de la app no dejan a tu cuenta leer eso. Si crees que ' +
+              'debería, pide que revisen tu rol en Usuarios.',
+            true,
+          );
+        }
         const mensaje =
           e instanceof ConfigError || e instanceof AccesoError
             ? e.message
             : `No se pudo consultar: ${e instanceof Error ? e.message : String(e)}`;
-        return ok(p.id, { content: [{ type: 'text', text: mensaje }], isError: true });
+        return respuestaTexto(p.id, mensaje, true);
       }
     }
 
@@ -106,61 +143,15 @@ export default async function handler(req: Req, res: Res) {
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {
-    // Sonda de vida, y una lista de comprobación para saber qué falta por
-    // configurar. Solo dice SI cada pieza está puesta, nunca su valor, y los
-    // mensajes son los mismos que ya devuelve la herramienta.
-    const pasos: { paso: string; listo: boolean; falta?: string }[] = [
-      {
-        paso: '1. Ingreso por correo activado en Firebase',
-        listo: await ingresoPorCorreoActivado(),
-        falta:
-          'Consola de Firebase → Authentication → Sign-in method → ' +
-          'Email/Password → Habilitar. Es un interruptor, no una clave de ' +
-          'cuenta de servicio.',
-      },
-      {
-        paso: '2. Cuenta de consultas configurada (GEMB_EMAIL / GEMB_PASSWORD)',
-        listo: !!(process.env.GEMB_EMAIL && process.env.GEMB_PASSWORD),
-        falta: 'Agrégalas en Vercel → Settings → Environment Variables y vuelve a desplegar.',
-      },
-      {
-        paso: '3. Token que protege este servidor (GEMB_MCP_TOKEN)',
-        listo: !!process.env.GEMB_MCP_TOKEN,
-        falta: 'Inventa una contraseña larga y agrégala igual que las anteriores.',
-      },
-    ];
-
-    // Si lo anterior está puesto, se prueba de verdad: entrar y leer algo.
-    let lectura: { listo: boolean; detalle: string } | undefined;
-    if (pasos.every((p) => p.listo)) {
-      try {
-        const s = await cargarSesiones();
-        lectura = {
-          listo: true,
-          detalle: `Entra y lee correctamente (${s.length} reuniones a la vista).`,
-        };
-      } catch (e) {
-        lectura = {
-          listo: false,
-          detalle:
-            e instanceof ConfigError || e instanceof AccesoError
-              ? e.message
-              : `No se pudo leer: ${e instanceof Error ? e.message : String(e)}`,
-        };
-      }
-    }
-
-    const todoListo = pasos.every((p) => p.listo) && lectura?.listo === true;
+    // Sonda de vida. No revela nada: quién puede consultar depende de la llave
+    // que traiga cada quien, no de una configuración del servidor.
     res.status(200).json({
       nombre: 'coordinacion-gemb',
       mcp: VERSION_PROTOCOLO,
-      estado: todoListo ? 'en pie y funcionando' : 'en pie',
-      configuracion: pasos.map((p) => ({
-        paso: p.paso,
-        listo: p.listo,
-        ...(p.listo ? {} : { falta: p.falta }),
-      })),
-      ...(lectura ? { '4. Acceso a los datos': lectura } : {}),
+      estado: 'en pie',
+      como_conectar:
+        'Cada persona usa su propia llave: app → Panel → "Conectar con Claude". ' +
+        'Se pega como cabecera Authorization: Bearer <llave>.',
     });
     return;
   }
@@ -169,32 +160,25 @@ export default async function handler(req: Req, res: Res) {
     return;
   }
 
-  // Sin token configurado, el servidor no atiende: mejor cerrado que abierto.
-  const esperado = process.env.GEMB_MCP_TOKEN;
-  if (!esperado) {
-    res.status(503).json(
-      fallo(null, -32000, 'Falta GEMB_MCP_TOKEN en el servidor: nadie puede consultar todavía.'),
-    );
-    return;
-  }
   const cabecera = req.headers.authorization;
-  const recibido = (Array.isArray(cabecera) ? cabecera[0] : cabecera ?? '')
+  const llave = (Array.isArray(cabecera) ? cabecera[0] : cabecera ?? '')
     .replace(/^Bearer\s+/i, '')
     .trim();
-  if (recibido !== esperado) {
-    res.setHeader('WWW-Authenticate', 'Bearer');
-    res.status(401).json(fallo(null, -32001, 'Token inválido o ausente.'));
-    return;
-  }
+
+  // Se abre una sola vez por petición aunque vengan varias llamadas juntas.
+  let abierta: Promise<Cliente> | null = null;
+  const obtener = () => (abierta ??= abrirSesion(llave));
 
   const cuerpo = req.body;
   const peticiones: Peticion[] = Array.isArray(cuerpo)
     ? (cuerpo as Peticion[])
     : [(cuerpo ?? {}) as Peticion];
 
-  const respuestas = (await Promise.all(peticiones.map(atender))).filter(
-    (r): r is object => r !== null,
-  );
+  const respuestas: object[] = [];
+  for (const p of peticiones) {
+    const r = await atender(p, obtener);
+    if (r !== null) respuestas.push(r);
+  }
 
   if (respuestas.length === 0) {
     res.status(202).end();

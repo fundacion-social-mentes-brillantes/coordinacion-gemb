@@ -6,134 +6,36 @@ var ConfigError = class extends Error {
 };
 var AccesoError = class extends Error {
 };
-var sesion = null;
-async function entrar() {
-  if (sesion && sesion.expira > Date.now() + 6e4) return sesion;
-  const email = process.env.GEMB_EMAIL?.trim();
-  const password = process.env.GEMB_PASSWORD;
-  if (!email || !password) {
-    throw new ConfigError(
-      "Faltan GEMB_EMAIL y GEMB_PASSWORD: son los datos de la cuenta de solo lectura que la app usa para consultar. Ver mcp/README.md."
-    );
-  }
-  let data = await llamarAuth("signInWithPassword", email, password);
-  const codigoEntrada = data.error?.message ?? "";
-  if (!data.idToken && (codigoEntrada.startsWith("EMAIL_NOT_FOUND") || codigoEntrada.startsWith("INVALID_LOGIN_CREDENTIALS"))) {
-    const alta = await llamarAuth("signUp", email, password);
-    if (alta.idToken) {
-      data = alta;
-    } else if ((alta.error?.message ?? "").startsWith("EMAIL_EXISTS")) {
-      throw new ConfigError(
-        `La cuenta ${email} ya existe pero la contrase\xF1a guardada no coincide. Corrige GEMB_PASSWORD en Vercel, o cambia la contrase\xF1a desde Firebase \u2192 Authentication \u2192 Users.`
-      );
-    } else {
-      throw new ConfigError(mensajeDeEntrada(alta.error?.message ?? codigoEntrada, email));
-    }
-  }
-  if (!data.idToken) {
-    throw new ConfigError(mensajeDeEntrada(codigoEntrada || "ERROR", email));
-  }
-  sesion = {
-    idToken: data.idToken,
-    uid: data.localId ?? "",
-    email,
-    expira: Date.now() + Number(data.expiresIn ?? 3600) * 1e3
-  };
-  return sesion;
-}
-async function llamarAuth(metodo, email, password) {
-  const r = await fetch(
-    `https://identitytoolkit.googleapis.com/v1/accounts:${metodo}?key=${API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, returnSecureToken: true })
-    }
-  );
-  return await r.json();
-}
-function mensajeDeEntrada(codigo, email) {
-  if (codigo.startsWith("PASSWORD_LOGIN_DISABLED") || codigo.startsWith("OPERATION_NOT_ALLOWED") || codigo.startsWith("ADMIN_ONLY_OPERATION")) {
-    return "Falta activar el ingreso por correo y contrase\xF1a en Firebase: consola de Firebase \u2192 Authentication \u2192 Sign-in method \u2192 Email/Password \u2192 Habilitar. (Es un interruptor; no tiene nada que ver con las claves de cuenta de servicio que tu organizaci\xF3n bloquea.)";
-  }
-  if (codigo.startsWith("INVALID_PASSWORD")) {
-    return `La contrase\xF1a guardada para ${email} no coincide. Corrige GEMB_PASSWORD en Vercel \u2192 Settings \u2192 Environment Variables.`;
-  }
-  if (codigo.startsWith("WEAK_PASSWORD")) {
-    return "La contrase\xF1a es demasiado corta para crear la cuenta: usa al menos 6 caracteres (mejor si es larga) en GEMB_PASSWORD.";
-  }
-  if (codigo.startsWith("USER_DISABLED")) {
-    return `La cuenta ${email} est\xE1 deshabilitada en Firebase.`;
-  }
-  if (codigo.startsWith("TOO_MANY_ATTEMPTS")) {
-    return "Firebase bloque\xF3 temporalmente los intentos. Espera unos minutos.";
-  }
-  return `No se pudo entrar como ${email}: ${codigo}`;
-}
-async function ingresoPorCorreoActivado() {
-  try {
-    const r = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: "comprobacion-de-configuracion@example.invalid",
-          password: "no-es-una-contrasena-real",
-          returnSecureToken: true
-        })
-      }
-    );
-    const d = await r.json();
-    return !(d.error?.message ?? "").startsWith("PASSWORD_LOGIN_DISABLED");
-  } catch {
-    return true;
-  }
-}
-async function registrarse(s) {
-  const invite = await pedir(
-    `${DOCS}/invites/${encodeURIComponent(s.email.toLowerCase())}`,
-    s,
-    true
-  );
-  const rol = invite && typeof invite === "object" ? invite.fields?.role?.stringValue ?? "" : "";
-  if (!rol) {
-    throw new AccesoError(
-      `La cuenta ${s.email} todav\xEDa no tiene permiso dentro de la app. Entra a la app como administradora \u2192 Usuarios \u2192 "Pre-autorizar por correo" \u2192 ${s.email} con rol Coordinador(a). Despu\xE9s vuelve a intentar.`
-    );
-  }
-  const r = await fetch(`${DOCS}/users/${s.uid}`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${s.idToken}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      fields: {
-        email: { stringValue: s.email },
-        displayName: { stringValue: "Consultas (Claude)" },
-        photoURL: { stringValue: "" },
-        role: { stringValue: rol },
-        active: { booleanValue: true },
-        createdAt: { timestampValue: (/* @__PURE__ */ new Date()).toISOString() }
-      }
-    })
+async function canjear(llave) {
+  const r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${API_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(llave)}`
   });
-  if (!r.ok) {
-    throw new AccesoError(
-      `No se pudo registrar la cuenta ${s.email} dentro de la app (HTTP ${r.status}). Comprueba que la pre-autorizaci\xF3n existe y que el rol es "admin" o "coordinador".`
-    );
+  const d = await r.json();
+  if (!r.ok || !d.id_token) {
+    const codigo = d.error?.message ?? `HTTP ${r.status}`;
+    if (codigo.startsWith("TOKEN_EXPIRED") || codigo.startsWith("USER_NOT_FOUND") || codigo.startsWith("INVALID_REFRESH_TOKEN") || codigo.startsWith("INVALID_GRANT_TYPE")) {
+      throw new AccesoError(
+        'La llave ya no sirve (caduc\xF3, o cerraste la sesi\xF3n en la app). Entra a la app \u2192 Panel \u2192 "Conectar con Claude" y copia una nueva.'
+      );
+    }
+    if (codigo.startsWith("USER_DISABLED")) {
+      throw new AccesoError("Esta cuenta est\xE1 deshabilitada.");
+    }
+    throw new AccesoError(`No se pudo validar la llave: ${codigo}`);
   }
+  return {
+    idToken: d.id_token,
+    uid: d.user_id ?? "",
+    expira: Date.now() + Number(d.expires_in ?? 3600) * 1e3
+  };
 }
-async function pedir(url, s, toleraFalta = false) {
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${s.idToken}` } });
+async function pedir(url, idToken, toleraFalta = false) {
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
   if (r.status === 404 && toleraFalta) return null;
-  if (r.status === 403) {
-    throw new AccesoError("PERMISSION_DENIED");
-  }
-  if (!r.ok) {
-    throw new AccesoError(`Firestore respondi\xF3 HTTP ${r.status} en ${url}`);
-  }
+  if (r.status === 403) throw new AccesoError("PERMISSION_DENIED");
+  if (!r.ok) throw new AccesoError(`Firestore respondi\xF3 HTTP ${r.status}`);
   return r.json();
 }
 function valor(v) {
@@ -146,8 +48,7 @@ function valor(v) {
   if ("timestampValue" in o) return new Date(o.timestampValue);
   if ("nullValue" in o) return null;
   if ("arrayValue" in o) {
-    const a = o.arrayValue.values ?? [];
-    return a.map(valor);
+    return (o.arrayValue.values ?? []).map(valor);
   }
   if ("mapValue" in o) {
     return campos(o.mapValue.fields);
@@ -164,18 +65,18 @@ function aObjeto(d) {
   const id = d.name.split("/").pop() ?? "";
   return { ...campos(d.fields), id };
 }
-async function coleccion(nombre, s) {
+async function coleccion(nombre, idToken) {
   const salida = [];
   let token = "";
   do {
     const url = `${DOCS}/${nombre}?pageSize=300${token ? `&pageToken=${token}` : ""}`;
-    const r = await pedir(url, s);
+    const r = await pedir(url, idToken);
     for (const d of r.documents ?? []) salida.push(aObjeto(d));
     token = r.nextPageToken ?? "";
   } while (token);
   return salida;
 }
-async function todaLaAsistencia(s) {
+async function todaLaAsistencia(idToken) {
   const salida = [];
   const TANDA = 1e3;
   let ultimo = null;
@@ -186,17 +87,11 @@ async function todaLaAsistencia(s) {
       limit: TANDA
     };
     if (ultimo) {
-      structuredQuery.startAt = {
-        values: [{ referenceValue: ultimo }],
-        before: false
-      };
+      structuredQuery.startAt = { values: [{ referenceValue: ultimo }], before: false };
     }
     const r = await fetch(`${DOCS}:runQuery`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${s.idToken}`,
-        "Content-Type": "application/json"
-      },
+      headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ structuredQuery })
     });
     if (r.status === 403) throw new AccesoError("PERMISSION_DENIED");
@@ -211,42 +106,132 @@ async function todaLaAsistencia(s) {
 }
 var TTL_MS = 6e4;
 var cache = /* @__PURE__ */ new Map();
-async function cacheado(clave, cargar) {
-  const hit = cache.get(clave);
-  if (hit && hit.hasta > Date.now()) return hit.valor;
-  const valor2 = await cargar();
-  cache.set(clave, { valor: valor2, hasta: Date.now() + TTL_MS });
-  return valor2;
+function limpiarVencidos() {
+  const ahora = Date.now();
+  for (const [k, v] of cache) if (v.hasta <= ahora) cache.delete(k);
 }
-function limpiarCache() {
-  cache.clear();
-  sesion = null;
-  registrado = false;
+async function abrirSesion(llave) {
+  if (!llave || llave.length < 20) {
+    throw new ConfigError(
+      'Falta la llave personal. Entra a la app \u2192 Panel \u2192 "Conectar con Claude" y copia la tuya.'
+    );
+  }
+  limpiarVencidos();
+  const cred = await canjear(llave);
+  const yo = await pedir(`${DOCS}/users/${cred.uid}`, cred.idToken, true);
+  if (!yo) {
+    throw new AccesoError(
+      "Tu cuenta todav\xEDa no est\xE1 dada de alta en la app. Entra una vez a la app con Google y pide que te aprueben."
+    );
+  }
+  const perfil = campos(yo.fields);
+  if (perfil.active === false) {
+    throw new AccesoError("Tu acceso est\xE1 desactivado en la app. Habla con la administraci\xF3n.");
+  }
+  const rol = perfil.role ?? "pending";
+  if (rol === "pending") {
+    throw new AccesoError("Tu acceso est\xE1 pendiente de aprobaci\xF3n en la app.");
+  }
+  const esAdmin = rol === "admin" || rol === "super_admin";
+  const clave = (sufijo) => `${cred.uid}:${sufijo}`;
+  async function cacheado(sufijo, cargar) {
+    const k = clave(sufijo);
+    const hit = cache.get(k);
+    if (hit && hit.hasta > Date.now()) return hit.valor;
+    const v = await cargar();
+    cache.set(k, { valor: v, hasta: Date.now() + TTL_MS });
+    return v;
+  }
+  return {
+    uid: cred.uid,
+    email: perfil.email ?? "",
+    nombre: perfil.displayName || perfil.email || "Sin nombre",
+    rol,
+    esAdmin,
+    cargarSesiones: () => cacheado("sessions", () => coleccion("sessions", cred.idToken)),
+    cargarAsistencia: () => cacheado("attendance", () => todaLaAsistencia(cred.idToken)),
+    cargarPersonas: () => cacheado("members", async () => {
+      const todas = await coleccion("members", cred.idToken);
+      return todas.map(({ phone: _p, notes: _n, ...resto }) => resto);
+    }),
+    async escribir(ruta, datos, mascara) {
+      exigirAdmin(esAdmin);
+      await escribirDoc(ruta, datos, cred.idToken, mascara);
+      olvidar(cred.uid);
+    },
+    async borrar(ruta) {
+      exigirAdmin(esAdmin);
+      await borrarDoc(ruta, cred.idToken);
+      olvidar(cred.uid);
+    }
+  };
 }
-var registrado = false;
-async function listo() {
-  const s = await entrar();
-  if (registrado) return s;
-  const yo = await pedir(`${DOCS}/users/${s.uid}`, s, true).catch((e) => {
-    if (e instanceof AccesoError && e.message === "PERMISSION_DENIED") return null;
-    throw e;
+function aValorRest(v) {
+  if (v === null || v === void 0) return { nullValue: null };
+  if (v instanceof Date) return { timestampValue: v.toISOString() };
+  if (typeof v === "string") return { stringValue: v };
+  if (typeof v === "boolean") return { booleanValue: v };
+  if (typeof v === "number") {
+    return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  }
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(aValorRest) } };
+  if (typeof v === "object") {
+    const fields = {};
+    for (const [k, x] of Object.entries(v)) fields[k] = aValorRest(x);
+    return { mapValue: { fields } };
+  }
+  return { stringValue: String(v) };
+}
+async function escribirDoc(ruta, datos, idToken, mascara) {
+  const fields = {};
+  for (const [k, v] of Object.entries(datos)) fields[k] = aValorRest(v);
+  const query = mascara?.length ? "?" + mascara.map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`).join("&") : "";
+  const r = await fetch(`${DOCS}/${ruta}${query}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ fields })
   });
-  if (!yo) await registrarse(s);
-  registrado = true;
-  return s;
+  if (r.status === 403) throw new AccesoError("PERMISSION_DENIED");
+  if (!r.ok) {
+    throw new AccesoError(`No se pudo guardar (HTTP ${r.status}) en ${ruta}`);
+  }
 }
-async function cargarSesiones() {
-  return cacheado("sessions", async () => coleccion("sessions", await listo()));
-}
-async function cargarAsistencia() {
-  return cacheado("attendance", async () => todaLaAsistencia(await listo()));
-}
-async function cargarPersonas() {
-  return cacheado("members", async () => {
-    const todas = await coleccion("members", await listo());
-    return todas.map(({ phone: _p, notes: _n, ...resto }) => resto);
+async function borrarDoc(ruta, idToken) {
+  const r = await fetch(`${DOCS}/${ruta}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${idToken}` }
   });
+  if (r.status === 403) throw new AccesoError("PERMISSION_DENIED");
+  if (!r.ok && r.status !== 404) {
+    throw new AccesoError(`No se pudo borrar (HTTP ${r.status}) ${ruta}`);
+  }
 }
+function exigirAdmin(esAdmin) {
+  if (!esAdmin) {
+    throw new AccesoError(
+      "Tu cuenta entra como coordinador(a): solo lectura. Registrar o corregir cosas es de administraci\xF3n, y se hace desde la app."
+    );
+  }
+}
+function olvidar(uid) {
+  for (const k of [...cache.keys()]) if (k.startsWith(`${uid}:`)) cache.delete(k);
+}
+
+// src/lib/normalize.ts
+var DIACRITICS = new RegExp("[\\u0300-\\u036f]", "g");
+function normalizeText(input) {
+  return (input || "").normalize("NFD").replace(DIACRITICS, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// src/lib/constants.ts
+var SESSION_TYPE_LABELS = {
+  entrega_pasos: "Entrega de Pasos",
+  reduccion_ego: "Sala de Reducci\xF3n del Ego"
+};
+var MODALITY_LABELS = {
+  virtual: "Virtual",
+  presencial: "Presencial"
+};
 
 // node_modules/date-fns/toDate.mjs
 function toDate(argument) {
@@ -2265,16 +2250,6 @@ function toDate2(value) {
 }
 var fmtDate = (v) => format(toDate2(v), "d MMM yyyy", { locale: es });
 
-// src/lib/constants.ts
-var SESSION_TYPE_LABELS = {
-  entrega_pasos: "Entrega de Pasos",
-  reduccion_ego: "Sala de Reducci\xF3n del Ego"
-};
-var MODALITY_LABELS = {
-  virtual: "Virtual",
-  presencial: "Presencial"
-};
-
 // src/lib/activity.ts
 var GROUP_ORDER = [
   "firmes",
@@ -2449,12 +2424,6 @@ function resumenActividad(r, conNombres = true) {
   return lineas.join("\n");
 }
 
-// src/lib/normalize.ts
-var DIACRITICS = new RegExp("[\\u0300-\\u036f]", "g");
-function normalizeText(input) {
-  return (input || "").normalize("NFD").replace(DIACRITICS, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
-}
-
 // mcp/src/informes.ts
 var TIPOS = {
   pasos: "entrega_pasos",
@@ -2550,14 +2519,237 @@ function informePorRevisar(personas) {
   ).join("\n");
 }
 
+// mcp/src/escrituras.ts
+var VIGENCIA_MS = 15 * 6e4;
+function empaquetar(o) {
+  return Buffer.from(JSON.stringify(o), "utf8").toString("base64url");
+}
+function desempaquetar(id, uid) {
+  let o;
+  try {
+    o = JSON.parse(Buffer.from(id, "base64url").toString("utf8"));
+  } catch {
+    throw new AccesoError("Ese identificador de confirmaci\xF3n no es v\xE1lido.");
+  }
+  if (o.uid !== uid) {
+    throw new AccesoError("Esa operaci\xF3n la prepar\xF3 otra cuenta. Prep\xE1rala de nuevo.");
+  }
+  if (Date.now() > o.exp) {
+    throw new AccesoError("El borrador caduc\xF3 (dura 15 minutos). Prep\xE1ralo de nuevo.");
+  }
+  return o;
+}
+function borrador(uid, op, args, resumen) {
+  const o = { op, args, uid, exp: Date.now() + VIGENCIA_MS, resumen };
+  return [
+    "BORRADOR \u2014 todav\xEDa no se ha guardado nada.",
+    "",
+    resumen,
+    "",
+    'Si est\xE1 bien, conf\xEDrmalo con la herramienta "confirmar_operacion" usando:',
+    `confirmacion_id: ${empaquetar(o)}`,
+    "",
+    "Caduca en 15 minutos."
+  ].join("\n");
+}
+function idNuevo() {
+  const abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let s = "";
+  for (let i = 0; i < 20; i++) s += abc[Math.floor(Math.random() * abc.length)];
+  return s;
+}
+async function prepararCrearReunion(c, tipo, modalidad, fecha, coordinadora) {
+  const d = /* @__PURE__ */ new Date(`${fecha}T12:00:00`);
+  if (isNaN(d.getTime())) throw new AccesoError(`La fecha "${fecha}" no se entiende. Usa AAAA-MM-DD.`);
+  const type = TIPOS[tipo];
+  const yaHay = (await c.cargarSesiones()).filter(
+    (s) => s.type === type && toDate2(s.date).toDateString() === d.toDateString()
+  );
+  return borrador(
+    c.uid,
+    "crear_reunion",
+    { tipo, modalidad, fecha, coordinadora: coordinadora ?? "" },
+    [
+      `Crear reuni\xF3n de ${SESSION_TYPE_LABELS[type]}`,
+      `  Fecha: ${fmtDate(d)}`,
+      `  Modalidad: ${MODALITY_LABELS[modalidad]}`,
+      `  Coordina: ${coordinadora || "sin asignar"}`,
+      `  Queda ABIERTA para tomar asistencia.`,
+      ...yaHay.length ? ["", `\u26A0\uFE0F OJO: ya existe ${yaHay.length} reuni\xF3n de ese tipo ese mismo d\xEDa.`] : []
+    ].join("\n")
+  );
+}
+async function prepararMarcar(c, reunionId, personaId, quitar) {
+  const sesion = (await c.cargarSesiones()).find((s) => s.id === reunionId);
+  if (!sesion) throw new AccesoError(`No existe ninguna reuni\xF3n con id ${reunionId}.`);
+  const persona = (await c.cargarPersonas()).find((p) => p.id === personaId);
+  if (!persona) throw new AccesoError(`No existe ninguna persona con id ${personaId}.`);
+  const yaEsta = (await c.cargarAsistencia()).some(
+    (a) => a.sessionId === reunionId && a.memberId === personaId
+  );
+  if (quitar && !yaEsta) throw new AccesoError(`${persona.fullName} no figura en esa reuni\xF3n.`);
+  if (!quitar && yaEsta) throw new AccesoError(`${persona.fullName} ya figura como presente.`);
+  return borrador(
+    c.uid,
+    quitar ? "quitar_presente" : "marcar_presente",
+    { reunionId, personaId },
+    [
+      quitar ? "QUITAR de la lista de asistencia:" : "MARCAR como presente:",
+      `  ${persona.fullName}`,
+      `  en ${SESSION_TYPE_LABELS[sesion.type]} del ${fmtDate(sesion.date)} (${MODALITY_LABELS[sesion.modality]})`,
+      ...sesion.status === "closed" ? ["", "Esa reuni\xF3n est\xE1 CERRADA; se corrige igual por ser administraci\xF3n."] : []
+    ].join("\n")
+  );
+}
+async function prepararEstadoReunion(c, reunionId, cerrar) {
+  const sesion = (await c.cargarSesiones()).find((s) => s.id === reunionId);
+  if (!sesion) throw new AccesoError(`No existe ninguna reuni\xF3n con id ${reunionId}.`);
+  if (cerrar && sesion.status === "closed") throw new AccesoError("Esa reuni\xF3n ya est\xE1 cerrada.");
+  if (!cerrar && sesion.status === "open") throw new AccesoError("Esa reuni\xF3n ya est\xE1 abierta.");
+  return borrador(
+    c.uid,
+    cerrar ? "cerrar_reunion" : "reabrir_reunion",
+    { reunionId },
+    [
+      cerrar ? "CERRAR la reuni\xF3n:" : "REABRIR la reuni\xF3n:",
+      `  ${SESSION_TYPE_LABELS[sesion.type]} del ${fmtDate(sesion.date)}`,
+      cerrar ? "  Al cerrarla, las coordinadoras ya no podr\xE1n modificarla." : "  Al reabrirla, las coordinadoras vuelven a poder marcar asistencia."
+    ].join("\n")
+  );
+}
+async function prepararAprobarPersona(c, personaId, nombreCorregido) {
+  const persona = (await c.cargarPersonas()).find((p) => p.id === personaId);
+  if (!persona) throw new AccesoError(`No existe ninguna persona con id ${personaId}.`);
+  if (!persona.pendingReview) {
+    throw new AccesoError(`${persona.fullName} ya forma parte de la lista oficial.`);
+  }
+  const nombre = (nombreCorregido ?? persona.fullName).trim();
+  if (nombre.length < 3) throw new AccesoError("El nombre es demasiado corto.");
+  return borrador(
+    c.uid,
+    "aprobar_persona",
+    { personaId, nombre },
+    [
+      "APROBAR e incorporar a la lista oficial:",
+      `  ${nombre}` + (nombre !== persona.fullName ? `   (antes: "${persona.fullName}")` : ""),
+      persona.createdByName ? `  La registr\xF3: ${persona.createdByName}` : "",
+      "",
+      "Nota: esto solo aprueba la ficha. Si el nombre cambia, la asistencia ya",
+      "registrada conserva el nombre anterior; para corregir todo el historial",
+      'usa la pantalla "Revisar" de la app.'
+    ].filter(Boolean).join("\n")
+  );
+}
+async function ejecutar(c, o) {
+  switch (o.op) {
+    case "crear_reunion": {
+      const { tipo, modalidad, fecha, coordinadora } = o.args;
+      const id = idNuevo();
+      const type = TIPOS[tipo];
+      await c.escribir(`sessions/${id}`, {
+        type,
+        modality: modalidad,
+        date: /* @__PURE__ */ new Date(`${fecha}T12:00:00`),
+        status: "open",
+        createdBy: c.uid,
+        createdByName: c.nombre,
+        createdAt: /* @__PURE__ */ new Date(),
+        presentCount: 0,
+        coordinator: coordinadora ?? ""
+      });
+      return `Listo. Reuni\xF3n de ${SESSION_TYPE_LABELS[type]} creada para el ${fmtDate(
+        /* @__PURE__ */ new Date(`${fecha}T12:00:00`)
+      )} y abierta para tomar asistencia.
+  id: ${id}`;
+    }
+    case "marcar_presente":
+    case "quitar_presente": {
+      const { reunionId, personaId } = o.args;
+      const sesion = (await c.cargarSesiones()).find((s) => s.id === reunionId);
+      if (!sesion) throw new AccesoError("La reuni\xF3n ya no existe.");
+      const persona = (await c.cargarPersonas()).find((p) => p.id === personaId);
+      if (!persona) throw new AccesoError("La persona ya no existe.");
+      if (o.op === "marcar_presente") {
+        await c.escribir(`sessions/${reunionId}/attendance/${personaId}`, {
+          memberId: personaId,
+          fullName: persona.fullName,
+          status: "present",
+          checkedInAt: /* @__PURE__ */ new Date(),
+          checkedInBy: c.uid,
+          checkedInByName: c.nombre,
+          sessionId: reunionId,
+          sessionType: sesion.type,
+          modality: sesion.modality,
+          sessionDate: toDate2(sesion.date)
+        });
+      } else {
+        await c.borrar(`sessions/${reunionId}/attendance/${personaId}`);
+      }
+      const presentes = (await c.cargarAsistencia()).filter(
+        (a) => a.sessionId === reunionId
+      ).length;
+      await c.escribir(`sessions/${reunionId}`, { presentCount: presentes }, ["presentCount"]);
+      return `Listo. ${persona.fullName} ${o.op === "marcar_presente" ? "qued\xF3 presente en" : "sali\xF3 de"} ${SESSION_TYPE_LABELS[sesion.type]} del ${fmtDate(sesion.date)}. Ahora hay ${presentes} presentes.`;
+    }
+    case "cerrar_reunion":
+    case "reabrir_reunion": {
+      const { reunionId } = o.args;
+      const estado = o.op === "cerrar_reunion" ? "closed" : "open";
+      await c.escribir(`sessions/${reunionId}`, { status: estado }, ["status"]);
+      return `Listo. La reuni\xF3n qued\xF3 ${estado === "closed" ? "cerrada" : "abierta"}.`;
+    }
+    case "aprobar_persona": {
+      const { personaId, nombre } = o.args;
+      await c.escribir(
+        `members/${personaId}`,
+        { fullName: nombre, searchName: normalizeText(nombre), pendingReview: false },
+        ["fullName", "searchName", "pendingReview"]
+      );
+      return `Listo. ${nombre} ya forma parte de la lista oficial.`;
+    }
+    default:
+      throw new AccesoError(`Operaci\xF3n desconocida: ${o.op}`);
+  }
+}
+
 // mcp/src/herramientas.ts
-var objeto = (properties = {}, required = []) => ({ type: "object", properties, required });
+var objeto = (properties = {}, required = []) => ({
+  type: "object",
+  properties,
+  required
+});
 var txt = (description) => ({ type: "string", description });
 var HERRAMIENTAS = [
+  {
+    name: "quien_soy",
+    title: "Con qu\xE9 cuenta estoy consultando",
+    description: "Dice con qu\xE9 cuenta y con qu\xE9 rol est\xE1 conectado Claude, y por tanto qu\xE9 puede y qu\xE9 no puede consultar. \xDAtil para comprobar que la llave es la correcta.",
+    alcance: "todos",
+    inputSchema: objeto(),
+    async ejecutar(c) {
+      const permitidas = HERRAMIENTAS.filter((h) => permitida(h, c));
+      const escritura = permitidas.filter((h) => h.alcance === "escribir");
+      return [
+        `Cuenta: ${c.nombre} (${c.email})`,
+        `Rol: ${ROL_LEGIBLE[c.rol] ?? c.rol}`,
+        "",
+        c.esAdmin ? "PERMISOS: LECTURA Y ESCRITURA. Puedes consultar todo y adem\xE1s registrar y corregir cosas (siempre con una confirmaci\xF3n de por medio)." : "PERMISOS: SOLO LECTURA. Puedes consultar, pero NO se puede cambiar nada desde aqu\xED: ni marcar asistencia, ni crear reuniones, ni tocar fichas. Eso es de administraci\xF3n.",
+        "",
+        `Herramientas disponibles para ti: ${permitidas.length} de ${HERRAMIENTAS.length}`,
+        ...permitidas.filter((h) => h.alcance !== "escribir").map((h) => `  \xB7 ${h.name} (consulta)`),
+        ...escritura.map((h) => `  \xB7 ${h.name} (MODIFICA datos)`),
+        ...c.esAdmin ? [] : [
+          "",
+          "Tampoco ves el historial de una persona concreta ni la bandeja de revisi\xF3n: eso tambi\xE9n es de administraci\xF3n."
+        ]
+      ].join("\n");
+    }
+  },
   {
     name: "como_vamos",
     title: "\xBFC\xF3mo vamos?",
     description: 'Responde cu\xE1ntas personas est\xE1n viniendo \xDALTIMAMENTE a un tipo de reuni\xF3n (no en todo el a\xF1o): la cifra, si subi\xF3 o baj\xF3 frente al per\xEDodo anterior, el promedio de presentes por reuni\xF3n y el reparto en grupos (firmes, nuevas, van y vienen, se est\xE1n alejando) con los nombres. Es el mismo c\xE1lculo que muestra el apartado "\xBFC\xF3mo vamos?" del Panel de la app.',
+    alcance: "todos",
     inputSchema: objeto({
       tipo: {
         type: "string",
@@ -2572,16 +2764,12 @@ var HERRAMIENTAS = [
         default: 4,
         description: "Cu\xE1ntas reuniones hacia atr\xE1s mirar. La app usa 4, 8 o 12."
       },
-      con_nombres: {
-        type: "boolean",
-        default: true,
-        description: "Incluir los nombres de cada grupo."
-      }
+      con_nombres: { type: "boolean", default: true, description: "Incluir los nombres." }
     }),
-    async ejecutar(a) {
+    async ejecutar(c, a) {
       const [sessions, attendance] = await Promise.all([
-        cargarSesiones(),
-        cargarAsistencia()
+        c.cargarSesiones(),
+        c.cargarAsistencia()
       ]);
       return informeComoVamos(
         sessions,
@@ -2593,30 +2781,18 @@ var HERRAMIENTAS = [
     }
   },
   {
-    name: "conteos",
-    title: "Conteos generales",
-    description: "Totales r\xE1pidos: personas en la lista (activas y totales), reuniones registradas por tipo, y cu\xE1ntas personas nuevas esperan revisi\xF3n.",
-    inputSchema: objeto(),
-    async ejecutar() {
-      const [sessions, personas] = await Promise.all([
-        cargarSesiones(),
-        cargarPersonas()
-      ]);
-      return informeConteos(sessions, personas);
-    }
-  },
-  {
     name: "reuniones",
     title: "Listar reuniones",
     description: "Las reuniones m\xE1s recientes, con fecha, tipo, modalidad, qui\xE9n coordin\xF3, cu\xE1ntas personas asistieron y si la sesi\xF3n sigue abierta. Devuelve el id de cada una para consultar su lista.",
+    alcance: "todos",
     inputSchema: objeto({
       tipo: { type: "string", enum: ["pasos", "ego", "todas"], default: "todas" },
       limite: { type: "integer", minimum: 1, maximum: 100, default: 10 }
     }),
-    async ejecutar(a) {
+    async ejecutar(c, a) {
       const [sessions, attendance] = await Promise.all([
-        cargarSesiones(),
-        cargarAsistencia()
+        c.cargarSesiones(),
+        c.cargarAsistencia()
       ]);
       return informeReuniones(
         sessions,
@@ -2630,34 +2806,48 @@ var HERRAMIENTAS = [
     name: "asistencia_reunion",
     title: "Qui\xE9nes fueron a una reuni\xF3n",
     description: 'La lista de personas presentes en una reuni\xF3n concreta. El id se obtiene con la herramienta "reuniones".',
+    alcance: "todos",
     inputSchema: objeto({ reunion_id: txt("id de la reuni\xF3n") }, ["reunion_id"]),
-    async ejecutar(a) {
+    async ejecutar(c, a) {
       const [sessions, attendance] = await Promise.all([
-        cargarSesiones(),
-        cargarAsistencia()
+        c.cargarSesiones(),
+        c.cargarAsistencia()
       ]);
       return informeAsistenciaReunion(sessions, attendance, String(a.reunion_id));
+    }
+  },
+  {
+    name: "conteos",
+    title: "Conteos generales",
+    description: "Totales r\xE1pidos: personas en la lista (activas y totales), reuniones registradas por tipo, y cu\xE1ntas personas nuevas esperan revisi\xF3n.",
+    alcance: "admin",
+    inputSchema: objeto(),
+    async ejecutar(c) {
+      const [sessions, personas] = await Promise.all([c.cargarSesiones(), c.cargarPersonas()]);
+      return informeConteos(sessions, personas);
     }
   },
   {
     name: "buscar_persona",
     title: "Buscar una persona",
     description: "Busca personas por nombre (tolera acentos, may\xFAsculas y orden de las palabras) y devuelve su id para consultar el historial. No devuelve tel\xE9fonos ni notas.",
+    alcance: "admin",
     inputSchema: objeto({ nombre: txt("Nombre o parte del nombre") }, ["nombre"]),
-    async ejecutar(a) {
-      return informeBuscarPersona(await cargarPersonas(), String(a.nombre));
+    async ejecutar(c, a) {
+      return informeBuscarPersona(await c.cargarPersonas(), String(a.nombre));
     }
   },
   {
     name: "historial_persona",
     title: "Historial de una persona",
     description: 'Todas las veces que una persona ha asistido, separadas por tipo de reuni\xF3n, con su porcentaje de asistencia. El id se obtiene con "buscar_persona".',
+    alcance: "admin",
     inputSchema: objeto({ persona_id: txt("id de la persona") }, ["persona_id"]),
-    async ejecutar(a) {
+    async ejecutar(c, a) {
       const [sessions, attendance, personas] = await Promise.all([
-        cargarSesiones(),
-        cargarAsistencia(),
-        cargarPersonas()
+        c.cargarSesiones(),
+        c.cargarAsistencia(),
+        c.cargarPersonas()
       ]);
       return informeHistorial(sessions, attendance, personas, String(a.persona_id));
     }
@@ -2666,34 +2856,126 @@ var HERRAMIENTAS = [
     name: "por_revisar",
     title: "Personas esperando revisi\xF3n",
     description: "Las personas que una coordinadora agreg\xF3 en plena reuni\xF3n y que todav\xEDa no forman parte de la lista oficial, para que la administraci\xF3n las apruebe, las una con alguien que ya exist\xEDa o las descarte.",
+    alcance: "admin",
     inputSchema: objeto(),
-    async ejecutar() {
-      return informePorRevisar(await cargarPersonas());
+    async ejecutar(c) {
+      return informePorRevisar(await c.cargarPersonas());
     }
+  },
+  /* --------------------------------------------------------------- */
+  /* ESCRITURA — solo administración, y siempre en dos pasos           */
+  /* --------------------------------------------------------------- */
+  {
+    name: "preparar_crear_reunion",
+    title: "Preparar: crear una reuni\xF3n",
+    description: 'Prepara la creaci\xF3n de una reuni\xF3n (no la crea todav\xEDa: devuelve un borrador para revisar). Mu\xE9strale el borrador a la persona y solo llama a "confirmar_operacion" cuando lo apruebe expl\xEDcitamente.',
+    alcance: "escribir",
+    inputSchema: objeto(
+      {
+        tipo: { type: "string", enum: ["pasos", "ego"] },
+        modalidad: { type: "string", enum: ["presencial", "virtual"] },
+        fecha: txt("Fecha en formato AAAA-MM-DD"),
+        coordinadora: txt("Qui\xE9n coordina (opcional)")
+      },
+      ["tipo", "modalidad", "fecha"]
+    ),
+    ejecutar: (c, a) => prepararCrearReunion(
+      c,
+      a.tipo,
+      a.modalidad,
+      String(a.fecha),
+      a.coordinadora ? String(a.coordinadora) : void 0
+    )
+  },
+  {
+    name: "preparar_marcar_presente",
+    title: "Preparar: marcar a alguien presente",
+    description: "Prepara marcar a una persona como presente en una reuni\xF3n. Devuelve un borrador; no cambia nada hasta confirmar.",
+    alcance: "escribir",
+    inputSchema: objeto(
+      { reunion_id: txt("id de la reuni\xF3n"), persona_id: txt("id de la persona") },
+      ["reunion_id", "persona_id"]
+    ),
+    ejecutar: (c, a) => prepararMarcar(c, String(a.reunion_id), String(a.persona_id), false)
+  },
+  {
+    name: "preparar_quitar_presente",
+    title: "Preparar: quitar a alguien de la lista",
+    description: "Prepara quitar a una persona de la asistencia de una reuni\xF3n. Devuelve un borrador; no cambia nada hasta confirmar.",
+    alcance: "escribir",
+    inputSchema: objeto(
+      { reunion_id: txt("id de la reuni\xF3n"), persona_id: txt("id de la persona") },
+      ["reunion_id", "persona_id"]
+    ),
+    ejecutar: (c, a) => prepararMarcar(c, String(a.reunion_id), String(a.persona_id), true)
+  },
+  {
+    name: "preparar_cerrar_reunion",
+    title: "Preparar: cerrar o reabrir una reuni\xF3n",
+    description: "Prepara cerrar una reuni\xF3n (o reabrirla, con abrir=true). Al cerrarla, las coordinadoras dejan de poder modificarla. Devuelve un borrador.",
+    alcance: "escribir",
+    inputSchema: objeto(
+      {
+        reunion_id: txt("id de la reuni\xF3n"),
+        abrir: { type: "boolean", default: false, description: "true = reabrir en vez de cerrar" }
+      },
+      ["reunion_id"]
+    ),
+    ejecutar: (c, a) => prepararEstadoReunion(c, String(a.reunion_id), a.abrir !== true)
+  },
+  {
+    name: "preparar_aprobar_persona",
+    title: "Preparar: aprobar a una persona nueva",
+    description: "Prepara aprobar a una persona que est\xE1 esperando revisi\xF3n, opcionalmente corrigiendo su nombre. Devuelve un borrador.",
+    alcance: "escribir",
+    inputSchema: objeto(
+      { persona_id: txt("id de la persona"), nombre: txt("Nombre completo corregido (opcional)") },
+      ["persona_id"]
+    ),
+    ejecutar: (c, a) => prepararAprobarPersona(c, String(a.persona_id), a.nombre ? String(a.nombre) : void 0)
+  },
+  {
+    name: "confirmar_operacion",
+    title: "Confirmar y ejecutar",
+    description: "EJECUTA de verdad una operaci\xF3n preparada antes. \xDAsalo SOLO despu\xE9s de haberle mostrado el borrador a la persona y de que lo haya aprobado de forma expl\xEDcita en ese mismo momento. Si duda o corrige algo, prepara uno nuevo en vez de confirmar el anterior.",
+    alcance: "escribir",
+    inputSchema: objeto(
+      { confirmacion_id: txt("El identificador que devolvi\xF3 el borrador") },
+      ["confirmacion_id"]
+    ),
+    ejecutar: (c, a) => ejecutar(c, desempaquetar(String(a.confirmacion_id), c.uid))
   },
   {
     name: "refrescar",
     title: "Releer los datos",
     description: "Vac\xEDa la cach\xE9 de un minuto y vuelve a leer todo. \xDAtil si acaban de tomar asistencia y quieres los datos al segundo.",
+    alcance: "todos",
     inputSchema: objeto(),
-    async ejecutar() {
-      limpiarCache();
+    async ejecutar(c) {
+      olvidar(c.uid);
       const [sessions, attendance] = await Promise.all([
-        cargarSesiones(),
-        cargarAsistencia()
+        c.cargarSesiones(),
+        c.cargarAsistencia()
       ]);
       return `Datos rele\xEDdos: ${sessions.length} reuniones y ${attendance.length} asistencias.`;
     }
   }
 ];
-var CATALOGO = HERRAMIENTAS.map(({ name, title, description, inputSchema }) => ({
-  name,
-  title,
-  description,
-  inputSchema
-}));
+var ROL_LEGIBLE = {
+  super_admin: "Super administrador(a) \u2014 lectura y escritura",
+  admin: "Administrador(a) \u2014 lectura y escritura",
+  coordinador: "Coordinador(a) \u2014 SOLO LECTURA"
+};
+function catalogoPara(c) {
+  return HERRAMIENTAS.filter((h) => h.alcance === "todos" || c.esAdmin).map(
+    ({ name, title, description, inputSchema }) => ({ name, title, description, inputSchema })
+  );
+}
 function buscarHerramienta(nombre) {
   return HERRAMIENTAS.find((h) => h.name === nombre);
+}
+function permitida(h, c) {
+  return h.alcance === "todos" || c.esAdmin;
 }
 
 // mcp/src/http.ts
@@ -2704,33 +2986,65 @@ var fallo = (id, code, message2) => ({
   id,
   error: { code, message: message2 }
 });
-async function atender(p) {
+var respuestaTexto = (id, texto, esError = false) => ok(id, { content: [{ type: "text", text: texto }], ...esError ? { isError: true } : {} });
+function saludo(p) {
   switch (p.method) {
     case "initialize":
       return ok(p.id, {
         protocolVersion: VERSION_PROTOCOLO,
         capabilities: { tools: {} },
-        serverInfo: { name: "coordinacion-gemb", version: "2.0.0" }
+        serverInfo: { name: "coordinacion-gemb", version: "3.0.0" }
       });
-    // Las notificaciones no llevan respuesta.
     case "notifications/initialized":
     case "notifications/cancelled":
       return null;
     case "ping":
       return ok(p.id, {});
+    default:
+      return void 0;
+  }
+}
+async function atender(p, obtener) {
+  const previo = saludo(p);
+  if (previo !== void 0) return previo;
+  let cliente;
+  try {
+    cliente = await obtener();
+  } catch (e) {
+    const mensaje = e instanceof ConfigError || e instanceof AccesoError ? e.message : `No se pudo validar la llave: ${e instanceof Error ? e.message : String(e)}`;
+    if (p.method === "tools/list") return ok(p.id, { tools: [] });
+    return respuestaTexto(p.id, mensaje, true);
+  }
+  switch (p.method) {
     case "tools/list":
-      return ok(p.id, { tools: CATALOGO });
+      return ok(p.id, { tools: catalogoPara(cliente) });
     case "tools/call": {
       const nombre = String(p.params?.name ?? "");
       const herramienta = buscarHerramienta(nombre);
       if (!herramienta) return fallo(p.id, -32602, `No existe la herramienta "${nombre}".`);
-      const args = p.params?.arguments ?? {};
+      if (!permitida(herramienta, cliente)) {
+        return respuestaTexto(
+          p.id,
+          `"${nombre}" es solo para administraci\xF3n, y tu cuenta (${cliente.email}) entra como coordinador(a). Puedes consultar las reuniones y c\xF3mo va el grupo; el detalle de una persona concreta y la bandeja de revisi\xF3n, no.`,
+          true
+        );
+      }
       try {
-        const texto = await herramienta.ejecutar(args);
-        return ok(p.id, { content: [{ type: "text", text: texto }] });
+        const texto = await herramienta.ejecutar(
+          cliente,
+          p.params?.arguments ?? {}
+        );
+        return respuestaTexto(p.id, texto);
       } catch (e) {
+        if (e instanceof AccesoError && e.message === "PERMISSION_DENIED") {
+          return respuestaTexto(
+            p.id,
+            "Las reglas de la app no dejan a tu cuenta leer eso. Si crees que deber\xEDa, pide que revisen tu rol en Usuarios.",
+            true
+          );
+        }
         const mensaje = e instanceof ConfigError || e instanceof AccesoError ? e.message : `No se pudo consultar: ${e instanceof Error ? e.message : String(e)}`;
-        return ok(p.id, { content: [{ type: "text", text: mensaje }], isError: true });
+        return respuestaTexto(p.id, mensaje, true);
       }
     }
     default:
@@ -2740,49 +3054,11 @@ async function atender(p) {
 async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   if (req.method === "GET") {
-    const pasos = [
-      {
-        paso: "1. Ingreso por correo activado en Firebase",
-        listo: await ingresoPorCorreoActivado(),
-        falta: "Consola de Firebase \u2192 Authentication \u2192 Sign-in method \u2192 Email/Password \u2192 Habilitar. Es un interruptor, no una clave de cuenta de servicio."
-      },
-      {
-        paso: "2. Cuenta de consultas configurada (GEMB_EMAIL / GEMB_PASSWORD)",
-        listo: !!(process.env.GEMB_EMAIL && process.env.GEMB_PASSWORD),
-        falta: "Agr\xE9galas en Vercel \u2192 Settings \u2192 Environment Variables y vuelve a desplegar."
-      },
-      {
-        paso: "3. Token que protege este servidor (GEMB_MCP_TOKEN)",
-        listo: !!process.env.GEMB_MCP_TOKEN,
-        falta: "Inventa una contrase\xF1a larga y agr\xE9gala igual que las anteriores."
-      }
-    ];
-    let lectura;
-    if (pasos.every((p) => p.listo)) {
-      try {
-        const s = await cargarSesiones();
-        lectura = {
-          listo: true,
-          detalle: `Entra y lee correctamente (${s.length} reuniones a la vista).`
-        };
-      } catch (e) {
-        lectura = {
-          listo: false,
-          detalle: e instanceof ConfigError || e instanceof AccesoError ? e.message : `No se pudo leer: ${e instanceof Error ? e.message : String(e)}`
-        };
-      }
-    }
-    const todoListo = pasos.every((p) => p.listo) && lectura?.listo === true;
     res.status(200).json({
       nombre: "coordinacion-gemb",
       mcp: VERSION_PROTOCOLO,
-      estado: todoListo ? "en pie y funcionando" : "en pie",
-      configuracion: pasos.map((p) => ({
-        paso: p.paso,
-        listo: p.listo,
-        ...p.listo ? {} : { falta: p.falta }
-      })),
-      ...lectura ? { "4. Acceso a los datos": lectura } : {}
+      estado: "en pie",
+      como_conectar: 'Cada persona usa su propia llave: app \u2192 Panel \u2192 "Conectar con Claude". Se pega como cabecera Authorization: Bearer <llave>.'
     });
     return;
   }
@@ -2790,25 +3066,17 @@ async function handler(req, res) {
     res.status(405).json(fallo(null, -32600, "Usa POST."));
     return;
   }
-  const esperado = process.env.GEMB_MCP_TOKEN;
-  if (!esperado) {
-    res.status(503).json(
-      fallo(null, -32e3, "Falta GEMB_MCP_TOKEN en el servidor: nadie puede consultar todav\xEDa.")
-    );
-    return;
-  }
   const cabecera = req.headers.authorization;
-  const recibido = (Array.isArray(cabecera) ? cabecera[0] : cabecera ?? "").replace(/^Bearer\s+/i, "").trim();
-  if (recibido !== esperado) {
-    res.setHeader("WWW-Authenticate", "Bearer");
-    res.status(401).json(fallo(null, -32001, "Token inv\xE1lido o ausente."));
-    return;
-  }
+  const llave = (Array.isArray(cabecera) ? cabecera[0] : cabecera ?? "").replace(/^Bearer\s+/i, "").trim();
+  let abierta = null;
+  const obtener = () => abierta ??= abrirSesion(llave);
   const cuerpo = req.body;
   const peticiones = Array.isArray(cuerpo) ? cuerpo : [cuerpo ?? {}];
-  const respuestas = (await Promise.all(peticiones.map(atender))).filter(
-    (r) => r !== null
-  );
+  const respuestas = [];
+  for (const p of peticiones) {
+    const r = await atender(p, obtener);
+    if (r !== null) respuestas.push(r);
+  }
   if (respuestas.length === 0) {
     res.status(202).end();
     return;

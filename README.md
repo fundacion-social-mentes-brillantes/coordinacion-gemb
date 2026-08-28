@@ -230,24 +230,25 @@ prueba la toma de asistencia.
 
 ## 🤖 Preguntarle a Claude por la app (MCP)
 
-En [`mcp/`](./mcp) hay un servidor **MCP de solo lectura** que deja preguntarle
-a Claude directamente: *"¿cuántas personas están haciendo Pasos últimamente?"*,
-*"¿quién dejó de venir?"*, *"¿cuántas fueron el jueves?"* — sin entrar a la app
-ni exportar nada.
+En [`mcp/`](./mcp) hay un servidor **MCP** que deja preguntarle a Claude
+directamente: *"¿cuántas personas están haciendo Pasos últimamente?"*, *"¿quién
+dejó de venir?"* — sin entrar a la app ni exportar nada.
 
-Usa el mismo cálculo que el Panel (`src/lib/activity.ts`), así que la app y
-Claude nunca dan números distintos. **No escribe nada**: las reglas sobre quién
-marca asistencia y cuándo se respetan porque solo se consulta. Tampoco devuelve
-teléfonos ni notas privadas.
+**Cada persona lo conecta con su propia cuenta**, y lo que Claude puede hacer
+depende de su rol:
 
-Entra **como una usuaria más de la app** (correo y contraseña), así que respeta
-las reglas de Firestore igual que cualquier coordinadora, y se le corta el
-acceso desde la propia app (Usuarios → desactivar). No hace falta ninguna clave
-de cuenta de servicio.
+| | Coordinador(a) | Administrador(a) |
+| --- | :-: | :-: |
+| Consultar reuniones y cómo va el grupo | ✅ | ✅ |
+| Historial de una persona, revisión, conteos | ❌ | ✅ |
+| **Registrar y corregir** (asistencia, reuniones, aprobaciones) | ❌ | ✅ |
 
-Se despliega junto a la app en Vercel (`api/mcp.ts`), así que funciona en
-cualquier conversación —celular incluido— y no solo en el computador donde
-alguien dejó unas credenciales. Los cinco pasos de puesta en marcha están en
+> **Coordinación: solo lectura. Administración: lectura y escritura.**
+> Y toda escritura pasa por un borrador que hay que confirmar.
+
+No hace falta configurar nada: se saca la llave desde la propia app
+(**Sesiones → 🤖 Conectar con Claude**) y se pega en el conector. Funciona en
+cualquier Claude, celular incluido. Los detalles están en
 [`mcp/README.md`](./mcp/README.md).
 
 ---

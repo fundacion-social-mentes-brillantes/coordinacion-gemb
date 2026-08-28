@@ -6,51 +6,74 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { CATALOGO, buscarHerramienta } from './herramientas';
-import { AccesoError, ConfigError } from './rest';
+import { buscarHerramienta, catalogoPara, permitida } from './herramientas';
+import { AccesoError, ConfigError, abrirSesion, type Cliente } from './rest';
 
 // ---------------------------------------------------------------------------
-//  El mismo servidor, por terminal.
+//  El mismo servidor, por terminal, para desarrollar o para usarlo sin pasar
+//  por el despliegue. La llave se toma de GEMB_LLAVE.
 //
-//  Comparte el registro de herramientas con la versión HTTP (api/mcp.ts), así
-//  que las dos ofrecen exactamente lo mismo. Para el uso diario conviene la
-//  de Vercel: funciona desde el celular y desde cualquier sesión. Esta sirve
-//  para desarrollar y para trabajar sin conexión a ese despliegue.
-//
-//  Solo lee. La única escritura de todo el proyecto es el registro inicial de
-//  su propia cuenta dentro de la app, y ocurre una sola vez (ver rest.ts).
+//  Para el uso diario conviene la versión de Vercel: funciona desde el celular
+//  y desde cualquier Claude, y no hay que instalar nada.
 // ---------------------------------------------------------------------------
 
 const server = new Server(
-  { name: 'coordinacion-gemb', version: '2.0.0' },
+  { name: 'coordinacion-gemb', version: '3.0.0' },
   { capabilities: { tools: {} } },
 );
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: CATALOGO }));
+let abierta: Promise<Cliente> | null = null;
+const obtener = () => (abierta ??= abrirSesion(process.env.GEMB_LLAVE ?? ''));
+
+const texto = (t: string, esError = false) => ({
+  content: [{ type: 'text' as const, text: t }],
+  ...(esError ? { isError: true } : {}),
+});
+
+function explicar(e: unknown): string {
+  return e instanceof ConfigError || e instanceof AccesoError
+    ? e.message
+    : `No se pudo consultar: ${e instanceof Error ? e.message : String(e)}`;
+}
+
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  try {
+    return { tools: catalogoPara(await obtener()) };
+  } catch {
+    // Sin llave válida no se anuncia nada; el porqué se explica al llamar.
+    return { tools: [] };
+  }
+});
 
 server.setRequestHandler(CallToolRequestSchema, async (peticion) => {
+  let cliente: Cliente;
+  try {
+    cliente = await obtener();
+  } catch (e) {
+    return texto(explicar(e), true);
+  }
+
   const herramienta = buscarHerramienta(peticion.params.name);
   if (!herramienta) {
-    return {
-      content: [
-        { type: 'text' as const, text: `No existe la herramienta "${peticion.params.name}".` },
-      ],
-      isError: true,
-    };
+    return texto(`No existe la herramienta "${peticion.params.name}".`, true);
   }
-  try {
-    const texto = await herramienta.ejecutar(
-      (peticion.params.arguments ?? {}) as Record<string, unknown>,
+  if (!permitida(herramienta, cliente)) {
+    return texto(
+      `"${peticion.params.name}" es solo para administración, y tu cuenta ` +
+        `(${cliente.email}) entra como coordinador(a).`,
+      true,
     );
-    return { content: [{ type: 'text' as const, text: texto }] };
+  }
+
+  try {
+    return texto(
+      await herramienta.ejecutar(
+        cliente,
+        (peticion.params.arguments ?? {}) as Record<string, unknown>,
+      ),
+    );
   } catch (e) {
-    // Los problemas de configuración o permisos se devuelven como resultado,
-    // con su mensaje de "cómo arreglarlo", en vez de como caída del protocolo.
-    const mensaje =
-      e instanceof ConfigError || e instanceof AccesoError
-        ? e.message
-        : `No se pudo consultar: ${e instanceof Error ? e.message : String(e)}`;
-    return { content: [{ type: 'text' as const, text: mensaje }], isError: true };
+    return texto(explicar(e), true);
   }
 });
 
