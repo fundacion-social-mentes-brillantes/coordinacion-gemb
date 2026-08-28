@@ -2,10 +2,7 @@
   "mcpServers": {
     "coordinacion-gemb": {
       "command": "node",
-      "args": ["mcp/dist/index.js"],
-      "env": {
-        "GEMB_SERVICE_ACCOUNT": "${GEMB_SERVICE_ACCOUNT}"
-      }
+      "args": ["mcp/dist/index.js"]
     }
   }
 }

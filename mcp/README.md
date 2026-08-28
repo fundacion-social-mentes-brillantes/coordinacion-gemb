@@ -89,6 +89,27 @@ claude mcp add coordinacion-gemb -- node /ruta/al/proyecto/mcp/dist/index.js
 
 ---
 
+> **Ojo con el orden.** El servidor hereda las variables de la terminal desde
+> la que abres Claude Code. Si exportas la variable *después* de tener Claude
+> abierto, no se entera: ciérralo y vuelve a abrirlo.
+>
+> Por eso el `.mcp.json` **no** declara la llave en un bloque `env`: si lo
+> hiciera, pisaría la que tienes exportada. (Lo intenté así al principio y
+> rompía justo el caso que quería facilitar.)
+
+---
+
+## Si algo no funciona
+
+| Lo que dice | Qué hacer |
+| ----------- | --------- |
+| *"La variable GEMB_SERVICE_ACCOUNT llegó sin sustituir"* | Alguien puso un bloque `env` con `${...}` en el `.mcp.json`. Quítalo. |
+| *"No se pudo leer la llave en …"* | La ruta no existe o está mal escrita. Comprueba dónde guardaste el `.json`. |
+| *"no contiene un JSON … válido"* | El archivo no es la llave de Firebase (o se dañó al copiarlo). Genera otra. |
+| *"Falta la llave de acceso a Firebase"* | No exportaste la variable, o la exportaste después de abrir Claude Code. |
+
+---
+
 ## Comprobar que funciona
 
 ```bash

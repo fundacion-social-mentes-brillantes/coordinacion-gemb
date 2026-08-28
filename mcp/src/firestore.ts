@@ -11,8 +11,34 @@ export class ConfigError extends Error {}
 function credencial() {
   const inline = process.env.GEMB_SERVICE_ACCOUNT?.trim();
   if (inline) {
+    // Si alguien escribió "${GEMB_SERVICE_ACCOUNT}" en un .mcp.json y la
+    // sustitución no ocurrió, llega el texto literal y el error sería un
+    // ENOENT incomprensible. Mejor decir qué pasó.
+    if (inline.startsWith('${')) {
+      throw new ConfigError(
+        `La variable GEMB_SERVICE_ACCOUNT llegó sin sustituir (${inline}). ` +
+          'Quita el bloque "env" del .mcp.json: el servidor ya hereda las ' +
+          'variables de tu terminal. Y comprueba que la exportaste antes de ' +
+          'abrir Claude Code (export GEMB_SERVICE_ACCOUNT="/ruta/a/la-llave.json").',
+      );
+    }
+
     // Admite tanto la ruta del archivo como el JSON pegado directamente.
-    const texto = inline.startsWith('{') ? inline : readFileSync(inline, 'utf8');
+    let texto: string;
+    if (inline.startsWith('{')) {
+      texto = inline;
+    } else {
+      try {
+        texto = readFileSync(inline, 'utf8');
+      } catch {
+        throw new ConfigError(
+          `No se pudo leer la llave en "${inline}". Comprueba que la ruta existe ` +
+            'y que es el archivo .json que descargaste de Firebase ' +
+            '(Configuración del proyecto → Cuentas de servicio → Generar nueva clave privada).',
+        );
+      }
+    }
+
     try {
       return cert(JSON.parse(texto));
     } catch {
