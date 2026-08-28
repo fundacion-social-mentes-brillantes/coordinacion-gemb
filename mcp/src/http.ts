@@ -76,7 +76,22 @@ async function atender(p: Peticion, obtener: () => Promise<Cliente>): Promise<ob
         : `No se pudo validar la llave: ${e instanceof Error ? e.message : String(e)}`;
     // Como texto y no como fallo de protocolo: así el mensaje (que dice cómo
     // arreglarlo) llega a la persona en vez de morir en el transporte.
-    if (p.method === 'tools/list') return ok(p.id, { tools: [] });
+    // Nunca devolver una lista vacía: el conector se vería "sin herramientas"
+    // y nadie sabría por qué. Se ofrece una sola, que explica qué falta.
+    if (p.method === 'tools/list') {
+      return ok(p.id, {
+        tools: [
+          {
+            name: 'quien_soy',
+            title: 'Revisar la conexión',
+            description:
+              'Dice con qué cuenta está conectado Claude y qué puede hacer. ' +
+              'Ahora mismo la conexión no está completa; llámala para saber por qué.',
+            inputSchema: { type: 'object', properties: {}, required: [] },
+          },
+        ],
+      });
+    }
     return respuestaTexto(p.id, mensaje, true);
   }
 
@@ -129,8 +144,32 @@ async function atender(p: Peticion, obtener: () => Promise<Cliente>): Promise<ob
 
 interface Req {
   method?: string;
+  url?: string;
   headers: Record<string, string | string[] | undefined>;
   body?: unknown;
+}
+
+/**
+ * De dónde sale la llave de la persona.
+ *
+ * Lo más limpio sería solo la cabecera Authorization, pero la pantalla de
+ * conectores de claude.ai únicamente pide una dirección: no hay dónde poner
+ * cabeceras. Así que también se acepta en la propia URL (?k=…), que es lo que
+ * permite instalarlo desde el celular sin pelearse con nada.
+ */
+function llaveDe(req: Req): string {
+  const cabecera = req.headers.authorization;
+  const enCabecera = (Array.isArray(cabecera) ? cabecera[0] : cabecera ?? '')
+    .replace(/^Bearer\s+/i, '')
+    .trim();
+  if (enCabecera) return enCabecera;
+
+  try {
+    const u = new URL(req.url ?? '', 'http://x');
+    return (u.searchParams.get('k') ?? u.searchParams.get('llave') ?? '').trim();
+  } catch {
+    return '';
+  }
 }
 interface Res {
   status: (n: number) => Res;
@@ -160,10 +199,7 @@ export default async function handler(req: Req, res: Res) {
     return;
   }
 
-  const cabecera = req.headers.authorization;
-  const llave = (Array.isArray(cabecera) ? cabecera[0] : cabecera ?? '')
-    .replace(/^Bearer\s+/i, '')
-    .trim();
+  const llave = llaveDe(req);
 
   // Se abre una sola vez por petición aunque vengan varias llamadas juntas.
   let abierta: Promise<Cliente> | null = null;

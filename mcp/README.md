@@ -73,13 +73,18 @@ una fundación no debería poder pasar por un malentendido en una frase.
 nadie.** Si ya entras a la app, ya puedes conectarlo.
 
 1. Entra a la app → **Sesiones** (o **Panel**) → **🤖 Conectar con Claude**
-2. Toca **Copiar mi llave**
-3. En [claude.ai](https://claude.ai) → Configuración → Conectores → *Agregar
-   conector personalizado*:
-   - URL: `https://coordinacion-gemb.vercel.app/api/mcp`
-   - Cabecera `Authorization` con valor `Bearer ` + tu llave
+2. Toca **Copiar mi enlace** (lleva tu llave dentro)
+3. En [claude.ai](https://claude.ai) → Configuración → **Conectores** →
+   *Agregar conector personalizado* → pega el enlace → Agregar
 4. Pregúntale *"¿con qué cuenta estás conectado?"* — debe responder con tu
    nombre y tu rol.
+
+> **Por qué el enlace lleva la llave dentro.** La pantalla de conectores de
+> Claude solo pide una dirección: no tiene dónde poner cabeceras. Si tu cliente
+> sí las admite (Claude Code, por ejemplo), puedes usar la dirección limpia con
+> la cabecera `Authorization: Bearer <llave>`; el servidor acepta las dos.
+>
+> Trátalo como una contraseña: quien tenga ese enlace entra como tú.
 
 Funciona en **cualquier Claude**: el del celular, el de la web, el de
 escritorio, Claude Code. Es el mismo conector.
@@ -117,7 +122,8 @@ comprometido, no habría nada que robar.
 
 | Lo que dice | Qué hacer |
 | ----------- | --------- |
-| *"Falta la llave personal"* | No pegaste la cabecera `Authorization`, o le falta el `Bearer `. |
+| *"El conector no tiene herramientas disponibles"* | Lo agregaste con la dirección sin la llave. Desconéctalo y vuelve a agregarlo con **tu enlace** de la app. |
+| *"Falta la llave personal"* | Lo mismo: el enlace se pegó sin el `?k=…` del final. |
 | *"La llave ya no sirve"* | Saliste de la app. Entra otra vez y copia una nueva. |
 | *"Tu acceso está desactivado"* | La administración desactivó tu cuenta en Usuarios. |
 | *"Tu acceso está pendiente"* | Todavía no te han aprobado en la app. |

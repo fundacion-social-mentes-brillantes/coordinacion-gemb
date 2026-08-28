@@ -3012,7 +3012,18 @@ async function atender(p, obtener) {
     cliente = await obtener();
   } catch (e) {
     const mensaje = e instanceof ConfigError || e instanceof AccesoError ? e.message : `No se pudo validar la llave: ${e instanceof Error ? e.message : String(e)}`;
-    if (p.method === "tools/list") return ok(p.id, { tools: [] });
+    if (p.method === "tools/list") {
+      return ok(p.id, {
+        tools: [
+          {
+            name: "quien_soy",
+            title: "Revisar la conexi\xF3n",
+            description: "Dice con qu\xE9 cuenta est\xE1 conectado Claude y qu\xE9 puede hacer. Ahora mismo la conexi\xF3n no est\xE1 completa; ll\xE1mala para saber por qu\xE9.",
+            inputSchema: { type: "object", properties: {}, required: [] }
+          }
+        ]
+      });
+    }
     return respuestaTexto(p.id, mensaje, true);
   }
   switch (p.method) {
@@ -3051,6 +3062,17 @@ async function atender(p, obtener) {
       return fallo(p.id, -32601, `M\xE9todo no soportado: ${p.method}`);
   }
 }
+function llaveDe(req) {
+  const cabecera = req.headers.authorization;
+  const enCabecera = (Array.isArray(cabecera) ? cabecera[0] : cabecera ?? "").replace(/^Bearer\s+/i, "").trim();
+  if (enCabecera) return enCabecera;
+  try {
+    const u = new URL(req.url ?? "", "http://x");
+    return (u.searchParams.get("k") ?? u.searchParams.get("llave") ?? "").trim();
+  } catch {
+    return "";
+  }
+}
 async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   if (req.method === "GET") {
@@ -3066,8 +3088,7 @@ async function handler(req, res) {
     res.status(405).json(fallo(null, -32600, "Usa POST."));
     return;
   }
-  const cabecera = req.headers.authorization;
-  const llave = (Array.isArray(cabecera) ? cabecera[0] : cabecera ?? "").replace(/^Bearer\s+/i, "").trim();
+  const llave = llaveDe(req);
   let abierta = null;
   const obtener = () => abierta ??= abrirSesion(llave);
   const cuerpo = req.body;

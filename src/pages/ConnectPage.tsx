@@ -23,6 +23,9 @@ export function ConnectPage() {
 
   const llave = user?.refreshToken ?? '';
   const esAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
+  // La pantalla de conectores de Claude solo pide una dirección: no tiene
+  // dónde poner cabeceras. Por eso se entrega ya con la llave dentro.
+  const enlace = llave ? `${URL_MCP}?k=${encodeURIComponent(llave)}` : '';
 
   const copiar = async (valor: string, que: string) => {
     try {
@@ -48,67 +51,85 @@ export function ConnectPage() {
         <p className="text-sm text-slate-600">
           Se conectará como <strong className="text-primary-800">{profile?.displayName || profile?.email}</strong>
         </p>
-        <p className="mt-1 text-sm text-slate-600">
-          {esAdmin
-            ? 'Como administradora, Claude podrá consultar todo lo que tú ves: reuniones, asistencia, personas y la bandeja de revisión.'
-            : 'Como coordinadora, Claude podrá consultar las reuniones y cómo va el grupo. El historial de una persona concreta y la bandeja de revisión son de administración.'}
-        </p>
+        {esAdmin ? (
+          <>
+            <p className="mt-1 text-sm font-semibold text-primary-700">
+              Lectura y escritura
+            </p>
+            <p className="mt-1 text-sm text-slate-600">
+              Podrá consultar todo lo que tú ves (reuniones, asistencia, personas,
+              bandeja de revisión) y además <strong>registrar y corregir</strong>:
+              crear reuniones, marcar o quitar asistencia, cerrar o reabrir, y
+              aprobar personas nuevas.
+            </p>
+            <p className="mt-2 text-xs text-slate-500">
+              Nada se guarda de golpe: cada cambio te lo muestra primero como
+              borrador y espera tu aprobación.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="mt-1 text-sm font-semibold text-primary-700">
+              Solo lectura
+            </p>
+            <p className="mt-1 text-sm text-slate-600">
+              Podrá consultar las reuniones y cómo va el grupo. <strong>No puede
+              cambiar nada</strong>: ni marcar asistencia, ni crear reuniones, ni
+              tocar fichas. El historial de una persona concreta y la bandeja de
+              revisión también son de administración.
+            </p>
+          </>
+        )}
         <p className="mt-2 text-xs text-slate-500">
-          Claude solo <strong>lee</strong>: no puede marcar asistencia, crear
-          reuniones ni cambiar fichas. Nunca ve teléfonos ni notas privadas.
+          Nunca ve teléfonos ni las notas privadas de las fichas.
         </p>
       </div>
 
       {/* Pasos */}
       <ol className="space-y-3">
         <li className="card p-4">
-          <p className="font-semibold text-slate-800">1. Copia tu llave personal</p>
-          <p className="mt-1 text-xs text-slate-500">
-            Es como tu contraseña: no se la pases a nadie ni la publiques.
+          <p className="font-semibold text-slate-800">1. Copia tu enlace personal</p>
+          <p className="mt-1 text-sm text-slate-600">
+            Lleva tu llave dentro: es lo que le dice a Claude que eres tú.
           </p>
 
-          <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              onClick={() => copiar(llave, 'Tu llave')}
-              className="btn-primary min-h-[48px] flex-1"
-              disabled={!llave}
-            >
-              <ClipboardIcon className="text-lg" /> Copiar mi llave
-            </button>
-            <button
-              type="button"
-              onClick={() => setVisible((v) => !v)}
-              className="btn-secondary min-h-[48px] px-4"
-              aria-label={visible ? 'Ocultar la llave' : 'Ver la llave'}
-            >
-              {visible ? 'Ocultar' : 'Ver'}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => copiar(enlace, 'Tu enlace')}
+            className="btn-primary mt-3 min-h-[52px] w-full"
+            disabled={!enlace}
+          >
+            <ClipboardIcon className="text-lg" /> Copiar mi enlace
+          </button>
 
+          <button
+            type="button"
+            onClick={() => setVisible((v) => !v)}
+            className="mt-2 w-full text-xs font-medium text-primary-600"
+          >
+            {visible ? 'Ocultar' : 'Ver el enlace'}
+          </button>
           {visible && (
             <p className="mt-2 break-all rounded-lg bg-slate-100 p-2 font-mono text-[10px] leading-tight text-slate-600">
-              {llave || 'No disponible: cierra sesión y vuelve a entrar.'}
+              {enlace || 'No disponible: cierra sesión y vuelve a entrar.'}
             </p>
           )}
+
+          <p className="mt-3 text-xs text-amber-700">
+            ⚠️ Trátalo como una contraseña: quien lo tenga entra como tú. No lo
+            publiques ni lo mandes a grupos.
+          </p>
         </li>
 
         <li className="card p-4">
-          <p className="font-semibold text-slate-800">2. Añade el conector en Claude</p>
+          <p className="font-semibold text-slate-800">2. Pégalo en Claude</p>
           <p className="mt-1 text-sm text-slate-600">
-            En claude.ai → Configuración → Conectores → <em>Agregar conector
-            personalizado</em>. Pega esta dirección:
+            claude.ai → Configuración → <strong>Conectores</strong> →{' '}
+            <em>Agregar conector personalizado</em> → pega el enlace → Agregar.
           </p>
-          <button
-            type="button"
-            onClick={() => copiar(URL_MCP, 'La dirección')}
-            className="btn-secondary mt-2 min-h-[48px] w-full text-xs"
-          >
-            <ClipboardIcon className="text-base" /> {URL_MCP}
-          </button>
-          <p className="mt-2 text-sm text-slate-600">
-            Y en la autenticación, cabecera <code className="text-xs">Authorization</code> con
-            el valor <code className="text-xs">Bearer</code> + tu llave.
+          <p className="mt-2 text-xs text-slate-500">
+            Si ya lo agregaste sin la llave, desconéctalo primero y vuelve a
+            agregarlo con este enlace.
           </p>
         </li>
 
@@ -116,8 +137,8 @@ export function ConnectPage() {
           <p className="font-semibold text-slate-800">3. Pruébalo</p>
           <p className="mt-1 text-sm text-slate-600">
             Pregúntale: <em>“¿con qué cuenta estás conectado?”</em>. Debe
-            responder con tu nombre y tu rol. Después ya puedes preguntarle
-            cualquier cosa de la asistencia.
+            responder con tu nombre y tu rol. Si dice que falta la llave, es que
+            el enlace se pegó incompleto.
           </p>
         </li>
       </ol>
