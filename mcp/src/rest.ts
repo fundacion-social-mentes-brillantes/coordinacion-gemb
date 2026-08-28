@@ -122,7 +122,13 @@ function mensajeDeEntrada(codigo: string, email: string): string {
  * correo"). Es la ÚNICA escritura de todo el servidor.
  */
 async function registrarse(s: Sesion): Promise<void> {
-  const invite = await pedir(`${DOCS}/invites/${encodeURIComponent(s.email)}`, s, true);
+  // El id del documento de invitación es el correo EN MINÚSCULAS: si la
+  // persona lo escribió con mayúsculas al configurar, no debe fallar por eso.
+  const invite = await pedir(
+    `${DOCS}/invites/${encodeURIComponent(s.email.toLowerCase())}`,
+    s,
+    true,
+  );
   const rol =
     invite && typeof invite === 'object'
       ? ((invite as { fields?: { role?: { stringValue?: string } } }).fields?.role
@@ -296,6 +302,7 @@ async function cacheado<T>(clave: string, cargar: () => Promise<T>): Promise<T> 
 export function limpiarCache() {
   cache.clear();
   sesion = null;
+  registrado = false;
 }
 
 /* ------------------------------------------------------------------ */
@@ -304,14 +311,24 @@ export function limpiarCache() {
 
 export type MemberPublico = Omit<Member, 'phone' | 'notes'>;
 
-/** Entra y, si hace falta, registra la cuenta dentro de la app. */
+/**
+ * Entra y, si hace falta, registra la cuenta dentro de la app.
+ *
+ * La comprobación del registro se recuerda: una consulta puede pedir tres
+ * colecciones a la vez y no tiene sentido preguntar tres veces si la cuenta
+ * ya existe.
+ */
+let registrado = false;
 async function listo(): Promise<Sesion> {
   const s = await entrar();
+  if (registrado) return s;
+
   const yo = await pedir(`${DOCS}/users/${s.uid}`, s, true).catch((e) => {
     if (e instanceof AccesoError && e.message === 'PERMISSION_DENIED') return null;
     throw e;
   });
   if (!yo) await registrarse(s);
+  registrado = true;
   return s;
 }
 
