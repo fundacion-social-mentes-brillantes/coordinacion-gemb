@@ -1,8 +1,8 @@
 import {
   CATALOGO,
   buscarHerramienta,
-} from '../mcp/src/herramientas';
-import { AccesoError, ConfigError } from '../mcp/src/rest';
+} from './herramientas';
+import { AccesoError, ConfigError } from './rest';
 
 // ---------------------------------------------------------------------------
 //  Servidor MCP por HTTP, desplegado junto a la app en Vercel.
@@ -15,6 +15,12 @@ import { AccesoError, ConfigError } from '../mcp/src/rest';
 //  Protocolo JSON-RPC escrito a mano y sin estado: es lo que encaja con una
 //  función que se apaga entre llamada y llamada, y evita arrastrar
 //  dependencias que harían lento el arranque en frío.
+//
+//  Este archivo es la FUENTE. Lo que Vercel despliega es api/mcp.js, que se
+//  genera empaquetando todo en uno solo (npm run build:api). Hace falta
+//  porque Vercel compila cada archivo de api/ por separado y no arrastra los
+//  módulos de otras carpetas: al desplegarlo sin empaquetar, la función
+//  arrancaba y moría con ERR_MODULE_NOT_FOUND.
 // ---------------------------------------------------------------------------
 
 const VERSION_PROTOCOLO = '2024-11-05';

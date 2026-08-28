@@ -6,10 +6,11 @@
   "description": "PWA de control de asistencia para la fundación Gimnasio Emocional Mentes Brillantes (GEMB).",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && npm run build:api && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "gen:icons": "node scripts/gen-icons.mjs"
+    "gen:icons": "node scripts/gen-icons.mjs",
+    "build:api": "esbuild mcp/src/http.ts --bundle --platform=node --format=esm --target=node20 --outfile=api/mcp.js --log-level=warning"
   },
   "dependencies": {
     "date-fns": "^3.6.0",
@@ -29,6 +30,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "esbuild": "^0.24.2",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.6.3",
