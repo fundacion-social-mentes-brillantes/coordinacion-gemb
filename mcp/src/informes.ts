@@ -3,7 +3,7 @@ import { toDate, fmtDate } from '../../src/lib/dates';
 import { normalizeText } from '../../src/lib/normalize';
 import { SESSION_TYPE_LABELS, MODALITY_LABELS } from '../../src/lib/constants';
 import type { Attendance, Session, SessionType } from '../../src/types';
-import type { MemberPublico } from './firestore';
+import type { MemberPublico } from './rest';
 
 // ---------------------------------------------------------------------------
 //  Los textos que devuelve cada herramienta del MCP.

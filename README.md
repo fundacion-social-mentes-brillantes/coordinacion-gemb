@@ -240,9 +240,14 @@ Claude nunca dan números distintos. **No escribe nada**: las reglas sobre quié
 marca asistencia y cuándo se respetan porque solo se consulta. Tampoco devuelve
 teléfonos ni notas privadas.
 
-La puesta en marcha no necesita descargar ninguna llave: se entra una vez con
-la propia cuenta de Google (`gcloud auth application-default login`) y el
-permiso queda en el computador. El paso a paso está en
+Entra **como una usuaria más de la app** (correo y contraseña), así que respeta
+las reglas de Firestore igual que cualquier coordinadora, y se le corta el
+acceso desde la propia app (Usuarios → desactivar). No hace falta ninguna clave
+de cuenta de servicio.
+
+Se despliega junto a la app en Vercel (`api/mcp.ts`), así que funciona en
+cualquier conversación —celular incluido— y no solo en el computador donde
+alguien dejó unas credenciales. Los cinco pasos de puesta en marcha están en
 [`mcp/README.md`](./mcp/README.md).
 
 ---

@@ -18,6 +18,7 @@
   // src/lib es codigo de navegador (DOM) y no compila fuera de el.
   "include": [
     "src/**/*.ts",
+    "../api/**/*.ts",
     "../src/lib/activity.ts",
     "../src/lib/dates.ts",
     "../src/lib/normalize.ts",

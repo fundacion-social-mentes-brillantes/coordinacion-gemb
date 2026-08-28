@@ -1,20 +1,126 @@
 # MCP de Coordinación GEMB
 
-Un puente para que **Claude pueda consultar la app** y responder preguntas
-como *"¿cuántas personas están haciendo Pasos últimamente?"*, *"¿quién dejó de
-venir?"* o *"¿cuántas fueron el jueves pasado?"* — sin que tengas que entrar,
-exportar nada ni contar a mano.
+Para que **Claude pueda consultar la app** y responder preguntas como *"¿cuántas
+personas están haciendo Pasos últimamente?"*, *"¿quién dejó de venir?"* o
+*"¿cuántas fueron el jueves pasado?"* — sin que tengas que entrar, exportar nada
+ni contar a mano.
 
-> **Dónde funciona:** en Claude Code corriendo **en tu computador**. En Claude
-> Code web (claude.ai/code) el servidor arranca dentro de un contenedor
-> desechable que no tiene tu sesión de Google ni sobrevive a la sesión, así que
-> ahí no puede leer nada. Para esos casos está el botón **"Copiar resumen como
-> texto"** del apartado ¿Cómo vamos?: un toque y se lo pegas a Claude.
+> **Solo lee.** No crea sesiones, no marca asistencia, no corrige fichas.
+> Tampoco devuelve teléfonos ni las notas privadas de las personas.
+> (La única excepción está explicada abajo, en "La única escritura".)
 
-> **Solo lee. Nunca escribe.** La app tiene reglas cuidadas sobre quién puede
-> marcar asistencia y cuándo (sesión abierta o cerrada, el rol de cada quien,
-> la bandeja de revisión de personas nuevas). Escribir desde aquí se las
-> saltaría todas. Tampoco devuelve teléfonos ni las notas privadas.
+---
+
+## Cómo entra a los datos, y por qué así
+
+Entra **como una usuaria más de la app**, con correo y contraseña, y por lo
+tanto **pasa por tus reglas de seguridad de Firestore** igual que cualquier
+coordinadora.
+
+Esto es a propósito, y es mejor que la alternativa habitual:
+
+| | Llave de cuenta de servicio | Cuenta de la app (lo que usamos) |
+| --- | --- | --- |
+| ¿La deja crear tu organización? | ❌ No (está bloqueada) | ✅ Sí |
+| ¿Respeta las reglas de Firestore? | ❌ Se las salta todas | ✅ Pasa por ellas |
+| ¿Cómo se revoca? | Consola de Google | ✅ Desde la app: Usuarios → desactivar |
+| ¿Hay un archivo que se pueda filtrar? | ⚠️ Sí | ✅ No |
+
+---
+
+## Puesta en marcha (una sola vez, ~10 minutos)
+
+### Paso 1 — Activar el ingreso por correo en Firebase
+
+[Consola de Firebase](https://console.firebase.google.com/) → proyecto
+**coordinacion-gemb** → **Authentication** → pestaña **Sign-in method** →
+**Email/Password** → **Habilitar** → Guardar.
+
+> Es un interruptor. No tiene nada que ver con las claves de cuenta de servicio
+> que tu organización bloquea.
+
+### Paso 2 — Crear la cuenta de consultas
+
+En la misma pantalla de **Authentication** → pestaña **Users** → **Add user**:
+
+- Correo: `consultas@gimnasioemocionalmb.com` (o el que prefieras)
+- Contraseña: una larga y que no uses en ningún otro sitio
+
+Anótala: la vas a pegar una vez en el paso 4 y no la necesitas más.
+
+### Paso 3 — Darle permiso dentro de la app
+
+Abre la app como administradora → **Usuarios** → **Pre-autorizar por correo**
+→ escribe ese mismo correo → rol **Coordinador(a)** → guardar.
+
+Sin esto, la cuenta entra a Firebase pero las reglas no la dejan leer nada.
+
+### Paso 4 — Guardar los datos en Vercel
+
+[vercel.com](https://vercel.com) → proyecto **coordinacion-gemb** → **Settings**
+→ **Environment Variables**. Agrega tres:
+
+| Nombre | Valor |
+| ------ | ----- |
+| `GEMB_EMAIL` | el correo del paso 2 |
+| `GEMB_PASSWORD` | la contraseña del paso 2 |
+| `GEMB_MCP_TOKEN` | una contraseña larga que inventes; es la que protege el servidor |
+
+Luego **Deployments** → en el último, menú `···` → **Redeploy** (para que tome
+las variables nuevas).
+
+### Paso 5 — Conectarlo a Claude
+
+En [claude.ai](https://claude.ai) → **Configuración** → **Conectores** →
+**Agregar conector personalizado**:
+
+- URL: `https://TU-APP.vercel.app/api/mcp`
+- Autenticación: cabecera `Authorization` con valor `Bearer TU_GEMB_MCP_TOKEN`
+
+Listo. A partir de ahí funciona **en cualquier conversación**: desde el celular,
+desde la web, desde donde sea.
+
+---
+
+## Comprobar que funciona
+
+Abre en el navegador `https://TU-APP.vercel.app/api/mcp`. Debe responder:
+
+```json
+{"nombre":"coordinacion-gemb","mcp":"2024-11-05","estado":"en pie"}
+```
+
+Eso confirma que el servidor está desplegado. Que además pueda leer los datos
+depende de los pasos 1 a 4; si algo falta, la propia herramienta te dice cuál
+al preguntarle.
+
+---
+
+## Si algo no funciona
+
+Cada mensaje dice qué arreglar:
+
+| Lo que dice | Qué hacer |
+| ----------- | --------- |
+| *"Falta activar el ingreso por correo…"* | Paso 1. |
+| *"No se pudo entrar como …"* | Paso 2: la cuenta no existe o la contraseña guardada no coincide. |
+| *"…todavía no tiene permiso dentro de la app"* | Paso 3: falta pre-autorizar ese correo. |
+| *"Faltan GEMB_EMAIL y GEMB_PASSWORD"* | Paso 4, y acuérdate de volver a desplegar. |
+| *"Token inválido o ausente"* | El `Bearer` del paso 5 no coincide con `GEMB_MCP_TOKEN`. |
+| *PERMISSION_DENIED* | La cuenta quedó desactivada en la app (Usuarios) o le quitaron el rol. |
+
+**Para cortarle el acceso en cualquier momento:** app → **Usuarios** →
+desactiva esa cuenta. Deja de leer al instante, sin tocar nada más.
+
+---
+
+## La única escritura
+
+Las reglas exigen que exista `users/{uid}` con un rol para poder leer. Esta
+cuenta nunca entra por la pantalla de la app, así que ese documento no se crea
+solo: **el servidor lo crea una única vez**, la primera vez que consulta, y solo
+funciona si antes hiciste el paso 3. Es la única escritura de todo el proyecto y
+está en `rest.ts` (`registrarse`).
 
 ---
 
@@ -22,137 +128,40 @@ exportar nada ni contar a mano.
 
 | Herramienta | Para qué sirve |
 | ----------- | -------------- |
-| `como_vamos` | **La principal.** Cuántas personas están viniendo últimamente, si subió o bajó, el promedio por reunión y los grupos (firmes, nuevas, van y vienen, se están alejando) con nombres. |
-| `conteos` | Totales rápidos: personas en la lista, reuniones hechas, cuántas esperan revisión. |
-| `reuniones` | Las últimas reuniones con fecha, modalidad, quién coordinó y cuántas fueron. |
+| `como_vamos` | **La principal.** Cuántas personas vienen últimamente, si subió o bajó, promedio por reunión y los grupos con nombres. |
+| `conteos` | Totales: personas en la lista, reuniones hechas, cuántas esperan revisión. |
+| `reuniones` | Las últimas reuniones con fecha, modalidad, coordinadora y asistentes. |
 | `asistencia_reunion` | La lista de presentes de una reunión concreta. |
 | `buscar_persona` | Encuentra a alguien por nombre (tolera tildes y orden de palabras). |
 | `historial_persona` | Todas sus asistencias y su porcentaje. |
-| `por_revisar` | Las personas que agregó una coordinadora y aún no entran a la lista oficial. |
+| `por_revisar` | Personas que agregó una coordinadora y aún no entran a la lista oficial. |
 | `refrescar` | Vuelve a leer todo, por si acaban de tomar asistencia. |
 
-Es **el mismo cálculo** que muestra el apartado "¿Cómo vamos?" del Panel: la
-lógica vive en un solo sitio (`src/lib/activity.ts`), así que la app y Claude
-nunca van a decir números distintos.
-
----
-
-## Puesta en marcha (una sola vez)
-
-### 1) Dar permiso de entrada — **con tu propia cuenta** (recomendado)
-
-No hace falta descargar ninguna llave. Entras una vez con tu cuenta de Google
-y el permiso se queda guardado en tu computador.
-
-1. Instala la herramienta `gcloud`:
-   [cloud.google.com/sdk/docs/install](https://cloud.google.com/sdk/docs/install)
-2. En la terminal:
-
-```bash
-gcloud auth application-default login
-gcloud auth application-default set-quota-project coordinacion-gemb
-```
-
-Se abre el navegador, inicias sesión con la cuenta de la fundación y ya está.
-
-**Por qué así y no con una "clave privada":** muchas organizaciones tienen
-prohibido crear claves de cuenta de servicio (el botón *Generar nueva clave
-privada* no funciona), y con razón: ese archivo abre la base de datos entera
-y cualquiera que lo consiga entra. Con este método **no existe ningún archivo
-que se pueda filtrar ni compartir por error**, y puedes revocar el permiso
-cuando quieras con `gcloud auth application-default revoke`.
-
-> Necesitas que tu cuenta tenga permiso de lectura en el proyecto de Firebase.
-> Si eres quien administra **coordinacion-gemb**, ya lo tienes.
-
-<details>
-<summary>Alternativa: llave de cuenta de servicio (solo si tu organización la permite)</summary>
-
-1. [Consola de Firebase](https://console.firebase.google.com/) → proyecto
-   **coordinacion-gemb** → rueda dentada → **Configuración del proyecto** →
-   **Cuentas de servicio** → **Generar nueva clave privada**.
-2. Guarda el `.json` **fuera** de la carpeta del proyecto.
-3. `export GEMB_SERVICE_ACCOUNT="/ruta/a/la-llave.json"`
-
-⚠️ Ese archivo se salta las reglas de seguridad de Firestore. Trátalo como una
-contraseña: nunca lo subas a GitHub ni lo mandes por WhatsApp. Si se te escapa,
-bórralo desde esa misma pantalla.
-
-</details>
-
-### 2) Instalar y compilar
-
-Desde la carpeta del proyecto, en la terminal:
-
-```bash
-cd mcp
-npm install
-npm run build
-```
-
-### 3) Listo
-
-El archivo [`.mcp.json`](../.mcp.json) de la raíz del proyecto ya deja el
-servidor registrado. Al abrir Claude Code dentro de esta carpeta, aparece
-`coordinacion-gemb` entre los servidores disponibles (`/mcp` para verlo).
-
-Si prefieres registrarlo a mano:
-
-```bash
-claude mcp add coordinacion-gemb -- node /ruta/al/proyecto/mcp/dist/index.js
-```
-
----
-
-> **Ojo con el orden.** Si haces `gcloud auth …` (o exportas la variable de la
-> llave) *después* de tener Claude Code abierto, no se entera: ciérralo y
-> vuelve a abrirlo.
->
-> Por eso el `.mcp.json` **no** declara nada en un bloque `env`: si lo hiciera,
-> pisaría lo que tengas en tu terminal. (Lo intenté así al principio y rompía
-> justo el caso que quería facilitar.)
-
----
-
-## Si algo no funciona
-
-| Lo que dice | Qué hacer |
-| ----------- | --------- |
-| *"No hay credenciales para entrar a Firebase"* | Falta el paso 1, o lo hiciste con Claude Code ya abierto. Ejecuta `gcloud auth application-default login` y reinicia Claude Code. |
-| *"La variable GEMB_SERVICE_ACCOUNT llegó sin sustituir"* | Alguien puso un bloque `env` con `${...}` en el `.mcp.json`. Quítalo. |
-| *"No se pudo leer la llave en …"* | La ruta no existe o está mal escrita. Comprueba dónde guardaste el `.json`. |
-| *"no contiene un JSON … válido"* | El archivo no es la llave de Firebase (o se dañó al copiarlo). |
-| *PERMISSION_DENIED* al consultar | Tu cuenta de Google no tiene permiso de lectura en el proyecto **coordinacion-gemb**, o falta el `set-quota-project` del paso 1. |
-
-Para revocar el permiso en cualquier momento:
-
-```bash
-gcloud auth application-default revoke
-```
-
----
-
-## Comprobar que funciona
-
-```bash
-cd mcp
-npm start
-```
-
-Si la llave está bien, se queda esperando en silencio (es lo normal: habla por
-la entrada estándar). Si falta o está mal, lo dice con todas sus letras.
+Es **el mismo cálculo** que muestra el apartado "¿Cómo vamos?" del Panel: vive
+en un solo sitio (`src/lib/activity.ts`), así que la app y Claude no pueden
+decir números distintos.
 
 ---
 
 ## Para quien mantenga esto
 
-- `src/firestore.ts` — conexión y lectura, con caché de 1 minuto para no
-  releer toda la asistencia en cada pregunta de una misma conversación.
-- `src/informes.ts` — el texto de cada herramienta. **Lógica pura**, sin
-  Firebase ni protocolo, para poder probarla con datos armados a mano.
-- `src/index.ts` — el servidor MCP: declara las herramientas y poco más.
-- `npm run typecheck` verifica tipos; `npm run build` genera `dist/index.js`.
+- `api/mcp.ts` — el servidor por HTTP (Vercel). JSON-RPC a mano y sin estado,
+  que es lo que encaja con una función que se apaga entre llamadas.
+- `mcp/src/rest.ts` — entrada por Firebase Auth y lectura de Firestore por su
+  API REST. **Sin dependencias**: solo `fetch`.
+- `mcp/src/herramientas.ts` — el registro de herramientas, definido una vez y
+  compartido por los dos servidores.
+- `mcp/src/informes.ts` — el texto de cada respuesta. Lógica pura, probada con
+  datos armados a mano.
+- `mcp/src/index.ts` — el mismo servidor por terminal, para desarrollar.
 
-Reutiliza `src/lib/activity.ts`, `dates.ts`, `normalize.ts` y `constants.ts`
-de la app, a propósito: si algún día cambia la definición de "firme" o de
-"nueva", cambia en los dos sitios a la vez.
+Alternativa por terminal (útil para desarrollar):
+
+```bash
+cd mcp && npm install && npm run build
+GEMB_EMAIL=… GEMB_PASSWORD=… node dist/index.js
+```
+
+El [`.mcp.json`](../.mcp.json) de la raíz lo deja registrado para Claude Code
+local. Recuerda exportar las variables **antes** de abrir Claude Code: el
+servidor las hereda de la terminal al arrancar.
