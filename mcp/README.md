@@ -74,7 +74,7 @@ las variables nuevas).
 En [claude.ai](https://claude.ai) → **Configuración** → **Conectores** →
 **Agregar conector personalizado**:
 
-- URL: `https://TU-APP.vercel.app/api/mcp`
+- URL: `https://coordinacion-gemb.vercel.app/api/mcp`
 - Autenticación: cabecera `Authorization` con valor `Bearer TU_GEMB_MCP_TOKEN`
 
 Listo. A partir de ahí funciona **en cualquier conversación**: desde el celular,
@@ -161,8 +161,12 @@ decir números distintos.
 
 ## Para quien mantenga esto
 
-- `api/mcp.ts` — el servidor por HTTP (Vercel). JSON-RPC a mano y sin estado,
-  que es lo que encaja con una función que se apaga entre llamadas.
+- `mcp/src/http.ts` — el servidor por HTTP. JSON-RPC a mano y sin estado, que
+  es lo que encaja con una función que se apaga entre llamadas.
+- `api/mcp.js` — **generado**, no se edita a mano: es http.ts empaquetado con
+  todo dentro (`npm run build:api`, incluido en `npm run build`). Va versionado
+  porque Vercel compila cada archivo de api/ por separado y no arrastra los
+  módulos de otras carpetas.
 - `mcp/src/rest.ts` — entrada por Firebase Auth y lectura de Firestore por su
   API REST. **Sin dependencias**: solo `fetch`.
 - `mcp/src/herramientas.ts` — el registro de herramientas, definido una vez y
