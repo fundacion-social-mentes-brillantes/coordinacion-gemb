@@ -52,6 +52,26 @@ function mensajeDeEntrada(codigo, email) {
   }
   return `No se pudo entrar como ${email}: ${codigo}`;
 }
+async function ingresoPorCorreoActivado() {
+  try {
+    const r = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: "comprobacion-de-configuracion@example.invalid",
+          password: "no-es-una-contrasena-real",
+          returnSecureToken: true
+        })
+      }
+    );
+    const d = await r.json();
+    return !(d.error?.message ?? "").startsWith("PASSWORD_LOGIN_DISABLED");
+  } catch {
+    return true;
+  }
+}
 async function registrarse(s) {
   const invite = await pedir(
     `${DOCS}/invites/${encodeURIComponent(s.email.toLowerCase())}`,
@@ -2704,12 +2724,17 @@ async function handler(req, res) {
   if (req.method === "GET") {
     const pasos = [
       {
-        paso: "1. Cuenta de consultas configurada (GEMB_EMAIL / GEMB_PASSWORD)",
+        paso: "1. Ingreso por correo activado en Firebase",
+        listo: await ingresoPorCorreoActivado(),
+        falta: "Consola de Firebase \u2192 Authentication \u2192 Sign-in method \u2192 Email/Password \u2192 Habilitar. Es un interruptor, no una clave de cuenta de servicio."
+      },
+      {
+        paso: "2. Cuenta de consultas configurada (GEMB_EMAIL / GEMB_PASSWORD)",
         listo: !!(process.env.GEMB_EMAIL && process.env.GEMB_PASSWORD),
         falta: "Agr\xE9galas en Vercel \u2192 Settings \u2192 Environment Variables y vuelve a desplegar."
       },
       {
-        paso: "2. Token que protege este servidor (GEMB_MCP_TOKEN)",
+        paso: "3. Token que protege este servidor (GEMB_MCP_TOKEN)",
         listo: !!process.env.GEMB_MCP_TOKEN,
         falta: "Inventa una contrase\xF1a larga y agr\xE9gala igual que las anteriores."
       }
@@ -2739,7 +2764,7 @@ async function handler(req, res) {
         listo: p.listo,
         ...p.listo ? {} : { falta: p.falta }
       })),
-      ...lectura ? { "3. Acceso a los datos": lectura } : {}
+      ...lectura ? { "4. Acceso a los datos": lectura } : {}
     });
     return;
   }

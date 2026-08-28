@@ -2,7 +2,12 @@ import {
   CATALOGO,
   buscarHerramienta,
 } from './herramientas';
-import { AccesoError, ConfigError, cargarSesiones } from './rest';
+import {
+  AccesoError,
+  ConfigError,
+  cargarSesiones,
+  ingresoPorCorreoActivado,
+} from './rest';
 
 // ---------------------------------------------------------------------------
 //  Servidor MCP por HTTP, desplegado junto a la app en Vercel.
@@ -106,12 +111,20 @@ export default async function handler(req: Req, res: Res) {
     // mensajes son los mismos que ya devuelve la herramienta.
     const pasos: { paso: string; listo: boolean; falta?: string }[] = [
       {
-        paso: '1. Cuenta de consultas configurada (GEMB_EMAIL / GEMB_PASSWORD)',
+        paso: '1. Ingreso por correo activado en Firebase',
+        listo: await ingresoPorCorreoActivado(),
+        falta:
+          'Consola de Firebase → Authentication → Sign-in method → ' +
+          'Email/Password → Habilitar. Es un interruptor, no una clave de ' +
+          'cuenta de servicio.',
+      },
+      {
+        paso: '2. Cuenta de consultas configurada (GEMB_EMAIL / GEMB_PASSWORD)',
         listo: !!(process.env.GEMB_EMAIL && process.env.GEMB_PASSWORD),
         falta: 'Agrégalas en Vercel → Settings → Environment Variables y vuelve a desplegar.',
       },
       {
-        paso: '2. Token que protege este servidor (GEMB_MCP_TOKEN)',
+        paso: '3. Token que protege este servidor (GEMB_MCP_TOKEN)',
         listo: !!process.env.GEMB_MCP_TOKEN,
         falta: 'Inventa una contraseña larga y agrégala igual que las anteriores.',
       },
@@ -147,7 +160,7 @@ export default async function handler(req: Req, res: Res) {
         listo: p.listo,
         ...(p.listo ? {} : { falta: p.falta }),
       })),
-      ...(lectura ? { '3. Acceso a los datos': lectura } : {}),
+      ...(lectura ? { '4. Acceso a los datos': lectura } : {}),
     });
     return;
   }

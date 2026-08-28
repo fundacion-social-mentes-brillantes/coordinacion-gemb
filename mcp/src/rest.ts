@@ -110,6 +110,37 @@ function mensajeDeEntrada(codigo: string, email: string): string {
   return `No se pudo entrar como ${email}: ${codigo}`;
 }
 
+/**
+ * ¿Está activado el ingreso por correo y contraseña en Firebase?
+ *
+ * Se comprueba SIN credenciales, con un intento deliberadamente inválido: si
+ * el proveedor está apagado, Firebase responde PASSWORD_LOGIN_DISABLED antes
+ * de mirar siquiera el usuario. Sirve para que la lista de comprobación
+ * marque el primer paso en verde apenas se active, sin haber configurado
+ * todavía nada más.
+ */
+export async function ingresoPorCorreoActivado(): Promise<boolean> {
+  try {
+    const r = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'comprobacion-de-configuracion@example.invalid',
+          password: 'no-es-una-contrasena-real',
+          returnSecureToken: true,
+        }),
+      },
+    );
+    const d = (await r.json()) as { error?: { message?: string } };
+    return !(d.error?.message ?? '').startsWith('PASSWORD_LOGIN_DISABLED');
+  } catch {
+    // Si Firebase no contesta, no se afirma que esté apagado.
+    return true;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Registro de la cuenta dentro de la app                              */
 /* ------------------------------------------------------------------ */

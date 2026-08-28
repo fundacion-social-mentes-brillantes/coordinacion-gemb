@@ -91,10 +91,12 @@ dice qué falta, paso por paso:
 {
   "estado": "en pie",
   "configuracion": [
-    { "paso": "1. Cuenta de consultas configurada (GEMB_EMAIL / GEMB_PASSWORD)",
+    { "paso": "1. Ingreso por correo activado en Firebase",
       "listo": false,
-      "falta": "Agrégalas en Vercel → Settings → Environment Variables…" },
-    { "paso": "2. Token que protege este servidor (GEMB_MCP_TOKEN)",
+      "falta": "Consola de Firebase → Authentication → Sign-in method…" },
+    { "paso": "2. Cuenta de consultas configurada (GEMB_EMAIL / GEMB_PASSWORD)",
+      "listo": false, "falta": "…" },
+    { "paso": "3. Token que protege este servidor (GEMB_MCP_TOKEN)",
       "listo": false, "falta": "…" }
   ]
 }
@@ -104,11 +106,14 @@ Cuando todo esté puesto, intenta entrar y leer de verdad, y lo dice:
 
 ```json
 { "estado": "en pie y funcionando",
-  "3. Acceso a los datos": { "listo": true,
+  "4. Acceso a los datos": { "listo": true,
     "detalle": "Entra y lee correctamente (37 reuniones a la vista)." } }
 ```
 
-Nunca muestra el valor de nada: solo si está puesto o no.
+El paso 1 se comprueba **contra Firebase de verdad**, sin necesitar ninguna
+credencial: se ve en verde en cuanto actives el interruptor, aunque todavía no
+hayas hecho nada más. Nunca muestra el valor de ninguna variable, solo si está
+puesta o no.
 
 ---
 
