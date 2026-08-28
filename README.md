@@ -226,6 +226,23 @@ prueba la toma de asistencia.
 
 ---
 
+## 🤖 Preguntarle a Claude por la app (MCP)
+
+En [`mcp/`](./mcp) hay un servidor **MCP de solo lectura** que deja preguntarle
+a Claude directamente: *"¿cuántas personas están haciendo Pasos últimamente?"*,
+*"¿quién dejó de venir?"*, *"¿cuántas fueron el jueves?"* — sin entrar a la app
+ni exportar nada.
+
+Usa el mismo cálculo que el Panel (`src/lib/activity.ts`), así que la app y
+Claude nunca dan números distintos. **No escribe nada**: las reglas sobre quién
+marca asistencia y cuándo se respetan porque solo se consulta. Tampoco devuelve
+teléfonos ni notas privadas.
+
+La puesta en marcha (descargar la llave de Firebase, instalar y registrarlo)
+está en [`mcp/README.md`](./mcp/README.md).
+
+---
+
 ## 🗂️ Modelo de datos (Firestore)
 
 - `users/{uid}`: `{ email, displayName, photoURL, role, active, createdAt }`
