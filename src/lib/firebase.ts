@@ -31,10 +31,29 @@ import {
  */
 // Dominios propios de la app que YA están registrados en Google Cloud
 // (Orígenes autorizados + URI de redireccionamiento `/__/auth/handler`).
-// Si algún día la app cambia de dominio, hay que añadirlo AQUÍ y registrarlo
-// en Google Cloud (paso 4b del README). Sin las dos cosas, el iPhone se
-// vuelve a romper.
-const APP_HOSTS = ['coordinacion-gemb.vercel.app'];
+//
+// ⚠️ ESTA LISTA VA VACÍA A PROPÓSITO. No es un olvido.
+//
+// Poner aquí un dominio ANTES de registrarlo en Google Cloud rompe el ingreso
+// para TODO EL MUNDO, no solo en iPhone: Google responde `redirect_uri_mismatch`
+// y nadie puede entrar. Pasó exactamente eso el 2026-08-28 al desplegar este
+// archivo con 'coordinacion-gemb.vercel.app' en la lista sin haber hecho antes
+// el registro.
+//
+// EL ORDEN CORRECTO ES:
+//   1. Google Cloud → APIs y servicios → Credenciales → el cliente OAuth de
+//      web (id 1019293780998-rgi4eu70dekg9id9172e4tp5mg5jr39f). Añadir
+//      https://coordinacion-gemb.vercel.app/__/auth/handler a "URI de
+//      redireccionamiento autorizados", y el dominio a "Orígenes autorizados".
+//   2. Comprobar que Google ya lo acepta, sin tocar nada (ver README, paso 4b):
+//      POST identitytoolkit.googleapis.com/v1/accounts:createAuthUri con
+//      {"providerId":"google.com","continueUri":"<el handler>"}, seguir el
+//      authUri que devuelve y comprobar que NO dice redirect_uri_mismatch.
+//   3. Solo entonces, añadir el dominio aquí y desplegar.
+//
+// Mientras la lista esté vacía se usa el dominio de Firebase de siempre: el
+// iPhone sigue con el camino frágil, pero TODO EL MUNDO puede entrar.
+const APP_HOSTS: string[] = [];
 const FIREBASE_DOMAIN = 'coordinacion-gemb.firebaseapp.com';
 
 function resolveAuthDomain(): string {
