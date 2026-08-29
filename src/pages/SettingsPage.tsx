@@ -1,7 +1,12 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ROLE_LABELS } from '../lib/constants';
-import { InstallButton, IosInstallHelp } from '../components/InstallPrompt';
+import {
+  InstallButton,
+  IosInstallHelp,
+  usePuedeInstalar,
+  useNecesitaAyudaIos,
+} from '../components/InstallPrompt';
 import { ChevronRightIcon, RobotIcon } from '../components/Icons';
 
 /**
@@ -17,6 +22,12 @@ import { ChevronRightIcon, RobotIcon } from '../components/Icons';
  */
 export function SettingsPage() {
   const { profile, user } = useAuth();
+  // Los dos componentes de instalación se pintan solos o no según el
+  // dispositivo. Hay que preguntarlo antes para no dejar el título encima
+  // de un hueco vacío, que es como se veía en el computador.
+  const [puedeInstalar] = usePuedeInstalar();
+  const necesitaAyudaIos = useNecesitaAyudaIos();
+  const hayAlgoQueInstalar = puedeInstalar !== null || necesitaAyudaIos;
 
   return (
     <div className="space-y-4">
@@ -53,16 +64,18 @@ export function SettingsPage() {
         </Link>
       </div>
 
-      {/* Instalar la app en el teléfono. */}
-      <div>
-        <p className="px-1 text-xs font-medium uppercase tracking-wide text-slate-400">
-          La app en tu teléfono
-        </p>
-        <div className="mt-2 space-y-2">
-          <InstallButton className="btn-secondary min-h-[48px] w-full text-sm" />
-          <IosInstallHelp />
+      {/* Instalar la app en el teléfono. Solo si de verdad hay algo que ofrecer. */}
+      {hayAlgoQueInstalar && (
+        <div>
+          <p className="px-1 text-xs font-medium uppercase tracking-wide text-slate-400">
+            La app en tu teléfono
+          </p>
+          <div className="mt-2 space-y-2">
+            <InstallButton className="btn-secondary min-h-[48px] w-full text-sm" />
+            <IosInstallHelp />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

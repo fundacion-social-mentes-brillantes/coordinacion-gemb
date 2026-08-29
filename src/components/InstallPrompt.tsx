@@ -9,7 +9,14 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
-export function InstallButton({ className }: { className?: string }) {
+/**
+ * ¿El navegador ofrece instalar la app? (Android/Chrome.)
+ *
+ * Se saca a un hook para que quien pinte un apartado con título pueda saber
+ * ANTES si va a haber algo debajo. Si no, queda un rótulo huérfano encima de
+ * la nada, que es lo que pasaba en Ajustes.
+ */
+export function usePuedeInstalar() {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
@@ -25,6 +32,29 @@ export function InstallButton({ className }: { className?: string }) {
       window.removeEventListener('appinstalled', installed);
     };
   }, []);
+
+  return [deferred, setDeferred] as const;
+}
+
+/** ¿Hay que explicar los dos toques de Safari? (iPhone/iPad sin instalar.) */
+export function useNecesitaAyudaIos() {
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    const isIOS =
+      /iP(hone|ad|od)/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const installed =
+      window.matchMedia?.('(display-mode: standalone)').matches ||
+      (navigator as Navigator & { standalone?: boolean }).standalone === true;
+    setShow(isIOS && !installed);
+  }, []);
+
+  return show;
+}
+
+export function InstallButton({ className }: { className?: string }) {
+  const [deferred, setDeferred] = usePuedeInstalar();
 
   if (!deferred) return null;
 
@@ -50,17 +80,7 @@ export function InstallButton({ className }: { className?: string }) {
  * la app todavía NO está instalada.
  */
 export function IosInstallHelp({ className }: { className?: string }) {
-  const [show, setShow] = useState(false);
-
-  useEffect(() => {
-    const isIOS =
-      /iP(hone|ad|od)/.test(navigator.userAgent) ||
-      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    const installed =
-      window.matchMedia?.('(display-mode: standalone)').matches ||
-      (navigator as Navigator & { standalone?: boolean }).standalone === true;
-    setShow(isIOS && !installed);
-  }, []);
+  const show = useNecesitaAyudaIos();
 
   if (!show) return null;
 
