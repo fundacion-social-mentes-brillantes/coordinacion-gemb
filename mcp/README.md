@@ -72,12 +72,14 @@ una fundación no debería poder pasar por un malentendido en una frase.
 **No hay llaves que copiar ni nada que configurar.** Se entra con Google, como
 en cualquier otro conector.
 
-1. En [claude.ai](https://claude.ai) → Configuración → **Conectores** →
-   *Agregar conector personalizado*
+1. En [claude.ai](https://claude.ai) → **Personalizar** → **Conectores** →
+   *Agregar* → *Agregar conector personalizado*
 2. Pega la dirección: `https://coordinacion-gemb.vercel.app/api/mcp`
-3. Toca **Conectar**. Se abre una pantalla, entras con tu Google —el mismo de
+3. En **Autenticación**, deja marcado **"Siempre requerido"**. Con "Ninguno" el
+   conector se agrega vacío, sin ninguna herramienta, y no se ve por qué.
+4. Toca **Conectar**. Se abre una pantalla, entras con tu Google —el mismo de
    la app— y le das a **Permitir**.
-4. Pregúntale *"¿con qué cuenta estás conectado?"* — debe responder con tu
+5. Pregúntale *"¿con qué cuenta estás conectado?"* — debe responder con tu
    nombre y tu rol.
 
 Eso es todo. Tu rol viene con tu cuenta, así que **no hay nada que ajustar por
@@ -87,13 +89,23 @@ automáticamente.
 Funciona en **cualquier Claude**: el del celular, el de la web, el de
 escritorio, Claude Code. Es la misma dirección para todo el mundo.
 
+> **Si algún día deja de conectar de golpe y a todo el mundo a la vez**, mira
+> `src/lib/oauthRedirect.ts`. Ahí está la lista cerrada de sitios a los que se
+> puede devolver el acceso (los dominios de Claude y el propio equipo). Es una
+> cerradura a propósito: sin ella bastaría un enlace preparado para que, al
+> tocar "Permitir", tu acceso viajara al sitio de otro. Si Claude cambiara de
+> dominio, hay que añadirlo ahí — y en ningún otro sitio.
+
 <details>
 <summary>Alternativa sin entrar con Google (para clientes que no hagan OAuth)</summary>
 
-La app también entrega un enlace con la llave dentro (**Panel → Conectar con
-Claude → Copiar mi enlace**), y el servidor acepta además la cabecera
-`Authorization: Bearer <llave>`. Sirve para clientes que no hagan el ingreso
-con Google. Trátalo como una contraseña: quien lo tenga entra como tú.
+El servidor acepta además la llave directamente, como cabecera
+`Authorization: Bearer <llave>` o como `?k=<llave>` en la dirección. Sirve para
+clientes que no hagan el ingreso con Google. La llave es el permiso de sesión
+que Firebase le dio al navegador (`user.refreshToken`); ya no hay ninguna
+pantalla que la entregue, precisamente porque quien la tenga entra como tú, y
+una dirección con un secreto dentro acaba en historiales y registros de
+servidores. Si necesitas una, sácala a mano y trátala como una contraseña.
 
 </details>
 
@@ -132,7 +144,7 @@ comprometido, no habría nada que robar.
 | ----------- | --------- |
 | *"El conector no tiene herramientas disponibles"* | Falta entrar con Google: toca **Conectar** en el conector. Si lo agregaste antes de esto, desconéctalo y vuelve a agregarlo. |
 | *"Hay que entrar con Google"* | Lo mismo: no se completó el ingreso. |
-| *"La llave ya no sirve"* | Saliste de la app. Entra otra vez y copia una nueva. |
+| *"El acceso ya no sirve"* | Saliste de la app. Vuelve a tocar **Conectar** en el conector y entra otra vez con Google. |
 | *"Tu acceso está desactivado"* | La administración desactivó tu cuenta en Usuarios. |
 | *"Tu acceso está pendiente"* | Todavía no te han aprobado en la app. |
 | *"… es solo para administración"* | Correcto: entras como coordinador(a). |

@@ -1,3 +1,22 @@
+// src/lib/oauthRedirect.ts
+var DOMINIOS = ["claude.ai", "claude.com", "anthropic.com"];
+var LOCALES = ["localhost", "127.0.0.1", "::1"];
+function redirectPermitido(uri) {
+  let u;
+  try {
+    u = new URL(uri);
+  } catch {
+    return false;
+  }
+  const host = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (LOCALES.includes(host)) {
+    return u.protocol === "http:" || u.protocol === "https:";
+  }
+  if (u.protocol !== "https:") return false;
+  return DOMINIOS.some((d) => host === d || host.endsWith(`.${d}`));
+}
+var DESTINOS_PERMITIDOS = [...DOMINIOS, ...LOCALES].join(", ");
+
 // mcp/src/oauth.ts
 var RAIZ = "https://coordinacion-gemb.vercel.app";
 var RECURSO = `${RAIZ}/api/mcp`;
@@ -9,18 +28,29 @@ function parametros(req) {
   }
 }
 function cuerpo(req) {
+  const b = crudo(req);
+  const salida = {};
+  for (const [k, v] of Object.entries(b)) {
+    salida[k] = typeof v === "string" ? v : JSON.stringify(v);
+  }
+  return salida;
+}
+function crudo(req) {
   const b = req.body;
   if (!b) return {};
   if (typeof b === "string") {
-    return Object.fromEntries(new URLSearchParams(b));
-  }
-  if (typeof b === "object") {
-    const salida = {};
-    for (const [k, v] of Object.entries(b)) {
-      salida[k] = typeof v === "string" ? v : JSON.stringify(v);
+    const t = b.trim();
+    if (!t) return {};
+    if (t.startsWith("{")) {
+      try {
+        const j = JSON.parse(t);
+        if (j && typeof j === "object") return j;
+      } catch {
+      }
     }
-    return salida;
+    return Object.fromEntries(new URLSearchParams(t));
   }
+  if (typeof b === "object") return b;
   return {};
 }
 function metadatosServidor() {
@@ -44,8 +74,22 @@ function metadatosRecurso() {
     bearer_methods_supported: ["header"]
   };
 }
+function listaDeTextos(v) {
+  if (Array.isArray(v)) return v.filter((x) => typeof x === "string");
+  if (typeof v !== "string") return [];
+  const t = v.trim();
+  if (!t) return [];
+  if (t.startsWith("[")) {
+    try {
+      const j = JSON.parse(t);
+      if (Array.isArray(j)) return j.filter((x) => typeof x === "string");
+    } catch {
+    }
+  }
+  return [t];
+}
 function registrarCliente(datos) {
-  const redirects = Array.isArray(datos.redirect_uris) ? datos.redirect_uris : [];
+  const redirects = listaDeTextos(datos.redirect_uris);
   return {
     client_id: `gemb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
     client_id_issued_at: Math.floor(Date.now() / 1e3),
@@ -68,6 +112,9 @@ function irAAutorizar(req) {
   const p = parametros(req);
   const redirect = p.get("redirect_uri");
   if (!redirect) return { error: "Falta redirect_uri." };
+  if (!redirectPermitido(redirect)) {
+    return { error: "Esa direcci\xF3n de retorno no est\xE1 autorizada." };
+  }
   const destino = new URL(`${RAIZ}/autorizar`);
   destino.searchParams.set("redirect_uri", redirect);
   if (p.get("state")) destino.searchParams.set("state", p.get("state"));
@@ -131,7 +178,7 @@ async function atenderOauth(req, res, ruta) {
       res.status(200).json(metadatosRecurso());
       return;
     case "register":
-      res.status(201).json(registrarCliente(cuerpo(req)));
+      res.status(201).json(registrarCliente(crudo(req)));
       return;
     case "authorize": {
       const r = irAAutorizar(req);

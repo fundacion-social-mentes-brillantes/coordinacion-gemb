@@ -84,8 +84,8 @@ async function canjear(llave: string): Promise<Credencial> {
       codigo.startsWith('INVALID_GRANT_TYPE')
     ) {
       throw new AccesoError(
-        'La llave ya no sirve (caducó, o cerraste la sesión en la app). ' +
-          'Entra a la app → Panel → "Conectar con Claude" y copia una nueva.',
+        'El acceso ya no sirve (caducó, o cerraste la sesión en la app). ' +
+          'Vuelve a conectar el conector desde Claude y entra otra vez con Google.',
       );
     }
     if (codigo.startsWith('USER_DISABLED')) {
@@ -220,8 +220,8 @@ function limpiarVencidos() {
 export async function abrirSesion(llave: string): Promise<Cliente> {
   if (!llave || llave.length < 20) {
     throw new ConfigError(
-      'Falta la llave personal. Entra a la app → Panel → "Conectar con Claude" ' +
-        'y copia la tuya.',
+      'Falta entrar con Google. En Claude, toca "Conectar" en este conector y ' +
+        'entra con tu cuenta de siempre.',
     );
   }
   limpiarVencidos();

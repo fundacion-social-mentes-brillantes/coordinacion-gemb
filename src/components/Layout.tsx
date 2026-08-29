@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { Logo } from './Logo';
@@ -13,6 +13,7 @@ import {
   ShieldIcon,
   LogoutIcon,
   WifiOffIcon,
+  SettingsIcon,
 } from './Icons';
 import type { Role } from '../types';
 import type { ComponentType, SVGProps } from 'react';
@@ -117,6 +118,16 @@ export function Layout() {
             </span>
           )}
           <ThemeToggle />
+          {/* Ajustes: aquí dentro vive "Conectar con Claude", que antes
+              estorbaba en Sesiones. Discreto, pero siempre a mano. */}
+          <Link
+            to="/ajustes"
+            className="tap rounded-full text-slate-400 active:bg-slate-100"
+            title="Ajustes"
+            aria-label="Ajustes"
+          >
+            <SettingsIcon className="text-xl" />
+          </Link>
           <button
             type="button"
             onClick={handleLogout}

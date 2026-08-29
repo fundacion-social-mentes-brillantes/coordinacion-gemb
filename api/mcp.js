@@ -17,7 +17,7 @@ async function canjear(llave) {
     const codigo = d.error?.message ?? `HTTP ${r.status}`;
     if (codigo.startsWith("TOKEN_EXPIRED") || codigo.startsWith("USER_NOT_FOUND") || codigo.startsWith("INVALID_REFRESH_TOKEN") || codigo.startsWith("INVALID_GRANT_TYPE")) {
       throw new AccesoError(
-        'La llave ya no sirve (caduc\xF3, o cerraste la sesi\xF3n en la app). Entra a la app \u2192 Panel \u2192 "Conectar con Claude" y copia una nueva.'
+        "El acceso ya no sirve (caduc\xF3, o cerraste la sesi\xF3n en la app). Vuelve a conectar el conector desde Claude y entra otra vez con Google."
       );
     }
     if (codigo.startsWith("USER_DISABLED")) {
@@ -113,7 +113,7 @@ function limpiarVencidos() {
 async function abrirSesion(llave) {
   if (!llave || llave.length < 20) {
     throw new ConfigError(
-      'Falta la llave personal. Entra a la app \u2192 Panel \u2192 "Conectar con Claude" y copia la tuya.'
+      'Falta entrar con Google. En Claude, toca "Conectar" en este conector y entra con tu cuenta de siempre.'
     );
   }
   limpiarVencidos();
@@ -1026,15 +1026,12 @@ var formatters = {
   G: function(date, token, localize3) {
     const era = date.getFullYear() > 0 ? 1 : 0;
     switch (token) {
-      // AD, BC
       case "G":
       case "GG":
       case "GGG":
         return localize3.era(era, { width: "abbreviated" });
-      // A, B
       case "GGGGG":
         return localize3.era(era, { width: "narrow" });
-      // Anno Domini, Before Christ
       case "GGGG":
       default:
         return localize3.era(era, { width: "wide" });
@@ -1084,28 +1081,22 @@ var formatters = {
   Q: function(date, token, localize3) {
     const quarter = Math.ceil((date.getMonth() + 1) / 3);
     switch (token) {
-      // 1, 2, 3, 4
       case "Q":
         return String(quarter);
-      // 01, 02, 03, 04
       case "QQ":
         return addLeadingZeros(quarter, 2);
-      // 1st, 2nd, 3rd, 4th
       case "Qo":
         return localize3.ordinalNumber(quarter, { unit: "quarter" });
-      // Q1, Q2, Q3, Q4
       case "QQQ":
         return localize3.quarter(quarter, {
           width: "abbreviated",
           context: "formatting"
         });
-      // 1, 2, 3, 4 (narrow quarter; could be not numerical)
       case "QQQQQ":
         return localize3.quarter(quarter, {
           width: "narrow",
           context: "formatting"
         });
-      // 1st quarter, 2nd quarter, ...
       case "QQQQ":
       default:
         return localize3.quarter(quarter, {
@@ -1118,28 +1109,22 @@ var formatters = {
   q: function(date, token, localize3) {
     const quarter = Math.ceil((date.getMonth() + 1) / 3);
     switch (token) {
-      // 1, 2, 3, 4
       case "q":
         return String(quarter);
-      // 01, 02, 03, 04
       case "qq":
         return addLeadingZeros(quarter, 2);
-      // 1st, 2nd, 3rd, 4th
       case "qo":
         return localize3.ordinalNumber(quarter, { unit: "quarter" });
-      // Q1, Q2, Q3, Q4
       case "qqq":
         return localize3.quarter(quarter, {
           width: "abbreviated",
           context: "standalone"
         });
-      // 1, 2, 3, 4 (narrow quarter; could be not numerical)
       case "qqqqq":
         return localize3.quarter(quarter, {
           width: "narrow",
           context: "standalone"
         });
-      // 1st quarter, 2nd quarter, ...
       case "qqqq":
       default:
         return localize3.quarter(quarter, {
@@ -1155,22 +1140,18 @@ var formatters = {
       case "M":
       case "MM":
         return lightFormatters.M(date, token);
-      // 1st, 2nd, ..., 12th
       case "Mo":
         return localize3.ordinalNumber(month + 1, { unit: "month" });
-      // Jan, Feb, ..., Dec
       case "MMM":
         return localize3.month(month, {
           width: "abbreviated",
           context: "formatting"
         });
-      // J, F, ..., D
       case "MMMMM":
         return localize3.month(month, {
           width: "narrow",
           context: "formatting"
         });
-      // January, February, ..., December
       case "MMMM":
       default:
         return localize3.month(month, { width: "wide", context: "formatting" });
@@ -1180,28 +1161,22 @@ var formatters = {
   L: function(date, token, localize3) {
     const month = date.getMonth();
     switch (token) {
-      // 1, 2, ..., 12
       case "L":
         return String(month + 1);
-      // 01, 02, ..., 12
       case "LL":
         return addLeadingZeros(month + 1, 2);
-      // 1st, 2nd, ..., 12th
       case "Lo":
         return localize3.ordinalNumber(month + 1, { unit: "month" });
-      // Jan, Feb, ..., Dec
       case "LLL":
         return localize3.month(month, {
           width: "abbreviated",
           context: "standalone"
         });
-      // J, F, ..., D
       case "LLLLL":
         return localize3.month(month, {
           width: "narrow",
           context: "standalone"
         });
-      // January, February, ..., December
       case "LLLL":
       default:
         return localize3.month(month, { width: "wide", context: "standalone" });
@@ -1242,7 +1217,6 @@ var formatters = {
   E: function(date, token, localize3) {
     const dayOfWeek = date.getDay();
     switch (token) {
-      // Tue
       case "E":
       case "EE":
       case "EEE":
@@ -1250,19 +1224,16 @@ var formatters = {
           width: "abbreviated",
           context: "formatting"
         });
-      // T
       case "EEEEE":
         return localize3.day(dayOfWeek, {
           width: "narrow",
           context: "formatting"
         });
-      // Tu
       case "EEEEEE":
         return localize3.day(dayOfWeek, {
           width: "short",
           context: "formatting"
         });
-      // Tuesday
       case "EEEE":
       default:
         return localize3.day(dayOfWeek, {
@@ -1276,13 +1247,10 @@ var formatters = {
     const dayOfWeek = date.getDay();
     const localDayOfWeek = (dayOfWeek - options.weekStartsOn + 8) % 7 || 7;
     switch (token) {
-      // Numerical value (Nth day of week with current locale or weekStartsOn)
       case "e":
         return String(localDayOfWeek);
-      // Padded numerical value
       case "ee":
         return addLeadingZeros(localDayOfWeek, 2);
-      // 1st, 2nd, ..., 7th
       case "eo":
         return localize3.ordinalNumber(localDayOfWeek, { unit: "day" });
       case "eee":
@@ -1290,19 +1258,16 @@ var formatters = {
           width: "abbreviated",
           context: "formatting"
         });
-      // T
       case "eeeee":
         return localize3.day(dayOfWeek, {
           width: "narrow",
           context: "formatting"
         });
-      // Tu
       case "eeeeee":
         return localize3.day(dayOfWeek, {
           width: "short",
           context: "formatting"
         });
-      // Tuesday
       case "eeee":
       default:
         return localize3.day(dayOfWeek, {
@@ -1316,13 +1281,10 @@ var formatters = {
     const dayOfWeek = date.getDay();
     const localDayOfWeek = (dayOfWeek - options.weekStartsOn + 8) % 7 || 7;
     switch (token) {
-      // Numerical value (same as in `e`)
       case "c":
         return String(localDayOfWeek);
-      // Padded numerical value
       case "cc":
         return addLeadingZeros(localDayOfWeek, token.length);
-      // 1st, 2nd, ..., 7th
       case "co":
         return localize3.ordinalNumber(localDayOfWeek, { unit: "day" });
       case "ccc":
@@ -1330,19 +1292,16 @@ var formatters = {
           width: "abbreviated",
           context: "standalone"
         });
-      // T
       case "ccccc":
         return localize3.day(dayOfWeek, {
           width: "narrow",
           context: "standalone"
         });
-      // Tu
       case "cccccc":
         return localize3.day(dayOfWeek, {
           width: "short",
           context: "standalone"
         });
-      // Tuesday
       case "cccc":
       default:
         return localize3.day(dayOfWeek, {
@@ -1356,34 +1315,27 @@ var formatters = {
     const dayOfWeek = date.getDay();
     const isoDayOfWeek = dayOfWeek === 0 ? 7 : dayOfWeek;
     switch (token) {
-      // 2
       case "i":
         return String(isoDayOfWeek);
-      // 02
       case "ii":
         return addLeadingZeros(isoDayOfWeek, token.length);
-      // 2nd
       case "io":
         return localize3.ordinalNumber(isoDayOfWeek, { unit: "day" });
-      // Tue
       case "iii":
         return localize3.day(dayOfWeek, {
           width: "abbreviated",
           context: "formatting"
         });
-      // T
       case "iiiii":
         return localize3.day(dayOfWeek, {
           width: "narrow",
           context: "formatting"
         });
-      // Tu
       case "iiiiii":
         return localize3.day(dayOfWeek, {
           width: "short",
           context: "formatting"
         });
-      // Tuesday
       case "iiii":
       default:
         return localize3.day(dayOfWeek, {
@@ -1549,21 +1501,13 @@ var formatters = {
       return "Z";
     }
     switch (token) {
-      // Hours and optional minutes
       case "X":
         return formatTimezoneWithOptionalMinutes(timezoneOffset);
-      // Hours, minutes and optional seconds without `:` delimiter
-      // Note: neither ISO-8601 nor JavaScript supports seconds in timezone offsets
-      // so this token always has the same output as `XX`
       case "XXXX":
       case "XX":
         return formatTimezone(timezoneOffset);
-      // Hours, minutes and optional seconds with `:` delimiter
-      // Note: neither ISO-8601 nor JavaScript supports seconds in timezone offsets
-      // so this token always has the same output as `XXX`
       case "XXXXX":
       case "XXX":
-      // Hours and minutes with `:` delimiter
       default:
         return formatTimezone(timezoneOffset, ":");
     }
@@ -1572,21 +1516,13 @@ var formatters = {
   x: function(date, token, _localize) {
     const timezoneOffset = date.getTimezoneOffset();
     switch (token) {
-      // Hours and optional minutes
       case "x":
         return formatTimezoneWithOptionalMinutes(timezoneOffset);
-      // Hours, minutes and optional seconds without `:` delimiter
-      // Note: neither ISO-8601 nor JavaScript supports seconds in timezone offsets
-      // so this token always has the same output as `xx`
       case "xxxx":
       case "xx":
         return formatTimezone(timezoneOffset);
-      // Hours, minutes and optional seconds with `:` delimiter
-      // Note: neither ISO-8601 nor JavaScript supports seconds in timezone offsets
-      // so this token always has the same output as `xxx`
       case "xxxxx":
       case "xxx":
-      // Hours and minutes with `:` delimiter
       default:
         return formatTimezone(timezoneOffset, ":");
     }
@@ -1595,12 +1531,10 @@ var formatters = {
   O: function(date, token, _localize) {
     const timezoneOffset = date.getTimezoneOffset();
     switch (token) {
-      // Short
       case "O":
       case "OO":
       case "OOO":
         return "GMT" + formatTimezoneShort(timezoneOffset, ":");
-      // Long
       case "OOOO":
       default:
         return "GMT" + formatTimezone(timezoneOffset, ":");
@@ -1610,12 +1544,10 @@ var formatters = {
   z: function(date, token, _localize) {
     const timezoneOffset = date.getTimezoneOffset();
     switch (token) {
-      // Short
       case "z":
       case "zz":
       case "zzz":
         return "GMT" + formatTimezoneShort(timezoneOffset, ":");
-      // Long
       case "zzzz":
       default:
         return "GMT" + formatTimezone(timezoneOffset, ":");
@@ -3107,7 +3039,7 @@ async function handler(req, res) {
       nombre: "coordinacion-gemb",
       mcp: VERSION_PROTOCOLO,
       estado: "en pie",
-      como_conectar: 'Cada persona usa su propia llave: app \u2192 Panel \u2192 "Conectar con Claude". Se pega como cabecera Authorization: Bearer <llave>.'
+      como_conectar: 'Agrega esta direcci\xF3n como conector en Claude con autenticaci\xF3n "siempre requerida" y entra con Google cuando te lo pida. Los pasos, en la app: Ajustes (rueda dentada) \u2192 "Conectar con Claude".'
     });
     return;
   }

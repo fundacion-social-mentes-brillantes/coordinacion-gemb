@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import {
@@ -159,13 +159,8 @@ export function SessionsPage() {
       <InstallButton className="btn-secondary min-h-[48px] w-full text-sm" />
       <IosInstallHelp />
 
-      {/* Conectar con Claude para poder preguntarle por la asistencia. */}
-      <Link
-        to="/conectar"
-        className="btn-secondary min-h-[48px] w-full text-sm"
-      >
-        🤖 Conectar con Claude
-      </Link>
+      {/* Conectar con Claude se movió a Ajustes (rueda dentada, arriba):
+          se hace una sola vez y aquí competía con "Nueva sesión". */}
 
       {/* Filtros */}
       <div className="card p-3">

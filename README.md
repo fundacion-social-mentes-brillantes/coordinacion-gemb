@@ -291,9 +291,10 @@ depende de su rol:
 > **Coordinación: solo lectura. Administración: lectura y escritura.**
 > Y toda escritura pasa por un borrador que hay que confirmar.
 
-No hace falta configurar nada: se saca la llave desde la propia app
-(**Sesiones → 🤖 Conectar con Claude**) y se pega en el conector. Funciona en
-cualquier Claude, celular incluido. Los detalles están en
+No hay llaves que copiar: se agrega la dirección del servidor como conector y
+se entra con Google, igual que en cualquier otro. Los pasos, dentro de la app,
+en **Ajustes (rueda dentada) → Conectar con Claude**. Funciona en cualquier
+Claude, celular incluido. Los detalles están en
 [`mcp/README.md`](./mcp/README.md).
 
 ---

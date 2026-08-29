@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { Logo } from '../components/Logo';
 import { Spinner } from '../components/Spinner';
 import { ROLE_LABELS } from '../lib/constants';
+import { redirectPermitido } from '../lib/oauthRedirect';
 
 /**
  * "Entrar con Google" para conectar Claude.
@@ -17,12 +18,18 @@ export function AuthorizePage() {
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState('');
 
-  const { redirectUri, state, reto } = useMemo(() => {
+  const { redirectUri, state, reto, destinoAjeno } = useMemo(() => {
     const p = new URLSearchParams(window.location.search);
+    const pedido = p.get('redirect_uri') ?? '';
+    // Aquí se puede llegar por un enlace suelto, sin pasar por /api/oauth. Por
+    // eso se vuelve a comprobar: al aceptar se entrega la llave de sesión de
+    // quien acepta, y solo puede acabar en Claude.
+    const permitido = pedido !== '' && redirectPermitido(pedido);
     return {
-      redirectUri: p.get('redirect_uri') ?? '',
+      redirectUri: permitido ? pedido : '',
       state: p.get('state') ?? '',
       reto: p.get('code_challenge') ?? '',
+      destinoAjeno: pedido !== '' && !permitido,
     };
   }, []);
 
@@ -34,7 +41,9 @@ export function AuthorizePage() {
 
   const aceptar = () => {
     const llave = user?.refreshToken;
-    if (!llave || !redirectUri) {
+    // `redirectUri` ya viene filtrado, pero se comprueba otra vez justo antes
+    // de entregar: es la última línea antes de que la llave salga de aquí.
+    if (!llave || !redirectUri || !redirectPermitido(redirectUri)) {
       setError('Falta información para completar la conexión. Vuelve a intentarlo desde Claude.');
       return;
     }
@@ -53,6 +62,24 @@ export function AuthorizePage() {
     if (state) destino.searchParams.set('state', state);
     window.location.replace(destino.toString());
   };
+
+  // Alguien intentó que esto devolviera la llave a un sitio que no es Claude.
+  // Se corta aquí y se dice claro, porque quien lo ve probablemente llegó por
+  // un enlace que le pasaron.
+  if (destinoAjeno) {
+    return (
+      <Marco>
+        <p className="text-sm font-semibold text-red-700">Conexión bloqueada</p>
+        <p className="mt-2 text-sm text-slate-600">
+          Este enlace pedía devolver tu acceso a un sitio que no es Claude, así
+          que no se ha entregado nada. Si te lo mandó alguien, bórralo.
+        </p>
+        <p className="mt-2 text-sm text-slate-600">
+          Para conectar de verdad, hazlo desde Claude: él abre esta pantalla solo.
+        </p>
+      </Marco>
+    );
+  }
 
   if (!redirectUri) {
     return (

@@ -17,6 +17,8 @@
 //  tanto qué puede hacer— viene dado. No hay nada que configurar por usuario.
 // ---------------------------------------------------------------------------
 
+import { redirectPermitido } from '../../src/lib/oauthRedirect';
+
 const RAIZ = 'https://coordinacion-gemb.vercel.app';
 const RECURSO = `${RAIZ}/api/mcp`;
 
@@ -41,21 +43,51 @@ function parametros(req: Peticion): URLSearchParams {
   }
 }
 
-/** El cuerpo puede llegar como objeto ya interpretado o como texto. */
+/**
+ * El cuerpo, con cada valor convertido a texto.
+ *
+ * Sirve para /token, donde todo son cadenas sueltas (grant_type, code…) y da
+ * igual cómo llegaran. NO sirve para /register, que recibe listas: ver
+ * `cuerpoCrudo`.
+ */
 function cuerpo(req: Peticion): Record<string, string> {
+  const b = crudo(req);
+  const salida: Record<string, string> = {};
+  for (const [k, v] of Object.entries(b)) {
+    salida[k] = typeof v === 'string' ? v : JSON.stringify(v);
+  }
+  return salida;
+}
+
+/**
+ * El cuerpo TAL CUAL, conservando listas y números.
+ *
+ * Aquí estuvo el fallo que dejaba el conector sin herramientas: el registro
+ * recibe `redirect_uris` como lista, pero se le pasaba por el aplanador de
+ * arriba, que la convertía en la cadena '["https://…"]'. `Array.isArray` daba
+ * falso, se devolvía una lista vacía, y el cliente concluía —con razón— que su
+ * dirección de retorno no había quedado registrada y abortaba con un
+ * "No se pudo registrar" que no decía por qué.
+ */
+function crudo(req: Peticion): Record<string, unknown> {
   const b = req.body;
   if (!b) return {};
   if (typeof b === 'string') {
-    // application/x-www-form-urlencoded
-    return Object.fromEntries(new URLSearchParams(b));
-  }
-  if (typeof b === 'object') {
-    const salida: Record<string, string> = {};
-    for (const [k, v] of Object.entries(b as Record<string, unknown>)) {
-      salida[k] = typeof v === 'string' ? v : JSON.stringify(v);
+    const t = b.trim();
+    if (!t) return {};
+    // Puede venir como JSON en texto (según cómo lo entregue la plataforma) o
+    // como formulario. Se intenta lo primero y se cae a lo segundo.
+    if (t.startsWith('{')) {
+      try {
+        const j: unknown = JSON.parse(t);
+        if (j && typeof j === 'object') return j as Record<string, unknown>;
+      } catch {
+        /* no era JSON: se trata como formulario */
+      }
     }
-    return salida;
+    return Object.fromEntries(new URLSearchParams(t));
   }
+  if (typeof b === 'object') return b as Record<string, unknown>;
   return {};
 }
 
@@ -91,12 +123,33 @@ export function metadatosRecurso() {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Una lista de direcciones, venga como lista de verdad, como una sola cadena,
+ * o como una lista dentro de una cadena. Se es tolerante a propósito: lo que
+ * de verdad decide quién recibe el código es `redirectPermitido`, no esto.
+ */
+function listaDeTextos(v: unknown): string[] {
+  if (Array.isArray(v)) return v.filter((x): x is string => typeof x === 'string');
+  if (typeof v !== 'string') return [];
+  const t = v.trim();
+  if (!t) return [];
+  if (t.startsWith('[')) {
+    try {
+      const j: unknown = JSON.parse(t);
+      if (Array.isArray(j)) return j.filter((x): x is string => typeof x === 'string');
+    } catch {
+      /* no era una lista en JSON: se toma como una sola dirección */
+    }
+  }
+  return [t];
+}
+
+/**
  * Cualquier cliente puede registrarse. No es un descuido: el registro no
  * concede nada. Lo único que abre datos es que una persona real entre con su
  * Google y acepte, y lo que vea entonces lo deciden sus permisos en la app.
  */
 export function registrarCliente(datos: Record<string, unknown>) {
-  const redirects = Array.isArray(datos.redirect_uris) ? datos.redirect_uris : [];
+  const redirects = listaDeTextos(datos.redirect_uris);
   return {
     client_id: `gemb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
     client_id_issued_at: Math.floor(Date.now() / 1000),
@@ -146,6 +199,11 @@ export function irAAutorizar(req: Peticion): { destino: string } | { error: stri
   const p = parametros(req);
   const redirect = p.get('redirect_uri');
   if (!redirect) return { error: 'Falta redirect_uri.' };
+  // Primera puerta. La segunda está en /autorizar, que vuelve a comprobarlo
+  // antes de entregar nada: a esa pantalla se puede llegar sin pasar por aquí.
+  if (!redirectPermitido(redirect)) {
+    return { error: 'Esa dirección de retorno no está autorizada.' };
+  }
 
   const destino = new URL(`${RAIZ}/autorizar`);
   destino.searchParams.set('redirect_uri', redirect);
@@ -227,7 +285,8 @@ export async function atenderOauth(req: Peticion, res: Respuesta, ruta: string) 
       return;
 
     case 'register':
-      res.status(201).json(registrarCliente(cuerpo(req) as Record<string, unknown>));
+      // `crudo` y no `cuerpo`: aquí llegan listas y hay que conservarlas.
+      res.status(201).json(registrarCliente(crudo(req)));
       return;
 
     case 'authorize': {

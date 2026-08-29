@@ -45,6 +45,9 @@ const AuthorizePage = lazy(() =>
 const ConnectPage = lazy(() =>
   import('./pages/ConnectPage').then((m) => ({ default: m.ConnectPage })),
 );
+const SettingsPage = lazy(() =>
+  import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+);
 const NotFoundPage = lazy(() =>
   import('./pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })),
 );
@@ -68,8 +71,11 @@ export default function App() {
             <Route index element={<Navigate to="/sesiones" replace />} />
             <Route path="/sesiones" element={<SessionsPage />} />
             <Route path="/sesiones/:id" element={<AttendancePage />} />
-            {/* Conectar con Claude: cada quien saca su propia llave, y lo que
-                Claude puede hacer depende de su rol. También las coordinadoras. */}
+            {/* Ajustes y, dentro, conectar con Claude. Fuera de la barra de
+                abajo a propósito: se toca una vez y ya. Lo que Claude puede
+                hacer depende del rol de cada quien, así que también entran
+                las coordinadoras. */}
+            <Route path="/ajustes" element={<SettingsPage />} />
             <Route path="/conectar" element={<ConnectPage />} />
 
             {/* Solo administración (las coordinadoras solo usan Sesiones) */}

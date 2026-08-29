@@ -52,11 +52,24 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
-        // NO TOCAR: el ayudante de login de Google vive en /__/auth/ y ahora
-        // se sirve desde NUESTRO propio dominio (ver src/lib/firebase.ts). Si
-        // se quita esta línea, el service worker le responde con el index.html
-        // de la app y el ingreso se rompe para todo el mundo.
-        navigateFallbackDenylist: [/^\/__\/auth\//],
+        // NO TOCAR NINGUNA DE LAS DOS.
+        //
+        // El service worker responde a CUALQUIER navegación con el index.html
+        // guardado, que es justo lo que hace que la app abra sin conexión. El
+        // problema es que también lo haría con las direcciones que no son
+        // pantallas de la app, y entonces el navegador nunca llega al
+        // servidor. Aquí se listan esas excepciones:
+        //
+        //  /__/auth/  el ayudante de login de Google, servido desde nuestro
+        //             propio dominio (ver src/lib/firebase.ts). Sin esta
+        //             línea, el ingreso se rompe para todo el mundo.
+        //
+        //  /api/      el servidor MCP y su OAuth. Sin esta línea, al tocar
+        //             "Conectar" en Claude el navegador se queda en
+        //             /api/oauth/authorize con el index.html cacheado encima
+        //             y la app pinta "Página no encontrada": el 302 hacia
+        //             /autorizar nunca se llega a pedir.
+        navigateFallbackDenylist: [/^\/__\//, /^\/api\//],
       },
       // El SW no se registra en desarrollo para evitar cachés molestas.
       devOptions: { enabled: false },

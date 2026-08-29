@@ -228,8 +228,9 @@ export default async function handler(req: Req, res: Res) {
       mcp: VERSION_PROTOCOLO,
       estado: 'en pie',
       como_conectar:
-        'Cada persona usa su propia llave: app → Panel → "Conectar con Claude". ' +
-        'Se pega como cabecera Authorization: Bearer <llave>.',
+        'Agrega esta dirección como conector en Claude con autenticación ' +
+        '"siempre requerida" y entra con Google cuando te lo pida. Los pasos, ' +
+        'en la app: Ajustes (rueda dentada) → "Conectar con Claude".',
     });
     return;
   }
