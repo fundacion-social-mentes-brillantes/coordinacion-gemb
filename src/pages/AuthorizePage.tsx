@@ -14,7 +14,10 @@ import { redirectPermitido } from '../lib/oauthRedirect';
  * su rol —y por tanto qué podrá hacer Claude— viene dado, sin configurar nada.
  */
 export function AuthorizePage() {
-  const { user, profile, loading, signIn } = useAuth();
+  // `authError` es donde `signIn` deja sus avisos (ventana cerrada, iPhone con
+  // la app instalada…): `signIn` no lanza errores, así que sin leerlo aquí el
+  // botón fallaba en silencio.
+  const { user, profile, loading, signIn, authError } = useAuth();
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState('');
 
@@ -117,7 +120,9 @@ export function AuthorizePage() {
         >
           Entrar con Google
         </button>
-        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        {(error || authError) && (
+          <p className="mt-3 text-sm text-red-600">{error || authError}</p>
+        )}
       </Marco>
     );
   }

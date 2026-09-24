@@ -11,6 +11,7 @@ import {
   persistentLocalCache,
   persistentMultipleTabManager,
 } from 'firebase/firestore';
+import authHosts from './authHosts.json';
 
 /**
  * DOMINIO DE AUTENTICACIÓN — por qué esto importa (sobre todo en iPhone)
@@ -31,29 +32,30 @@ import {
  */
 // Dominios propios de la app que YA están registrados en Google Cloud
 // (Orígenes autorizados + URI de redireccionamiento `/__/auth/handler`).
+// La lista vive en `authHosts.json` para que el build la pueda comprobar.
 //
-// ⚠️ ESTA LISTA VA VACÍA A PROPÓSITO. No es un olvido.
+// ⚠️ SI LA LISTA ESTÁ VACÍA, ES A PROPÓSITO. No es un olvido.
 //
-// Poner aquí un dominio ANTES de registrarlo en Google Cloud rompe el ingreso
+// Poner ahí un dominio ANTES de registrarlo en Google Cloud rompe el ingreso
 // para TODO EL MUNDO, no solo en iPhone: Google responde `redirect_uri_mismatch`
-// y nadie puede entrar. Pasó exactamente eso el 2026-08-28 al desplegar este
-// archivo con 'coordinacion-gemb.vercel.app' en la lista sin haber hecho antes
-// el registro.
+// y nadie puede entrar. Pasó exactamente eso el 2026-08-28 al desplegar con
+// 'coordinacion-gemb.vercel.app' en la lista sin haber hecho antes el registro.
 //
 // EL ORDEN CORRECTO ES:
 //   1. Google Cloud → APIs y servicios → Credenciales → el cliente OAuth de
 //      web (id 1019293780998-rgi4eu70dekg9id9172e4tp5mg5jr39f). Añadir
 //      https://coordinacion-gemb.vercel.app/__/auth/handler a "URI de
 //      redireccionamiento autorizados", y el dominio a "Orígenes autorizados".
-//   2. Comprobar que Google ya lo acepta, sin tocar nada (ver README, paso 4b):
-//      POST identitytoolkit.googleapis.com/v1/accounts:createAuthUri con
-//      {"providerId":"google.com","continueUri":"<el handler>"}, seguir el
-//      authUri que devuelve y comprobar que NO dice redirect_uri_mismatch.
-//   3. Solo entonces, añadir el dominio aquí y desplegar.
+//   2. Añadir el dominio a `authHosts.json` y correr `npm run check:auth`, que
+//      le pregunta a Google si ya lo acepta sin tocar nada.
+//   3. Desplegar. El build vuelve a correr esa comprobación y se DETIENE si
+//      Google no acepta algún dominio de la lista, así que un error en el
+//      orden ya no llega a producción: se queda en un build fallido.
 //
-// Mientras la lista esté vacía se usa el dominio de Firebase de siempre: el
-// iPhone sigue con el camino frágil, pero TODO EL MUNDO puede entrar.
-const APP_HOSTS: string[] = [];
+// Mientras la lista esté vacía se usa el dominio de Firebase de siempre. Todo
+// el mundo puede entrar; en el iPhone se entra por ventana emergente, y la app
+// instalada en el iPhone no puede entrar (ver `signIn` en AuthContext).
+const APP_HOSTS: readonly string[] = authHosts;
 const FIREBASE_DOMAIN = 'coordinacion-gemb.firebaseapp.com';
 
 function resolveAuthDomain(): string {
@@ -64,18 +66,30 @@ function resolveAuthDomain(): string {
   // avisar: significa que el iPhone usará el camino frágil.
   if (host !== 'localhost' && host !== '127.0.0.1') {
     console.warn(
-      `[GEMB] El dominio "${host}" no está en APP_HOSTS (src/lib/firebase.ts). ` +
+      `[GEMB] El dominio "${host}" no está en src/lib/authHosts.json. ` +
         'El ingreso con Google puede fallar en iPhone. Ver el paso 4b del README.',
     );
   }
   return FIREBASE_DOMAIN;
 }
 
+const AUTH_DOMAIN = resolveAuthDomain();
+
+/**
+ * ¿El ayudante de Google vive en nuestro propio dominio?
+ *
+ * De esto depende qué método de ingreso sirve en el iPhone: la redirección
+ * solo funciona ahí si es `true`. Ver `signIn` en AuthContext.
+ */
+export const authIsFirstParty =
+  typeof window !== 'undefined' && AUTH_DOMAIN === window.location.hostname;
+
 // Estas llaves NO son secretas: viajan en el bundle del navegador.
 // La seguridad real la dan las reglas de Firestore y el login de Google.
+// (scripts/check-auth-hosts.mjs repite la apiKey: si cambia, cambiarla allí.)
 const firebaseConfig = {
   apiKey: 'AIzaSyB-KQMYvpKun5oxQhqTSyF-ElhJxAp-eGQ',
-  authDomain: resolveAuthDomain(),
+  authDomain: AUTH_DOMAIN,
   projectId: 'coordinacion-gemb',
   storageBucket: 'coordinacion-gemb.firebasestorage.app',
   messagingSenderId: '1019293780998',

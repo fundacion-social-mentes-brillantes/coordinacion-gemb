@@ -25,10 +25,12 @@ import {
 import {
   auth,
   authReady,
+  authIsFirstParty,
   googleProvider,
   db,
   SUPER_ADMIN_EMAIL,
 } from '../lib/firebase';
+import { isAppleMobile, isStandalone } from '../lib/device';
 import type { UserProfile, Role } from '../types';
 
 interface AuthContextValue {
@@ -103,19 +105,27 @@ function mapAuthError(e: unknown): string {
   if (code.includes('web-storage-unsupported'))
     return 'Tu navegador está bloqueando el almacenamiento. Si estás en navegación privada, sal de ella e inténtalo de nuevo.';
   if (code.includes('popup-blocked'))
-    return 'El navegador bloqueó la ventana de Google. Inténtalo de nuevo.';
+    return isAppleMobile()
+      ? 'Safari no dejó abrir la ventana de Google. Vuelve a tocar «Ingresar con Google». Si sigue sin abrir: Ajustes del iPhone → Safari → apaga «Bloquear ventanas emergentes».'
+      : 'El navegador bloqueó la ventana de Google. Inténtalo de nuevo.';
   return 'No se pudo iniciar sesión. Inténtalo de nuevo.';
 }
 
-/** ¿Es un iPhone/iPad? Ahí la ventana emergente de Google es poco fiable. */
-function isAppleMobile(): boolean {
-  const ua = navigator.userAgent || '';
-  return (
-    /iP(hone|ad|od)/.test(ua) ||
-    // El iPad moderno se hace pasar por Mac; se delata por el táctil.
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  );
+/**
+ * ¿Es la app instalada del iPhone, que HOY no tiene forma de entrar?
+ *
+ * Ahí la ventana emergente de Google abre fuera del alcance de la app y la
+ * promesa se queda colgada para siempre, y la redirección vuelve sin sesión
+ * mientras el ayudante siga en el dominio de Firebase (ver `signIn`). Se
+ * exporta para que la pantalla de ingreso lo diga ANTES del toque.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function iosInstaladaSinIngreso(): boolean {
+  return isAppleMobile() && isStandalone() && !authIsFirstParty;
 }
+
+const IOS_INSTALADA_MSG =
+  'En la app instalada del iPhone todavía no se puede entrar con Google. Mientras tanto, entra desde Safari: funciona igual.';
 
 /**
  * Crea (o corrige) el documento del usuario en `users/{uid}`.
@@ -190,6 +200,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // en el iPhone se veía como "vuelve a la pantalla de ingreso".
     let redirectSettled = false;
     let signedOutSeen = false;
+    // ¿Ya se le mostró algo a la usuaria (ingreso o su cuenta)? A partir de
+    // ahí la red de seguridad de abajo no tiene nada que rescatar.
+    let settled = false;
+    const finishLoading = () => {
+      settled = true;
+      setLoading(false);
+    };
 
     const showLoginScreen = () => {
       if (!alive) return;
@@ -201,7 +218,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clearRedirectFlag();
         setAuthError('No se completó el ingreso. Inténtalo de nuevo.');
       }
-      setLoading(false);
+      finishLoading();
     };
 
     // 1) Cierra el viaje de vuelta desde Google (método por redirección).
@@ -259,16 +276,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               ...(snap.data() as Omit<UserProfile, 'uid'>),
             });
             setStuck(false);
+            finishLoading();
           } else {
+            // Aún no existe (se está creando): se deja ver "Preparando tu
+            // cuenta…", pero sin dar el arranque por resuelto, para que la
+            // red de seguridad rescate si la creación nunca termina.
             setProfile(null);
+            setLoading(false);
           }
-          setLoading(false);
         },
         (err) => {
           console.warn('Error leyendo el perfil:', err);
           if (!alive) return;
           setStuck(true);
-          setLoading(false);
+          finishLoading();
         },
       );
 
@@ -280,12 +301,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     // 3) Red de seguridad: nunca dejar una ruedita girando para siempre.
+    // Solo actúa si el arranque sigue sin resolverse. Antes saltaba siempre a
+    // los 15 segundos y marcaba "atascada" a quien ya había cargado su cuenta
+    // sin problema (o a quien justo terminaba de entrar por la ventana).
     const bailout = window.setTimeout(() => {
-      if (!alive) return;
+      if (!alive || settled) return;
       redirectSettled = true;
       if (auth.currentUser) setStuck(true);
       else showLoginScreen();
-      setLoading(false);
+      finishLoading();
     }, 15000);
 
     return () => {
@@ -299,10 +323,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async () => {
     setAuthError(null);
 
-    // En iPhone/iPad la ventana emergente de Google es poco fiable (con la app
-    // instalada no abre y la promesa se queda colgada en "Conectando…"), así
-    // que ahí se usa siempre el método por redirección.
-    if (isAppleMobile()) {
+    const viaRedirect = async () => {
       // Espera a que la persistencia esté fijada: si no, la sesión podría
       // guardarse donde no debe y perderse al volver de Google. Aquí sí se
       // puede esperar porque no hay ninguna ventana emergente que abrir.
@@ -314,6 +335,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clearRedirectFlag();
         setAuthError(mapAuthError(e));
       }
+    };
+
+    /*
+     * POR QUÉ EL IPHONE VA APARTE (y por qué antes no dejaba entrar)
+     *
+     * La redirección deja el resultado del ingreso guardado en el dominio del
+     * ayudante de Google. Mientras ese ayudante viva en el dominio de Firebase
+     * (`authIsFirstParty` falso), Safari lo trata como "de un tercero" y le
+     * esconde ese guardado a nuestra página: vuelve de Google sin sesión y
+     * muestra otra vez la pantalla de ingreso. Pasa en TODOS los navegadores
+     * del iPhone, porque todos son Safari por dentro. Antes el iPhone usaba
+     * siempre la redirección, así que no había manera de entrar.
+     *
+     * La ventana emergente no depende de ese guardado y SÍ funciona en Safari,
+     * salvo en la app instalada, donde se queda colgada. De ahí las tres
+     * salidas de abajo.
+     */
+    if (isAppleMobile()) {
+      if (authIsFirstParty) {
+        // Ayudante en nuestro dominio: la redirección funciona en Safari y
+        // en la app instalada, y es lo más fiable en el celular.
+        await viaRedirect();
+        return;
+      }
+      if (isStandalone()) {
+        // App instalada con el ayudante de Firebase: ninguno de los dos
+        // métodos puede funcionar. Mejor decirlo que dejarla dando vueltas.
+        setAuthError(IOS_INSTALADA_MSG);
+        return;
+      }
+      // Safari normal: ventana emergente, sin plan B. La redirección aquí
+      // vuelve sin sesión, así que "reintentar por redirección" solo
+      // cambiaría un mensaje claro por un regreso mudo a esta pantalla.
+      try {
+        await signInWithPopup(auth, googleProvider);
+      } catch (e) {
+        const code = (e as { code?: string })?.code || '';
+        // Otro toque abrió una ventana nueva: esa manda, esta se ignora.
+        if (!code.includes('cancelled-popup')) setAuthError(mapAuthError(e));
+      }
       return;
     }
 
@@ -324,25 +385,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await signInWithPopup(auth, googleProvider);
     } catch (e) {
       const code = (e as { code?: string })?.code || '';
+      // Un segundo toque abrió otra ventana: la nueva sigue su curso. Irse
+      // por redirección aquí sacaría a la usuaria de la página a mitad del
+      // ingreso que sí está en marcha.
+      if (code.includes('cancelled-popup')) return;
       // Si el popup no funciona (frecuente en algunos móviles), usa redirect.
       if (
         code.includes('popup-blocked') ||
         code.includes('popup-closed') ||
-        code.includes('cancelled-popup') ||
         code.includes('operation-not-supported') ||
         // Navegador que bloquea el almacenamiento de la ventana emergente
         // (Safari y algunos navegadores con el rastreo muy restringido).
         code.includes('web-storage-unsupported') ||
         code.includes('internal-error')
       ) {
-        await authReady;
-        markRedirectStarted();
-        try {
-          await signInWithRedirect(auth, googleProvider);
-        } catch (e2) {
-          clearRedirectFlag();
-          setAuthError(mapAuthError(e2));
-        }
+        await viaRedirect();
       } else {
         setAuthError(mapAuthError(e));
       }

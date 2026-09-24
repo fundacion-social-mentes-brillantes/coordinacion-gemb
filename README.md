@@ -132,15 +132,15 @@ Cuando Vercel te dé la URL (p. ej. `coordinacion-gemb.vercel.app`):
 
 ### 4b) Registrar el dominio en Google Cloud  ⚠️ imprescindible para el iPhone
 
-Esto es lo que hace que **el iPhone pueda entrar**. Es un solo campo y se hace
-una única vez.
+Esto es lo que hace que **la app instalada en el iPhone pueda entrar**. Son dos
+campos y se hace una única vez.
 
 Para entrar con Google, Firebase usa una página "ayudante" en
 `/__/auth/handler`. Si esa página vive en otro dominio
 (`coordinacion-gemb.firebaseapp.com`), **Safari/iOS le bloquea el
 almacenamiento** por ser "de un tercero": la sesión se pierde en el camino y el
-iPhone vuelve a la pantalla de ingreso como si nada. Por eso la app ahora usa
-el ayudante en **su propio dominio** (`vercel.json` reenvía `/__/auth/*` a
+iPhone vuelve a la pantalla de ingreso como si nada. La solución es usar el
+ayudante en **su propio dominio** (`vercel.json` ya reenvía `/__/auth/*` a
 Firebase), y Google exige que ese dominio esté registrado:
 
 > **El orden importa:** este paso va **ANTES** de publicar el cambio. Si se
@@ -169,11 +169,27 @@ Firebase), y Google exige que ese dominio esté registrado:
 
 > No borres los URI que ya estaban (`...firebaseapp.com/__/auth/handler`): se
 > suman, no se reemplazan.
+
+6. Añade el dominio a [`src/lib/authHosts.json`](./src/lib/authHosts.json)
+   (queda `["coordinacion-gemb.vercel.app"]`) y comprueba, sin tocar nada:
+
+   ```
+   npm run check:auth
+   ```
+
+   Tiene que decir `✓ ... Google acepta`. El build de Vercel corre la misma
+   comprobación y **se detiene** si Google no acepta algún dominio de la lista,
+   así que un error de orden ya no tumba el ingreso de todo el mundo.
+
+> **Qué pasa mientras este paso no esté hecho.** Todo el mundo puede entrar. En
+> el iPhone se entra desde **Safari** (por ventana emergente), pero la **app
+> instalada** en el iPhone no puede: allí la pantalla de ingreso lo explica y
+> manda a Safari, y la ayuda para instalar se esconde para no llevar a nadie a
+> ese callejón.
 >
 > Si algún día la app cambia de dominio, hay que repetir este paso con el nuevo
-> dominio y añadirlo a `APP_HOSTS` en
-> [`src/lib/firebase.ts`](./src/lib/firebase.ts). Si falta una de las dos
-> cosas, el iPhone deja de poder entrar (la consola del navegador avisa).
+> dominio. Si falta el registro o la línea en `authHosts.json`, la app
+> instalada del iPhone deja de poder entrar (la consola del navegador avisa).
 
 ### 5) Primer uso
 

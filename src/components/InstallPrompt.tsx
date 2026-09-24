@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { InstallIcon } from './Icons';
+import { authIsFirstParty } from '../lib/firebase';
+import { isAppleMobile, isStandalone } from '../lib/device';
 
 // Captura el evento `beforeinstallprompt` (Android/Chrome) para ofrecer
 // "Instalar app". En iPhone se instala desde Safari (Compartir → Añadir a
@@ -36,18 +38,20 @@ export function usePuedeInstalar() {
   return [deferred, setDeferred] as const;
 }
 
-/** ¿Hay que explicar los dos toques de Safari? (iPhone/iPad sin instalar.) */
+/**
+ * ¿Hay que explicar los dos toques de Safari? (iPhone/iPad sin instalar.)
+ *
+ * Mientras el ayudante de Google siga en el dominio de Firebase, la app
+ * instalada del iPhone NO puede entrar (ver `signIn` en AuthContext), y la
+ * sesión de Safari no pasa a la app instalada: son almacenes separados. Invitar
+ * a instalar sería mandar a la persona a un callejón sin salida, así que la
+ * ayuda se esconde hasta que el ingreso funcione ahí.
+ */
 export function useNecesitaAyudaIos() {
   const [show, setShow] = useState(false);
 
   useEffect(() => {
-    const isIOS =
-      /iP(hone|ad|od)/.test(navigator.userAgent) ||
-      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    const installed =
-      window.matchMedia?.('(display-mode: standalone)').matches ||
-      (navigator as Navigator & { standalone?: boolean }).standalone === true;
-    setShow(isIOS && !installed);
+    setShow(isAppleMobile() && !isStandalone() && authIsFirstParty);
   }, []);
 
   return show;

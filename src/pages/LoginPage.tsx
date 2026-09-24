@@ -1,5 +1,5 @@
 import { Navigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, iosInstaladaSinIngreso } from '../context/AuthContext';
 import { Logo } from '../components/Logo';
 import { Spinner, FullScreenSpinner } from '../components/Spinner';
 import { InstallButton, IosInstallHelp } from '../components/InstallPrompt';
@@ -25,20 +25,18 @@ export function LoginPage() {
   // OJO: los hooks van ANTES de cualquier `return`. Si se ponen después,
   // React se rompe ("Rendered more hooks than during the previous render").
 
-  // El botón de "Ingresar" navega hacia Google y no vuelve a resolver. Si el
-  // iPhone/Android restaura esta página desde su caché al volver "atrás", el
-  // botón se quedaría muerto en "Conectando…". Esto lo revive.
+  // Cuando el ingreso va por redirección, el botón navega hacia Google y no
+  // vuelve a resolver. Si el celular restaura esta página desde su caché al
+  // volver "atrás", el botón se quedaría muerto en "Conectando…". Esto lo
+  // revive.
+  //
+  // Antes también se revivía al volver a estar visible. Con la ventana
+  // emergente eso es un error: en el celular la ventana tapa esta página, y al
+  // volver el botón se reactivaba con el ingreso todavía a medias.
   useEffect(() => {
     const revive = () => setBusy(false);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') revive();
-    };
     window.addEventListener('pageshow', revive);
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      window.removeEventListener('pageshow', revive);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
+    return () => window.removeEventListener('pageshow', revive);
   }, []);
 
   /**
@@ -46,8 +44,15 @@ export function LoginPage() {
    * solo existe DESPUÉS de entrar. Quien se quede atascado en esta pantalla
    * nunca recibiría un arreglo. Aquí, como nadie está en mitad de una reunión,
    * la versión nueva se aplica sola (una sola vez, para no ciclar).
+   *
+   * Pero solo con la pantalla QUIETA. Actualizar es recargar, y recargar
+   * mientras se resuelve el regreso desde Google, o con la ventana de Google
+   * abierta, tira ese ingreso: la persona tendría que volver a empezar sin
+   * saber por qué.
    */
+  const quieta = !loading && !user && !busy;
   useEffect(() => {
+    if (!quieta) return;
     const YA = 'gemb:auto-actualizado';
     const apply = () => {
       try {
@@ -61,7 +66,7 @@ export function LoginPage() {
     if (isUpdateReady()) apply();
     window.addEventListener('gemb:update-ready', apply);
     return () => window.removeEventListener('gemb:update-ready', apply);
-  }, []);
+  }, [quieta]);
 
   if (loading) return <FullScreenSpinner label="Comprobando tu sesión…" />;
   if (user && stuck && !profile) return <AuthStuck />;
@@ -75,9 +80,14 @@ export function LoginPage() {
 
   const handleSignIn = async () => {
     setBusy(true);
-    await signIn();
-    setBusy(false);
+    try {
+      await signIn();
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const sinIngresoAqui = iosInstaladaSinIngreso();
 
   return (
     <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-gradient-to-b from-primary-50 to-surface px-6">
@@ -94,21 +104,25 @@ export function LoginPage() {
           reuniones.
         </p>
 
-        <button
-          type="button"
-          onClick={handleSignIn}
-          disabled={busy}
-          className="btn-primary btn-lg mt-6"
-        >
-          {busy ? (
-            <Spinner className="h-5 w-5 text-white" />
-          ) : (
-            <GoogleGlyph />
-          )}
-          {busy ? 'Conectando…' : 'Ingresar con Google'}
-        </button>
+        {sinIngresoAqui ? (
+          <AbrirEnSafari />
+        ) : (
+          <button
+            type="button"
+            onClick={handleSignIn}
+            disabled={busy}
+            className="btn-primary btn-lg mt-6"
+          >
+            {busy ? (
+              <Spinner className="h-5 w-5 text-white" />
+            ) : (
+              <GoogleGlyph />
+            )}
+            {busy ? 'Conectando…' : 'Ingresar con Google'}
+          </button>
+        )}
 
-        {authError && (
+        {authError && !sinIngresoAqui && (
           <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">
             {authError}
           </p>
@@ -137,6 +151,56 @@ export function LoginPage() {
         La primera vez que ingresas, tu acceso queda pendiente hasta que la
         coordinación lo apruebe.
       </p>
+    </div>
+  );
+}
+
+/**
+ * Lo que ve la app instalada del iPhone mientras no pueda entrar (ver
+ * `iosInstaladaSinIngreso`). En vez de un botón que no funciona, la salida
+ * que sí funciona: la misma app en Safari.
+ */
+function AbrirEnSafari() {
+  const [copiado, setCopiado] = useState(false);
+  const direccion = window.location.host;
+
+  const copiar = async () => {
+    try {
+      await navigator.clipboard.writeText(`https://${direccion}`);
+      setCopiado(true);
+    } catch {
+      /* sin portapapeles: la dirección está escrita justo al lado */
+    }
+  };
+
+  return (
+    <div className="mt-6 rounded-2xl bg-amber-50 px-4 py-3 text-left text-sm text-amber-800">
+      <p className="font-semibold">
+        En la app instalada del iPhone todavía no se puede entrar
+      </p>
+      <p className="mt-1">
+        Apple bloquea aquí el ingreso con Google. Mientras tanto, entra desde{' '}
+        <strong>Safari</strong>: es la misma app y funciona igual.
+      </p>
+      {/* `x-safari-https://` le pide al iPhone abrir el enlace en Safari y no
+          dentro de esta app (iOS 17 o más nuevo). */}
+      <a
+        href={`x-safari-https://${direccion}/login`}
+        className="btn-primary btn-lg mt-3"
+      >
+        Abrir en Safari
+      </a>
+      <p className="mt-3">
+        Si el botón no abre nada, abre Safari y escribe{' '}
+        <strong className="select-all">{direccion}</strong>
+      </p>
+      <button
+        type="button"
+        onClick={copiar}
+        className="btn-secondary mt-2 min-h-[44px] w-full text-sm"
+      >
+        {copiado ? 'Dirección copiada ✓' : 'Copiar la dirección'}
+      </button>
     </div>
   );
 }

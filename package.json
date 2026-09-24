@@ -6,7 +6,8 @@
   "description": "PWA de control de asistencia para la fundaci\u00f3n Gimnasio Emocional Mentes Brillantes (GEMB).",
   "scripts": {
     "dev": "vite",
-    "build": "npm run typecheck && npm run build:api && vite build",
+    "build": "npm run typecheck && npm run check:auth && npm run build:api && vite build",
+    "check:auth": "node scripts/check-auth-hosts.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.mcp.json",
     "gen:icons": "node scripts/gen-icons.mjs",
