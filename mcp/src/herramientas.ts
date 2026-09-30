@@ -2,6 +2,7 @@ import { olvidar, type Cliente } from './rest';
 import {
   desempaquetar,
   ejecutar,
+  prepararAgregarParticipante,
   prepararAprobarPersona,
   prepararCrearReunion,
   prepararEstadoReunion,
@@ -270,6 +271,26 @@ export const HERRAMIENTAS: Herramienta[] = [
     inputSchema: objeto({ reunion_id: txt('id de la reunión'), persona_id: txt('id de la persona') },
       ['reunion_id', 'persona_id']),
     ejecutar: (c, a) => prepararMarcar(c, String(a.reunion_id), String(a.persona_id), false),
+  },
+  {
+    name: 'preparar_agregar_participante',
+    title: 'Preparar: agregar a alguien que no está en la lista',
+    description:
+      'Para alguien que asistió pero no tiene ficha (buscar_persona no lo ' +
+      'encuentra). Igual que cuando una coordinadora lo agrega en plena reunión: ' +
+      'queda presente en esa reunión y en la bandeja "por revisar", SIN entrar a ' +
+      'la lista oficial. Si ya existe una ficha parecida, el borrador la muestra: ' +
+      'en ese caso usa preparar_marcar_presente con esa ficha en vez de crear otra. ' +
+      'Devuelve un borrador; no cambia nada hasta confirmar.',
+    alcance: 'escribir',
+    inputSchema: objeto(
+      {
+        reunion_id: txt('id de la reunión'),
+        nombre: txt('Nombre completo de la persona, tal como se quiere registrar'),
+      },
+      ['reunion_id', 'nombre'],
+    ),
+    ejecutar: (c, a) => prepararAgregarParticipante(c, String(a.reunion_id), String(a.nombre)),
   },
   {
     name: 'preparar_quitar_presente',

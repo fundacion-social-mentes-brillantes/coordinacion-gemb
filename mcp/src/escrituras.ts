@@ -1,6 +1,6 @@
 import type { Cliente } from './rest';
 import { AccesoError } from './rest';
-import { normalizeText } from '../../src/lib/normalize';
+import { buildNameParts, normalizeText } from '../../src/lib/normalize';
 import { SESSION_TYPE_LABELS, MODALITY_LABELS } from '../../src/lib/constants';
 import { fmtDate, toDate } from '../../src/lib/dates';
 import { TIPOS, type TipoCorto } from './informes';
@@ -142,6 +142,67 @@ export async function prepararMarcar(
   );
 }
 
+/**
+ * Alguien asistió pero no tiene ficha. Igual que cuando una coordinadora lo
+ * agrega en plena reunión desde la app: se crea una ficha "por revisar" (fuera
+ * de la lista oficial) y se marca presente, para que la lista de la reunión
+ * quede completa.
+ *
+ * Antes de crear nada busca fichas parecidas: la auditoría de septiembre de
+ * 2026 encontró a varias personas partidas en dos y tres fichas justamente por
+ * crear una nueva cuando ya existía.
+ */
+export async function prepararAgregarParticipante(
+  c: Cliente,
+  reunionId: string,
+  nombreRaw: string,
+): Promise<string> {
+  const sesion = (await c.cargarSesiones()).find((s) => s.id === reunionId);
+  if (!sesion) throw new AccesoError(`No existe ninguna reunión con id ${reunionId}.`);
+  const { fullName } = buildNameParts(nombreRaw);
+  if (fullName.length < 3) throw new AccesoError('El nombre es demasiado corto.');
+
+  const buscado = normalizeText(fullName);
+  const [personas, asistencia] = await Promise.all([c.cargarPersonas(), c.cargarAsistencia()]);
+
+  const yaEnLaReunion = asistencia.find(
+    (a) => a.sessionId === reunionId && normalizeText(a.fullName) === buscado,
+  );
+  if (yaEnLaReunion) throw new AccesoError(`${yaEnLaReunion.fullName} ya figura en esa reunión.`);
+
+  const palabras = buscado.split(' ').filter((p) => p.length > 2);
+  const parecidas = personas.filter((p) => {
+    const suyas = new Set(normalizeText(p.fullName).split(' '));
+    const comunes = palabras.filter((w) => suyas.has(w)).length;
+    return comunes > 0 && comunes >= Math.min(2, palabras.length);
+  });
+
+  return borrador(
+    c.uid,
+    'agregar_participante',
+    { reunionId, nombre: fullName },
+    [
+      'AGREGAR como participante (queda "por revisar", NO entra a la lista oficial):',
+      `  ${fullName}`,
+      `  y marcarla presente en ${SESSION_TYPE_LABELS[sesion.type]} del ${fmtDate(sesion.date)}` +
+        ` (${MODALITY_LABELS[sesion.modality]})`,
+      ...(parecidas.length
+        ? [
+            '',
+            '⚠️ OJO: ya hay fichas con un nombre parecido. Si es alguna de ellas, no',
+            'la agregues de nuevo: márcala con "preparar_marcar_presente".',
+            ...parecidas.slice(0, 8).map(
+              (p) => `  · ${p.fullName}${p.pendingReview ? ' (por revisar)' : ''}  id: ${p.id}`,
+            ),
+          ]
+        : []),
+      ...(sesion.status === 'closed'
+        ? ['', 'Esa reunión está CERRADA; se corrige igual por ser administración.']
+        : []),
+    ].join('\n'),
+  );
+}
+
 export async function prepararEstadoReunion(
   c: Cliente,
   reunionId: string,
@@ -263,6 +324,65 @@ export async function ejecutar(c: Cliente, o: Operacion): Promise<string> {
         `Listo. ${persona.fullName} ${o.op === 'marcar_presente' ? 'quedó presente en' : 'salió de'}` +
         ` ${SESSION_TYPE_LABELS[sesion.type]} del ${fmtDate(sesion.date)}.` +
         ` Ahora hay ${presentes} presentes.`
+      );
+    }
+
+    case 'agregar_participante': {
+      const { reunionId, nombre } = o.args as { reunionId: string; nombre: string };
+      const sesion = (await c.cargarSesiones()).find((s) => s.id === reunionId);
+      if (!sesion) throw new AccesoError('La reunión ya no existe.');
+
+      // Los mismos campos que escribe la app (addWalkinAndMarkPresent).
+      const parts = buildNameParts(nombre);
+      const id = idNuevo();
+      const fechaReunion = toDate(sesion.date);
+      await c.escribir(`members/${id}`, {
+        fullName: parts.fullName,
+        firstName: parts.firstName,
+        lastName: parts.lastName,
+        searchName: parts.searchName,
+        aliases: [],
+        phone: '',
+        notes: '',
+        active: true,
+        createdAt: new Date(),
+        createdBy: c.uid,
+        createdByName: c.nombre,
+        pendingIdentify: false,
+        pendingReview: true,
+        sourceSessionId: reunionId,
+        sourceSessionDate: fechaReunion,
+      });
+
+      // La app lo hace en un lote atómico; por REST van por separado, así que
+      // si la asistencia falla se deshace la ficha para no dejarla huérfana.
+      try {
+        await c.escribir(`sessions/${reunionId}/attendance/${id}`, {
+          memberId: id,
+          fullName: parts.fullName,
+          status: 'present',
+          checkedInAt: new Date(),
+          checkedInBy: c.uid,
+          checkedInByName: c.nombre,
+          sessionId: reunionId,
+          sessionType: sesion.type,
+          modality: sesion.modality,
+          sessionDate: fechaReunion,
+        });
+      } catch (e) {
+        await c.borrar(`members/${id}`).catch(() => {});
+        throw e;
+      }
+
+      const presentes = (await c.cargarAsistencia()).filter(
+        (a) => a.sessionId === reunionId,
+      ).length;
+      await c.escribir(`sessions/${reunionId}`, { presentCount: presentes }, ['presentCount']);
+
+      return (
+        `Listo. ${parts.fullName} quedó presente en ${SESSION_TYPE_LABELS[sesion.type]}` +
+        ` del ${fmtDate(sesion.date)} y espera revisión (no está en la lista oficial).` +
+        ` Ahora hay ${presentes} presentes.\n  id: ${id}`
       );
     }
 

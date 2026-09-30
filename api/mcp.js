@@ -222,6 +222,18 @@ var DIACRITICS = new RegExp("[\\u0300-\\u036f]", "g");
 function normalizeText(input) {
   return (input || "").normalize("NFD").replace(DIACRITICS, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
+function buildNameParts(fullNameRaw) {
+  const fullName = (fullNameRaw || "").trim().replace(/\s+/g, " ");
+  const parts = fullName.split(" ").filter(Boolean);
+  const firstName = parts[0] ?? "";
+  const lastName = parts.length > 1 ? parts.slice(1).join(" ") : "";
+  return {
+    fullName,
+    firstName,
+    lastName,
+    searchName: normalizeText(fullName)
+  };
+}
 
 // src/lib/constants.ts
 var SESSION_TYPE_LABELS = {
@@ -1026,12 +1038,15 @@ var formatters = {
   G: function(date, token, localize3) {
     const era = date.getFullYear() > 0 ? 1 : 0;
     switch (token) {
+      // AD, BC
       case "G":
       case "GG":
       case "GGG":
         return localize3.era(era, { width: "abbreviated" });
+      // A, B
       case "GGGGG":
         return localize3.era(era, { width: "narrow" });
+      // Anno Domini, Before Christ
       case "GGGG":
       default:
         return localize3.era(era, { width: "wide" });
@@ -1081,22 +1096,28 @@ var formatters = {
   Q: function(date, token, localize3) {
     const quarter = Math.ceil((date.getMonth() + 1) / 3);
     switch (token) {
+      // 1, 2, 3, 4
       case "Q":
         return String(quarter);
+      // 01, 02, 03, 04
       case "QQ":
         return addLeadingZeros(quarter, 2);
+      // 1st, 2nd, 3rd, 4th
       case "Qo":
         return localize3.ordinalNumber(quarter, { unit: "quarter" });
+      // Q1, Q2, Q3, Q4
       case "QQQ":
         return localize3.quarter(quarter, {
           width: "abbreviated",
           context: "formatting"
         });
+      // 1, 2, 3, 4 (narrow quarter; could be not numerical)
       case "QQQQQ":
         return localize3.quarter(quarter, {
           width: "narrow",
           context: "formatting"
         });
+      // 1st quarter, 2nd quarter, ...
       case "QQQQ":
       default:
         return localize3.quarter(quarter, {
@@ -1109,22 +1130,28 @@ var formatters = {
   q: function(date, token, localize3) {
     const quarter = Math.ceil((date.getMonth() + 1) / 3);
     switch (token) {
+      // 1, 2, 3, 4
       case "q":
         return String(quarter);
+      // 01, 02, 03, 04
       case "qq":
         return addLeadingZeros(quarter, 2);
+      // 1st, 2nd, 3rd, 4th
       case "qo":
         return localize3.ordinalNumber(quarter, { unit: "quarter" });
+      // Q1, Q2, Q3, Q4
       case "qqq":
         return localize3.quarter(quarter, {
           width: "abbreviated",
           context: "standalone"
         });
+      // 1, 2, 3, 4 (narrow quarter; could be not numerical)
       case "qqqqq":
         return localize3.quarter(quarter, {
           width: "narrow",
           context: "standalone"
         });
+      // 1st quarter, 2nd quarter, ...
       case "qqqq":
       default:
         return localize3.quarter(quarter, {
@@ -1140,18 +1167,22 @@ var formatters = {
       case "M":
       case "MM":
         return lightFormatters.M(date, token);
+      // 1st, 2nd, ..., 12th
       case "Mo":
         return localize3.ordinalNumber(month + 1, { unit: "month" });
+      // Jan, Feb, ..., Dec
       case "MMM":
         return localize3.month(month, {
           width: "abbreviated",
           context: "formatting"
         });
+      // J, F, ..., D
       case "MMMMM":
         return localize3.month(month, {
           width: "narrow",
           context: "formatting"
         });
+      // January, February, ..., December
       case "MMMM":
       default:
         return localize3.month(month, { width: "wide", context: "formatting" });
@@ -1161,22 +1192,28 @@ var formatters = {
   L: function(date, token, localize3) {
     const month = date.getMonth();
     switch (token) {
+      // 1, 2, ..., 12
       case "L":
         return String(month + 1);
+      // 01, 02, ..., 12
       case "LL":
         return addLeadingZeros(month + 1, 2);
+      // 1st, 2nd, ..., 12th
       case "Lo":
         return localize3.ordinalNumber(month + 1, { unit: "month" });
+      // Jan, Feb, ..., Dec
       case "LLL":
         return localize3.month(month, {
           width: "abbreviated",
           context: "standalone"
         });
+      // J, F, ..., D
       case "LLLLL":
         return localize3.month(month, {
           width: "narrow",
           context: "standalone"
         });
+      // January, February, ..., December
       case "LLLL":
       default:
         return localize3.month(month, { width: "wide", context: "standalone" });
@@ -1217,6 +1254,7 @@ var formatters = {
   E: function(date, token, localize3) {
     const dayOfWeek = date.getDay();
     switch (token) {
+      // Tue
       case "E":
       case "EE":
       case "EEE":
@@ -1224,16 +1262,19 @@ var formatters = {
           width: "abbreviated",
           context: "formatting"
         });
+      // T
       case "EEEEE":
         return localize3.day(dayOfWeek, {
           width: "narrow",
           context: "formatting"
         });
+      // Tu
       case "EEEEEE":
         return localize3.day(dayOfWeek, {
           width: "short",
           context: "formatting"
         });
+      // Tuesday
       case "EEEE":
       default:
         return localize3.day(dayOfWeek, {
@@ -1247,10 +1288,13 @@ var formatters = {
     const dayOfWeek = date.getDay();
     const localDayOfWeek = (dayOfWeek - options.weekStartsOn + 8) % 7 || 7;
     switch (token) {
+      // Numerical value (Nth day of week with current locale or weekStartsOn)
       case "e":
         return String(localDayOfWeek);
+      // Padded numerical value
       case "ee":
         return addLeadingZeros(localDayOfWeek, 2);
+      // 1st, 2nd, ..., 7th
       case "eo":
         return localize3.ordinalNumber(localDayOfWeek, { unit: "day" });
       case "eee":
@@ -1258,16 +1302,19 @@ var formatters = {
           width: "abbreviated",
           context: "formatting"
         });
+      // T
       case "eeeee":
         return localize3.day(dayOfWeek, {
           width: "narrow",
           context: "formatting"
         });
+      // Tu
       case "eeeeee":
         return localize3.day(dayOfWeek, {
           width: "short",
           context: "formatting"
         });
+      // Tuesday
       case "eeee":
       default:
         return localize3.day(dayOfWeek, {
@@ -1281,10 +1328,13 @@ var formatters = {
     const dayOfWeek = date.getDay();
     const localDayOfWeek = (dayOfWeek - options.weekStartsOn + 8) % 7 || 7;
     switch (token) {
+      // Numerical value (same as in `e`)
       case "c":
         return String(localDayOfWeek);
+      // Padded numerical value
       case "cc":
         return addLeadingZeros(localDayOfWeek, token.length);
+      // 1st, 2nd, ..., 7th
       case "co":
         return localize3.ordinalNumber(localDayOfWeek, { unit: "day" });
       case "ccc":
@@ -1292,16 +1342,19 @@ var formatters = {
           width: "abbreviated",
           context: "standalone"
         });
+      // T
       case "ccccc":
         return localize3.day(dayOfWeek, {
           width: "narrow",
           context: "standalone"
         });
+      // Tu
       case "cccccc":
         return localize3.day(dayOfWeek, {
           width: "short",
           context: "standalone"
         });
+      // Tuesday
       case "cccc":
       default:
         return localize3.day(dayOfWeek, {
@@ -1315,27 +1368,34 @@ var formatters = {
     const dayOfWeek = date.getDay();
     const isoDayOfWeek = dayOfWeek === 0 ? 7 : dayOfWeek;
     switch (token) {
+      // 2
       case "i":
         return String(isoDayOfWeek);
+      // 02
       case "ii":
         return addLeadingZeros(isoDayOfWeek, token.length);
+      // 2nd
       case "io":
         return localize3.ordinalNumber(isoDayOfWeek, { unit: "day" });
+      // Tue
       case "iii":
         return localize3.day(dayOfWeek, {
           width: "abbreviated",
           context: "formatting"
         });
+      // T
       case "iiiii":
         return localize3.day(dayOfWeek, {
           width: "narrow",
           context: "formatting"
         });
+      // Tu
       case "iiiiii":
         return localize3.day(dayOfWeek, {
           width: "short",
           context: "formatting"
         });
+      // Tuesday
       case "iiii":
       default:
         return localize3.day(dayOfWeek, {
@@ -1501,13 +1561,21 @@ var formatters = {
       return "Z";
     }
     switch (token) {
+      // Hours and optional minutes
       case "X":
         return formatTimezoneWithOptionalMinutes(timezoneOffset);
+      // Hours, minutes and optional seconds without `:` delimiter
+      // Note: neither ISO-8601 nor JavaScript supports seconds in timezone offsets
+      // so this token always has the same output as `XX`
       case "XXXX":
       case "XX":
         return formatTimezone(timezoneOffset);
+      // Hours, minutes and optional seconds with `:` delimiter
+      // Note: neither ISO-8601 nor JavaScript supports seconds in timezone offsets
+      // so this token always has the same output as `XXX`
       case "XXXXX":
       case "XXX":
+      // Hours and minutes with `:` delimiter
       default:
         return formatTimezone(timezoneOffset, ":");
     }
@@ -1516,13 +1584,21 @@ var formatters = {
   x: function(date, token, _localize) {
     const timezoneOffset = date.getTimezoneOffset();
     switch (token) {
+      // Hours and optional minutes
       case "x":
         return formatTimezoneWithOptionalMinutes(timezoneOffset);
+      // Hours, minutes and optional seconds without `:` delimiter
+      // Note: neither ISO-8601 nor JavaScript supports seconds in timezone offsets
+      // so this token always has the same output as `xx`
       case "xxxx":
       case "xx":
         return formatTimezone(timezoneOffset);
+      // Hours, minutes and optional seconds with `:` delimiter
+      // Note: neither ISO-8601 nor JavaScript supports seconds in timezone offsets
+      // so this token always has the same output as `xxx`
       case "xxxxx":
       case "xxx":
+      // Hours and minutes with `:` delimiter
       default:
         return formatTimezone(timezoneOffset, ":");
     }
@@ -1531,10 +1607,12 @@ var formatters = {
   O: function(date, token, _localize) {
     const timezoneOffset = date.getTimezoneOffset();
     switch (token) {
+      // Short
       case "O":
       case "OO":
       case "OOO":
         return "GMT" + formatTimezoneShort(timezoneOffset, ":");
+      // Long
       case "OOOO":
       default:
         return "GMT" + formatTimezone(timezoneOffset, ":");
@@ -1544,10 +1622,12 @@ var formatters = {
   z: function(date, token, _localize) {
     const timezoneOffset = date.getTimezoneOffset();
     switch (token) {
+      // Short
       case "z":
       case "zz":
       case "zzz":
         return "GMT" + formatTimezoneShort(timezoneOffset, ":");
+      // Long
       case "zzzz":
       default:
         return "GMT" + formatTimezone(timezoneOffset, ":");
@@ -2533,6 +2613,43 @@ async function prepararMarcar(c, reunionId, personaId, quitar) {
     ].join("\n")
   );
 }
+async function prepararAgregarParticipante(c, reunionId, nombreRaw) {
+  const sesion = (await c.cargarSesiones()).find((s) => s.id === reunionId);
+  if (!sesion) throw new AccesoError(`No existe ninguna reuni\xF3n con id ${reunionId}.`);
+  const { fullName } = buildNameParts(nombreRaw);
+  if (fullName.length < 3) throw new AccesoError("El nombre es demasiado corto.");
+  const buscado = normalizeText(fullName);
+  const [personas, asistencia] = await Promise.all([c.cargarPersonas(), c.cargarAsistencia()]);
+  const yaEnLaReunion = asistencia.find(
+    (a) => a.sessionId === reunionId && normalizeText(a.fullName) === buscado
+  );
+  if (yaEnLaReunion) throw new AccesoError(`${yaEnLaReunion.fullName} ya figura en esa reuni\xF3n.`);
+  const palabras = buscado.split(" ").filter((p) => p.length > 2);
+  const parecidas = personas.filter((p) => {
+    const suyas = new Set(normalizeText(p.fullName).split(" "));
+    const comunes = palabras.filter((w) => suyas.has(w)).length;
+    return comunes > 0 && comunes >= Math.min(2, palabras.length);
+  });
+  return borrador(
+    c.uid,
+    "agregar_participante",
+    { reunionId, nombre: fullName },
+    [
+      'AGREGAR como participante (queda "por revisar", NO entra a la lista oficial):',
+      `  ${fullName}`,
+      `  y marcarla presente en ${SESSION_TYPE_LABELS[sesion.type]} del ${fmtDate(sesion.date)} (${MODALITY_LABELS[sesion.modality]})`,
+      ...parecidas.length ? [
+        "",
+        "\u26A0\uFE0F OJO: ya hay fichas con un nombre parecido. Si es alguna de ellas, no",
+        'la agregues de nuevo: m\xE1rcala con "preparar_marcar_presente".',
+        ...parecidas.slice(0, 8).map(
+          (p) => `  \xB7 ${p.fullName}${p.pendingReview ? " (por revisar)" : ""}  id: ${p.id}`
+        )
+      ] : [],
+      ...sesion.status === "closed" ? ["", "Esa reuni\xF3n est\xE1 CERRADA; se corrige igual por ser administraci\xF3n."] : []
+    ].join("\n")
+  );
+}
 async function prepararEstadoReunion(c, reunionId, cerrar) {
   const sesion = (await c.cargarSesiones()).find((s) => s.id === reunionId);
   if (!sesion) throw new AccesoError(`No existe ninguna reuni\xF3n con id ${reunionId}.`);
@@ -2622,6 +2739,55 @@ async function ejecutar(c, o) {
       ).length;
       await c.escribir(`sessions/${reunionId}`, { presentCount: presentes }, ["presentCount"]);
       return `Listo. ${persona.fullName} ${o.op === "marcar_presente" ? "qued\xF3 presente en" : "sali\xF3 de"} ${SESSION_TYPE_LABELS[sesion.type]} del ${fmtDate(sesion.date)}. Ahora hay ${presentes} presentes.`;
+    }
+    case "agregar_participante": {
+      const { reunionId, nombre } = o.args;
+      const sesion = (await c.cargarSesiones()).find((s) => s.id === reunionId);
+      if (!sesion) throw new AccesoError("La reuni\xF3n ya no existe.");
+      const parts = buildNameParts(nombre);
+      const id = idNuevo();
+      const fechaReunion = toDate2(sesion.date);
+      await c.escribir(`members/${id}`, {
+        fullName: parts.fullName,
+        firstName: parts.firstName,
+        lastName: parts.lastName,
+        searchName: parts.searchName,
+        aliases: [],
+        phone: "",
+        notes: "",
+        active: true,
+        createdAt: /* @__PURE__ */ new Date(),
+        createdBy: c.uid,
+        createdByName: c.nombre,
+        pendingIdentify: false,
+        pendingReview: true,
+        sourceSessionId: reunionId,
+        sourceSessionDate: fechaReunion
+      });
+      try {
+        await c.escribir(`sessions/${reunionId}/attendance/${id}`, {
+          memberId: id,
+          fullName: parts.fullName,
+          status: "present",
+          checkedInAt: /* @__PURE__ */ new Date(),
+          checkedInBy: c.uid,
+          checkedInByName: c.nombre,
+          sessionId: reunionId,
+          sessionType: sesion.type,
+          modality: sesion.modality,
+          sessionDate: fechaReunion
+        });
+      } catch (e) {
+        await c.borrar(`members/${id}`).catch(() => {
+        });
+        throw e;
+      }
+      const presentes = (await c.cargarAsistencia()).filter(
+        (a) => a.sessionId === reunionId
+      ).length;
+      await c.escribir(`sessions/${reunionId}`, { presentCount: presentes }, ["presentCount"]);
+      return `Listo. ${parts.fullName} qued\xF3 presente en ${SESSION_TYPE_LABELS[sesion.type]} del ${fmtDate(sesion.date)} y espera revisi\xF3n (no est\xE1 en la lista oficial). Ahora hay ${presentes} presentes.
+  id: ${id}`;
     }
     case "cerrar_reunion":
     case "reabrir_reunion": {
@@ -2829,6 +2995,20 @@ var HERRAMIENTAS = [
       ["reunion_id", "persona_id"]
     ),
     ejecutar: (c, a) => prepararMarcar(c, String(a.reunion_id), String(a.persona_id), false)
+  },
+  {
+    name: "preparar_agregar_participante",
+    title: "Preparar: agregar a alguien que no est\xE1 en la lista",
+    description: 'Para alguien que asisti\xF3 pero no tiene ficha (buscar_persona no lo encuentra). Igual que cuando una coordinadora lo agrega en plena reuni\xF3n: queda presente en esa reuni\xF3n y en la bandeja "por revisar", SIN entrar a la lista oficial. Si ya existe una ficha parecida, el borrador la muestra: en ese caso usa preparar_marcar_presente con esa ficha en vez de crear otra. Devuelve un borrador; no cambia nada hasta confirmar.',
+    alcance: "escribir",
+    inputSchema: objeto(
+      {
+        reunion_id: txt("id de la reuni\xF3n"),
+        nombre: txt("Nombre completo de la persona, tal como se quiere registrar")
+      },
+      ["reunion_id", "nombre"]
+    ),
+    ejecutar: (c, a) => prepararAgregarParticipante(c, String(a.reunion_id), String(a.nombre))
   },
   {
     name: "preparar_quitar_presente",
