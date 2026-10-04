@@ -12,8 +12,8 @@ export default defineConfig({
       registerType: 'prompt',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'logo.svg'],
       manifest: {
-        name: 'Coordinación GEMB — Asistencia',
-        short_name: 'Coordinación',
+        name: 'Coordinación GEMB',
+        short_name: 'Coordinación GEMB',
         description:
           'Control de asistencia — Gimnasio Emocional Mentes Brillantes',
         lang: 'es',
