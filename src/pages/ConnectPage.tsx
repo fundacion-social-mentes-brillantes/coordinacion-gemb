@@ -158,9 +158,9 @@ export function ConnectPage() {
       <p className="flex items-start gap-2 px-1 text-xs text-slate-400">
         <CheckIcon className="mt-0.5 shrink-0" />
         <span>
-          Nuestro servidor no guarda tu permiso: lo guarda Claude y lo manda con
-          cada consulta. Cada vez se comprueba tu cuenta y tu rol en la app, así
-          que Claude ve exactamente lo mismo que tú, ni más ni menos.
+          Nuestro servidor no guarda tu permiso: lo guarda Claude, cifrado, y lo
+          manda con cada consulta. Cada vez se comprueba tu cuenta y tu rol en la
+          app, así que Claude ve exactamente lo mismo que tú, ni más ni menos.
         </span>
       </p>
 

@@ -14,6 +14,7 @@
 
 import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash, randomBytes } from 'node:crypto';
 
 const FS = process.env.FIRESTORE_EMULATOR_HOST;
 const AUTH = process.env.FIREBASE_AUTH_EMULATOR_HOST;
@@ -24,7 +25,11 @@ const PROYECTO = process.env.GCLOUD_PROJECT || 'demo-gemb';
 process.env.GEMB_PROJECT_ID = PROYECTO;
 
 const DOCS = `http://${FS}/v1/projects/${PROYECTO}/databases/(default)/documents`;
+// La clave con la que el servidor cifra códigos y permisos (en Vercel es
+// MCP_SECRETO). Aquí, una de prueba.
+process.env.MCP_SECRETO = randomBytes(32).toString('base64url');
 const { default: handler } = await import('../api/mcp.js');
+const { default: oauth } = await import('../api/oauth.js');
 
 /* ------------------------------------------------------------------ */
 /* Ayudas                                                              */
@@ -140,6 +145,51 @@ async function llamar(llave, nombre, args = {}, extra = {}) {
   return { estado, cabeceras, texto, error: cuerpo?.result?.isError === true };
 }
 
+/** Llama a las rutas de OAuth (api/oauth.js) como lo hace Claude. */
+async function oauthLlamar(ruta, { method = 'POST', body, query = '' } = {}) {
+  let estado = 0;
+  let cuerpo;
+  const res = {
+    status(n) {
+      estado = n;
+      return res;
+    },
+    setHeader() {},
+    json(b) {
+      cuerpo = b;
+    },
+    end() {},
+  };
+  await oauth({ method, url: `/api/oauth?ruta=${ruta}${query}`, headers: {}, body }, res);
+  return { estado, cuerpo };
+}
+
+const VUELTA = 'https://claude.ai/api/mcp/auth_callback';
+
+/** Aprobar en /autorizar y canjear el código, con PKCE. Devuelve el permiso. */
+async function conectar(llave, { verificadorAlCanjear } = {}) {
+  const verificador = randomBytes(32).toString('base64url');
+  const reto = createHash('sha256').update(verificador).digest('base64url');
+  const a = await oauthLlamar('aprobar', {
+    body: { llave, redirect_uri: VUELTA, state: 'abc', code_challenge: reto },
+  });
+  assert.equal(a.estado, 200, JSON.stringify(a.cuerpo));
+  const vuelta = new URL(a.cuerpo.destino);
+  assert.equal(vuelta.searchParams.get('state'), 'abc');
+  const code = vuelta.searchParams.get('code');
+  const t = await oauthLlamar('token', {
+    body: {
+      grant_type: 'authorization_code',
+      code,
+      code_verifier: verificadorAlCanjear ?? verificador,
+      redirect_uri: VUELTA,
+    },
+  });
+  if (verificadorAlCanjear) return t;
+  assert.equal(t.estado, 200, JSON.stringify(t.cuerpo));
+  return t.cuerpo.access_token;
+}
+
 const idDe = (texto) => {
   const m = texto.match(/confirmacion_id: (\S+)/);
   assert.ok(m, `sin confirmacion_id en:\n${texto}`);
@@ -168,6 +218,9 @@ let coord;
 before(async () => {
   admin = await cuenta(`admin-${Date.now()}@prueba.test`);
   coord = await cuenta(`coord-${Date.now()}@prueba.test`);
+  // Como Claude: entrar por OAuth y quedarse con el permiso cifrado.
+  admin.token = await conectar(admin.llave);
+  coord.token = await conectar(coord.llave);
 });
 
 beforeEach(async () => {
@@ -231,14 +284,14 @@ beforeEach(async () => {
 /* ------------------------------------------------------------------ */
 
 test('marcar y confirmar DOS veces el mismo borrador cuenta una sola vez', async () => {
-  const r1 = await preparaYConfirma(admin.llave, 'preparar_marcar_presente', {
+  const r1 = await preparaYConfirma(admin.token, 'preparar_marcar_presente', {
     reunion_id: SESION,
     persona_id: 'm_ana',
   });
   assert.equal(r1.error, false, r1.texto);
   assert.match(r1.texto, /Ahora hay 1 presentes/);
 
-  const r2 = await llamar(admin.llave, 'confirmar_operacion', {
+  const r2 = await llamar(admin.token, 'confirmar_operacion', {
     confirmacion_id: r1.confirmacion_id,
   });
   assert.match(r2.texto, /ya figuraba como presente/);
@@ -251,7 +304,7 @@ test('cinco marcas confirmadas a la vez: el contador termina exacto', async () =
   const ids = ['m_ana', 'm_luis', 'm_marta', 'm_pedro', 'm_rosalba'];
   const borradores = [];
   for (const persona_id of ids) {
-    const p = await llamar(admin.llave, 'preparar_marcar_presente', {
+    const p = await llamar(admin.token, 'preparar_marcar_presente', {
       reunion_id: SESION,
       persona_id,
     });
@@ -259,7 +312,7 @@ test('cinco marcas confirmadas a la vez: el contador termina exacto', async () =
   }
   const res = await Promise.all(
     borradores.map((confirmacion_id) =>
-      llamar(admin.llave, 'confirmar_operacion', { confirmacion_id }),
+      llamar(admin.token, 'confirmar_operacion', { confirmacion_id }),
     ),
   );
   for (const r of res) assert.equal(r.error, false, r.texto);
@@ -267,16 +320,16 @@ test('cinco marcas confirmadas a la vez: el contador termina exacto', async () =
 });
 
 test('quitar dos veces no resta dos', async () => {
-  await preparaYConfirma(admin.llave, 'preparar_marcar_presente', {
+  await preparaYConfirma(admin.token, 'preparar_marcar_presente', {
     reunion_id: SESION,
     persona_id: 'm_luis',
   });
-  const q = await preparaYConfirma(admin.llave, 'preparar_quitar_presente', {
+  const q = await preparaYConfirma(admin.token, 'preparar_quitar_presente', {
     reunion_id: SESION,
     persona_id: 'm_luis',
   });
   assert.equal(q.error, false, q.texto);
-  const otra = await llamar(admin.llave, 'confirmar_operacion', {
+  const otra = await llamar(admin.token, 'confirmar_operacion', {
     confirmacion_id: q.confirmacion_id,
   });
   assert.match(otra.texto, /ya no figuraba/);
@@ -284,12 +337,12 @@ test('quitar dos veces no resta dos', async () => {
 });
 
 test('agregar a alguien sin ficha dos veces deja UNA ficha y una asistencia', async () => {
-  const r = await preparaYConfirma(admin.llave, 'preparar_agregar_participante', {
+  const r = await preparaYConfirma(admin.token, 'preparar_agregar_participante', {
     reunion_id: SESION,
     nombre: 'kata blum',
   });
   assert.equal(r.error, false, r.texto);
-  const otra = await llamar(admin.llave, 'confirmar_operacion', {
+  const otra = await llamar(admin.token, 'confirmar_operacion', {
     confirmacion_id: r.confirmacion_id,
   });
   assert.match(otra.texto, /ya se había agregado/);
@@ -302,7 +355,7 @@ test('agregar a alguien sin ficha dos veces deja UNA ficha y una asistencia', as
 });
 
 test('agregar "Rous Martínez" avisa de la ficha "Rous" y de "Rosalba Martínez"', async () => {
-  const p = await llamar(admin.llave, 'preparar_agregar_participante', {
+  const p = await llamar(admin.token, 'preparar_agregar_participante', {
     reunion_id: SESION,
     nombre: 'Rous Martínez',
   });
@@ -311,14 +364,14 @@ test('agregar "Rous Martínez" avisa de la ficha "Rous" y de "Rosalba Martínez"
 });
 
 test('buscar_persona encuentra por alias y con errores de tipeo', async () => {
-  const alias = await llamar(admin.llave, 'buscar_persona', { nombre: 'chava' });
+  const alias = await llamar(admin.token, 'buscar_persona', { nombre: 'chava' });
   assert.match(alias.texto, /Rosalba Martínez/);
-  const tipeo = await llamar(admin.llave, 'buscar_persona', { nombre: 'Rosalva Martines' });
+  const tipeo = await llamar(admin.token, 'buscar_persona', { nombre: 'Rosalva Martines' });
   assert.match(tipeo.texto, /Rosalba Martínez/);
 });
 
 test('no deja marcar en una reunión que todavía no ocurre', async () => {
-  const p = await llamar(admin.llave, 'preparar_marcar_presente', {
+  const p = await llamar(admin.token, 'preparar_marcar_presente', {
     reunion_id: FUTURA,
     persona_id: 'm_ana',
   });
@@ -327,7 +380,7 @@ test('no deja marcar en una reunión que todavía no ocurre', async () => {
 });
 
 test('crear reunión: rechaza la del mismo día y no duplica al confirmar dos veces', async () => {
-  const dup = await llamar(admin.llave, 'preparar_crear_reunion', {
+  const dup = await llamar(admin.token, 'preparar_crear_reunion', {
     tipo: 'ego',
     modalidad: 'virtual',
     fecha: HOY,
@@ -336,14 +389,14 @@ test('crear reunión: rechaza la del mismo día y no duplica al confirmar dos ve
   assert.match(dup.texto, new RegExp(`Ya existe.*\\n.*${SESION}`));
 
   const pasado = diaBogota(-2);
-  const r = await preparaYConfirma(admin.llave, 'preparar_crear_reunion', {
+  const r = await preparaYConfirma(admin.token, 'preparar_crear_reunion', {
     tipo: 'pasos',
     modalidad: 'presencial',
     fecha: pasado,
   });
   assert.equal(r.error, false, r.texto);
   assert.match(r.texto, /ciérrala/);
-  const otra = await llamar(admin.llave, 'confirmar_operacion', {
+  const otra = await llamar(admin.token, 'confirmar_operacion', {
     confirmacion_id: r.confirmacion_id,
   });
   assert.match(otra.texto, /ya estaba creada/);
@@ -358,12 +411,12 @@ test('crear reunión: rechaza la del mismo día y no duplica al confirmar dos ve
 });
 
 test('aprobar corrige el nombre en la ficha Y en su historial', async () => {
-  const r = await preparaYConfirma(admin.llave, 'preparar_agregar_participante', {
+  const r = await preparaYConfirma(admin.token, 'preparar_agregar_participante', {
     reunion_id: SESION,
     nombre: 'sandra',
   });
   const id = r.texto.match(/id: (\S+)/)[1];
-  const a = await preparaYConfirma(admin.llave, 'preparar_aprobar_persona', {
+  const a = await preparaYConfirma(admin.token, 'preparar_aprobar_persona', {
     persona_id: id,
     nombre: 'sandra milena ruiz',
   });
@@ -377,34 +430,34 @@ test('aprobar corrige el nombre en la ficha Y en su historial', async () => {
 });
 
 test('aprobar una ficha que borraron mientras tanto NO la resucita', async () => {
-  const r = await preparaYConfirma(admin.llave, 'preparar_agregar_participante', {
+  const r = await preparaYConfirma(admin.token, 'preparar_agregar_participante', {
     reunion_id: SESION,
     nombre: 'miriam sabogal',
   });
   const id = r.texto.match(/id: (\S+)/)[1];
-  const p = await llamar(admin.llave, 'preparar_aprobar_persona', { persona_id: id });
+  const p = await llamar(admin.token, 'preparar_aprobar_persona', { persona_id: id });
   await fetch(`${DOCS}/members/${id}`, {
     method: 'DELETE',
     headers: { Authorization: 'Bearer owner' },
   });
-  const c = await llamar(admin.llave, 'confirmar_operacion', { confirmacion_id: idDe(p.texto) });
+  const c = await llamar(admin.token, 'confirmar_operacion', { confirmacion_id: idDe(p.texto) });
   assert.match(c.texto, /ya no existe/);
   assert.equal(await leer(`members/${id}`), null);
 });
 
 test('cerrar una reunión que borraron mientras tanto no la vuelve a crear', async () => {
-  const p = await llamar(admin.llave, 'preparar_cerrar_reunion', { reunion_id: SESION });
+  const p = await llamar(admin.token, 'preparar_cerrar_reunion', { reunion_id: SESION });
   await fetch(`${DOCS}/sessions/${SESION}`, {
     method: 'DELETE',
     headers: { Authorization: 'Bearer owner' },
   });
-  const c = await llamar(admin.llave, 'confirmar_operacion', { confirmacion_id: idDe(p.texto) });
+  const c = await llamar(admin.token, 'confirmar_operacion', { confirmacion_id: idDe(p.texto) });
   assert.match(c.texto, /ya no existe/);
   assert.equal(await leer(`sessions/${SESION}`), null);
 });
 
 test('un confirmacion_id alterado no ejecuta nada', async () => {
-  const p = await llamar(admin.llave, 'preparar_marcar_presente', {
+  const p = await llamar(admin.token, 'preparar_marcar_presente', {
     reunion_id: SESION,
     persona_id: 'm_ana',
   });
@@ -413,20 +466,20 @@ test('un confirmacion_id alterado no ejecuta nada', async () => {
   const json = JSON.parse(Buffer.from(cuerpo, 'base64url').toString('utf8'));
   json.args.personaId = 'm_luis';
   const alterado = `${Buffer.from(JSON.stringify(json)).toString('base64url')}.${firma}`;
-  const c = await llamar(admin.llave, 'confirmar_operacion', { confirmacion_id: alterado });
+  const c = await llamar(admin.token, 'confirmar_operacion', { confirmacion_id: alterado });
   assert.equal(c.error, true);
   assert.match(c.texto, /alterado/);
   assert.equal((await listar(`sessions/${SESION}/attendance`)).length, 0);
 });
 
 test('la coordinadora solo lee: no puede preparar escrituras', async () => {
-  const p = await llamar(coord.llave, 'preparar_marcar_presente', {
+  const p = await llamar(coord.token, 'preparar_marcar_presente', {
     reunion_id: SESION,
     persona_id: 'm_ana',
   });
   assert.equal(p.error, true);
   assert.match(p.texto, /solo para administración/);
-  const lista = await llamar(coord.llave, 'asistencia_reunion', { reunion_id: SESION });
+  const lista = await llamar(coord.token, 'asistencia_reunion', { reunion_id: SESION });
   assert.equal(lista.error, false, lista.texto);
 });
 
@@ -437,15 +490,63 @@ test('llave inválida: 401 para que Claude ofrezca reconectar', async () => {
 });
 
 test('la llave en la dirección (?k=) ya no se acepta', async () => {
-  const r = await llamar(null, 'quien_soy', {}, { url: `/api/mcp?k=${admin.llave}` });
+  const r = await llamar(null, 'quien_soy', {}, { url: `/api/mcp?k=${admin.token}` });
   assert.equal(r.estado, 400);
 });
 
 test('reuniones: separa las recientes de las agendadas', async () => {
-  const r = await llamar(admin.llave, 'reuniones', { tipo: 'ego' });
+  const r = await llamar(admin.token, 'reuniones', { tipo: 'ego' });
   const iReciente = r.texto.indexOf('Recientes:');
   const iAgendada = r.texto.indexOf('Agendadas:');
   assert.ok(iReciente >= 0 && iAgendada > iReciente, r.texto);
   assert.ok(r.texto.indexOf(SESION) < iAgendada);
   assert.ok(r.texto.indexOf(FUTURA) > iAgendada);
+});
+
+/* ------------------------------------------------------------------ */
+/* Conexión con Claude (OAuth)                                         */
+/* ------------------------------------------------------------------ */
+
+test('la llave de sesión no viaja en claro ni en el código ni en el permiso', async () => {
+  const verificador = randomBytes(32).toString('base64url');
+  const reto = createHash('sha256').update(verificador).digest('base64url');
+  const a = await oauthLlamar('aprobar', {
+    body: { llave: admin.llave, redirect_uri: VUELTA, code_challenge: reto },
+  });
+  const destino = a.cuerpo.destino;
+  assert.ok(!destino.includes(admin.llave));
+  const code = new URL(destino).searchParams.get('code');
+  assert.ok(!Buffer.from(code.slice(3), 'base64url').toString('latin1').includes(admin.llave));
+  assert.ok(!admin.token.includes(admin.llave));
+});
+
+test('una conexión de antes (llave en claro) pide reconectar con 401', async () => {
+  const r = await llamar(admin.llave, 'quien_soy');
+  assert.equal(r.estado, 401);
+  assert.match(r.cabeceras['www-authenticate'] ?? '', /invalid_token/);
+});
+
+test('un permiso cifrado con una llave que no sirve también da 401', async () => {
+  const token = await conectar('x'.repeat(40));
+  const r = await llamar(token, 'quien_soy');
+  assert.equal(r.estado, 401);
+});
+
+test('sin el verificador PKCE correcto el código no sirve', async () => {
+  const t = await conectar(admin.llave, { verificadorAlCanjear: 'y'.repeat(43) });
+  assert.equal(t.estado, 400);
+  assert.equal(t.cuerpo.error, 'invalid_grant');
+});
+
+test('authorize exige PKCE S256 y una vuelta de Claude', async () => {
+  const sinPkce = await oauthLlamar('authorize', {
+    method: 'GET',
+    query: `&redirect_uri=${encodeURIComponent(VUELTA)}&state=1`,
+  });
+  assert.equal(sinPkce.estado, 400);
+  const reto = createHash('sha256').update('z'.repeat(43)).digest('base64url');
+  const ajena = await oauthLlamar('aprobar', {
+    body: { llave: admin.llave, redirect_uri: 'https://malo.example/cb', code_challenge: reto },
+  });
+  assert.equal(ajena.estado, 400);
 });

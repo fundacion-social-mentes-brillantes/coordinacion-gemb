@@ -41,6 +41,10 @@
       "destination": "/api/oauth?ruta=token"
     },
     {
+      "source": "/api/oauth/aprobar",
+      "destination": "/api/oauth?ruta=aprobar"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },

@@ -6,6 +6,8 @@ import {
   abrirSesion,
   type Cliente,
 } from './rest';
+import type { Acceso } from './oauth';
+import { abrir, SinSecretoError } from './sobre';
 
 // Las fechas que se escriben en los textos (fmtDate) usan la zona del
 // proceso. Vercel corre en UTC; la fundación vive en Bogotá.
@@ -264,7 +266,38 @@ export default async function handler(req: Req, res: Res) {
     return;
   }
 
-  const llave = llaveDe(req);
+  // Lo que manda Claude es un sobre cifrado (ver sobre.ts) con la llave
+  // dentro. Una llave en claro —las conexiones de antes del cambio— ya no
+  // vale: se responde 401 y Claude ofrece volver a conectar.
+  const bearer = llaveDe(req);
+  let llave = '';
+  if (bearer) {
+    let acceso: Acceso | null;
+    try {
+      acceso = abrir<Acceso>('acceso', bearer);
+    } catch (e) {
+      if (e instanceof SinSecretoError) {
+        res.status(500).json(fallo(null, -32603, e.message));
+        return;
+      }
+      throw e;
+    }
+    if (!acceso || typeof acceso.llave !== 'string') {
+      res.setHeader('WWW-Authenticate', `${DONDE_ENTRAR}, error="invalid_token"`);
+      res
+        .status(401)
+        .json(
+          fallo(
+            null,
+            -32001,
+            'Esta conexión ya no vale (se renovó la seguridad). Vuelve a conectar el ' +
+              'conector desde Claude y entra con Google.',
+          ),
+        );
+      return;
+    }
+    llave = acceso.llave;
+  }
   const cuerpo = req.body;
   const peticiones: Peticion[] = Array.isArray(cuerpo)
     ? (cuerpo as Peticion[])

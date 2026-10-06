@@ -178,9 +178,9 @@ async function abrirSesion(llave) {
     throw new AccesoError("Tu acceso est\xE1 pendiente de aprobaci\xF3n en la app.");
   }
   const esAdmin = rol === "admin" || rol === "super_admin";
-  const clave = (sufijo) => `${cred.uid}:${sufijo}`;
+  const clave2 = (sufijo) => `${cred.uid}:${sufijo}`;
   async function cacheado(sufijo, cargar) {
-    const k = clave(sufijo);
+    const k = clave2(sufijo);
     const hit = cache.get(k);
     if (hit && hit.hasta > Date.now()) return hit.valor;
     const v = await cargar();
@@ -5145,6 +5145,37 @@ function permitida(h, c) {
   return h.alcance === "todos" || c.esAdmin;
 }
 
+// mcp/src/sobre.ts
+import { createCipheriv, createDecipheriv, createHash as createHash2, randomBytes } from "node:crypto";
+var PREFIJO = "g1.";
+var SinSecretoError = class extends Error {
+};
+function clave() {
+  const s = process.env.MCP_SECRETO ?? "";
+  if (s.length < 32) {
+    throw new SinSecretoError(
+      "Falta configurar MCP_SECRETO en el servidor (Vercel \u2192 Settings \u2192 Environment Variables). Sin ella no se puede conectar Claude."
+    );
+  }
+  return createHash2("sha256").update(s).digest();
+}
+var esSobre = (s) => s.startsWith(PREFIJO);
+function abrir(tipo, sobre) {
+  if (!esSobre(sobre)) return null;
+  const k = clave();
+  try {
+    const b = Buffer.from(sobre.slice(PREFIJO.length), "base64url");
+    if (b.length < 12 + 16 + 2) return null;
+    const d = createDecipheriv("aes-256-gcm", k, b.subarray(0, 12));
+    d.setAAD(Buffer.from(tipo));
+    d.setAuthTag(b.subarray(b.length - 16));
+    const json = Buffer.concat([d.update(b.subarray(12, b.length - 16)), d.final()]);
+    return JSON.parse(json.toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
 // mcp/src/http.ts
 process.env.TZ = "America/Bogota";
 var VERSIONES = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -5295,7 +5326,32 @@ async function handler(req, res) {
     );
     return;
   }
-  const llave = llaveDe(req);
+  const bearer = llaveDe(req);
+  let llave = "";
+  if (bearer) {
+    let acceso;
+    try {
+      acceso = abrir("acceso", bearer);
+    } catch (e) {
+      if (e instanceof SinSecretoError) {
+        res.status(500).json(fallo(null, -32603, e.message));
+        return;
+      }
+      throw e;
+    }
+    if (!acceso || typeof acceso.llave !== "string") {
+      res.setHeader("WWW-Authenticate", `${DONDE_ENTRAR}, error="invalid_token"`);
+      res.status(401).json(
+        fallo(
+          null,
+          -32001,
+          "Esta conexi\xF3n ya no vale (se renov\xF3 la seguridad). Vuelve a conectar el conector desde Claude y entra con Google."
+        )
+      );
+      return;
+    }
+    llave = acceso.llave;
+  }
   const cuerpo = req.body;
   const peticiones = Array.isArray(cuerpo) ? cuerpo : [cuerpo ?? {}];
   const soloSaludo = peticiones.every((p) => saludo(p) !== void 0);

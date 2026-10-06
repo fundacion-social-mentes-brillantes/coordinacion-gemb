@@ -7,17 +7,24 @@
 //
 //  Cómo encaja:
 //
-//    Claude  →  /api/oauth/authorize   (empieza)
+//    Claude  →  /api/oauth/authorize   (empieza; exige PKCE)
 //            →  la app: /autorizar     (la persona entra con Google)
-//            →  vuelve a Claude con un código
-//            →  /api/oauth/token       (el código se cambia por el permiso)
+//            →  /api/oauth/aprobar     (la app entrega la llave por POST y
+//                                       recibe un código CIFRADO, ver sobre.ts)
+//            →  vuelve a Claude con ese código
+//            →  /api/oauth/token       (el código se cambia por el permiso,
+//                                       también cifrado)
 //            →  ya puede consultar
+//
+//  La llave de sesión de Firebase nunca aparece en una dirección: antes iba
+//  dentro del código, en claro, y quedaba en el historial del navegador.
 //
 //  El permiso que sale de aquí es el de esa persona, así que su rol —y por
 //  tanto qué puede hacer— viene dado. No hay nada que configurar por usuario.
 // ---------------------------------------------------------------------------
 
 import { redirectPermitido } from '../../src/lib/oauthRedirect';
+import { abrir, sellar, SinSecretoError } from './sobre';
 
 const RAIZ = 'https://coordinacion-gemb.vercel.app';
 const RECURSO = `${RAIZ}/api/mcp`;
@@ -167,17 +174,21 @@ export function registrarCliente(datos: Record<string, unknown>) {
 
 interface Codigo {
   llave: string;
-  reto?: string;
+  reto: string;
+  /** A dónde se entregó: el canje tiene que decir la misma dirección. */
+  destino: string;
   exp: number;
 }
 
-export function empaquetarCodigo(c: Codigo): string {
-  return Buffer.from(JSON.stringify(c), 'utf8').toString('base64url');
+/** Lo que guarda Claude como permiso (cifrado). */
+export interface Acceso {
+  llave: string;
+  /** Cuándo se conectó (ms). */
+  desde: number;
 }
 
-function desempaquetarCodigo(s: string): Codigo {
-  return JSON.parse(Buffer.from(s, 'base64url').toString('utf8')) as Codigo;
-}
+/** Un reto PKCE S256 son 43 caracteres base64url. */
+const RETO_VALIDO = /^[A-Za-z0-9_-]{43}$/;
 
 async function sha256Base64Url(texto: string): Promise<string> {
   const datos = new TextEncoder().encode(texto);
@@ -199,10 +210,15 @@ export function irAAutorizar(req: Peticion): { destino: string } | { error: stri
   const p = parametros(req);
   const redirect = p.get('redirect_uri');
   if (!redirect) return { error: 'Falta redirect_uri.' };
-  // Primera puerta. La segunda está en /autorizar, que vuelve a comprobarlo
-  // antes de entregar nada: a esa pantalla se puede llegar sin pasar por aquí.
+  // Primera puerta. La segunda está en /api/oauth/aprobar, que vuelve a
+  // comprobarlo antes de entregar nada.
   if (!redirectPermitido(redirect)) {
     return { error: 'Esa dirección de retorno no está autorizada.' };
+  }
+  // PKCE obligatorio (S256): sin él, quien viera el código podría canjearlo.
+  const metodo = p.get('code_challenge_method') ?? 'plain';
+  if (metodo !== 'S256' || !RETO_VALIDO.test(p.get('code_challenge') ?? '')) {
+    return { error: 'Hace falta PKCE con code_challenge_method=S256.' };
   }
 
   const destino = new URL(`${RAIZ}/autorizar`);
@@ -211,6 +227,32 @@ export function irAAutorizar(req: Peticion): { destino: string } | { error: stri
   if (p.get('code_challenge')) {
     destino.searchParams.set('code_challenge', p.get('code_challenge')!);
   }
+  return { destino: destino.toString() };
+}
+
+/**
+ * Paso 2: la persona tocó "Permitir" en /autorizar. La app manda aquí (por
+ * POST, nunca en la dirección) su llave de sesión, y recibe la dirección de
+ * vuelta a Claude con un código cifrado que solo este servidor sabe abrir.
+ */
+export function aprobar(datos: Record<string, unknown>): { destino: string } | { error: string } {
+  const llave = typeof datos.llave === 'string' ? datos.llave.trim() : '';
+  const redirect = typeof datos.redirect_uri === 'string' ? datos.redirect_uri : '';
+  const reto = typeof datos.code_challenge === 'string' ? datos.code_challenge : '';
+  const state = typeof datos.state === 'string' ? datos.state : '';
+
+  if (llave.length < 20) return { error: 'Falta la sesión. Vuelve a entrar con Google.' };
+  if (!redirect || !redirectPermitido(redirect)) {
+    return { error: 'Esa dirección de retorno no está autorizada.' };
+  }
+  if (!RETO_VALIDO.test(reto)) {
+    return { error: 'Falta información de seguridad (PKCE). Vuelve a intentarlo desde Claude.' };
+  }
+
+  const codigo: Codigo = { llave, reto, destino: redirect, exp: Date.now() + 5 * 60_000 };
+  const destino = new URL(redirect);
+  destino.searchParams.set('code', sellar('codigo', codigo));
+  if (state) destino.searchParams.set('state', state);
   return { destino: destino.toString() };
 }
 
@@ -227,34 +269,33 @@ export async function canjearCodigo(
     return { error: 'invalid_request', detalle: 'Falta el código.' };
   }
 
-  let codigo: Codigo;
-  try {
-    codigo = desempaquetarCodigo(datos.code);
-  } catch {
+  const codigo = abrir<Codigo>('codigo', datos.code);
+  if (!codigo) {
     return { error: 'invalid_grant', detalle: 'El código no es válido.' };
   }
-  if (Date.now() > codigo.exp) {
+  if (typeof codigo.exp !== 'number' || Date.now() > codigo.exp) {
     return { error: 'invalid_grant', detalle: 'El código caducó. Vuelve a conectar.' };
+  }
+  if (datos.redirect_uri && datos.redirect_uri !== codigo.destino) {
+    return { error: 'invalid_grant', detalle: 'La dirección de retorno no coincide.' };
   }
 
   // PKCE: quien canjea tiene que demostrar que es quien empezó.
-  if (codigo.reto) {
-    const verificador = datos.code_verifier;
-    if (!verificador) {
-      return { error: 'invalid_request', detalle: 'Falta code_verifier.' };
-    }
-    if ((await sha256Base64Url(verificador)) !== codigo.reto) {
-      return { error: 'invalid_grant', detalle: 'El code_verifier no coincide.' };
-    }
+  const verificador = datos.code_verifier;
+  if (!verificador) {
+    return { error: 'invalid_request', detalle: 'Falta code_verifier.' };
+  }
+  if ((await sha256Base64Url(verificador)) !== codigo.reto) {
+    return { error: 'invalid_grant', detalle: 'El code_verifier no coincide.' };
   }
 
+  const acceso: Acceso = { llave: codigo.llave, desde: Date.now() };
   return {
     ok: {
-      access_token: codigo.llave,
+      access_token: sellar('acceso', acceso),
       token_type: 'Bearer',
-      // La llave se renueva sola en cada consulta mientras la sesión siga
-      // viva en la app; si la persona sale, deja de servir y hay que volver
-      // a conectar. Se anuncia una hora para que el cliente no la cachee de más.
+      // Por dentro, la sesión se renueva sola en cada consulta. Se anuncia
+      // una hora, como siempre, para que el cliente no la cachee de más.
       expires_in: 3600,
       scope: 'coordinacion',
     },
@@ -275,6 +316,18 @@ export async function atenderOauth(req: Peticion, res: Respuesta, ruta: string) 
     return;
   }
 
+  try {
+    await rutear(req, res, ruta);
+  } catch (e) {
+    if (e instanceof SinSecretoError) {
+      res.status(500).json({ error: 'server_error', error_description: e.message });
+      return;
+    }
+    throw e;
+  }
+}
+
+async function rutear(req: Peticion, res: Respuesta, ruta: string) {
   switch (ruta) {
     case 'as-metadata':
       res.status(200).json(metadatosServidor());
@@ -297,6 +350,20 @@ export async function atenderOauth(req: Peticion, res: Respuesta, ruta: string) 
       }
       res.setHeader('Location', r.destino);
       res.status(302).end();
+      return;
+    }
+
+    case 'aprobar': {
+      if (req.method !== 'POST') {
+        res.status(405).json({ error: 'invalid_request', error_description: 'Usa POST.' });
+        return;
+      }
+      const r = aprobar(crudo(req));
+      if ('error' in r) {
+        res.status(400).json({ error: 'invalid_request', error_description: r.error });
+        return;
+      }
+      res.status(200).json(r);
       return;
     }
 

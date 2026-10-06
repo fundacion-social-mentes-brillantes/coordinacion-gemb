@@ -43,28 +43,43 @@ export function AuthorizePage() {
 
   const esAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
 
-  const aceptar = () => {
+  const aceptar = async () => {
     const llave = user?.refreshToken;
     // `redirectUri` ya viene filtrado, pero se comprueba otra vez justo antes
     // de entregar: es la última línea antes de que la llave salga de aquí.
-    if (!llave || !redirectUri || !redirectPermitido(redirectUri)) {
+    if (!llave || !redirectUri || !redirectPermitido(redirectUri) || !reto) {
       setError('Falta información para completar la conexión. Vuelve a intentarlo desde Claude.');
       return;
     }
     setEnviando(true);
-    // El código dura 5 minutos y solo sirve una vez, en la conversación que
-    // lo pidió: Claude lo cambia enseguida por el permiso de consulta.
-    const codigo = btoa(
-      JSON.stringify({ llave, reto: reto || undefined, exp: Date.now() + 5 * 60_000 }),
-    )
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
-
-    const destino = new URL(redirectUri);
-    destino.searchParams.set('code', codigo);
-    if (state) destino.searchParams.set('state', state);
-    window.location.replace(destino.toString());
+    setError('');
+    // La llave va al servidor por POST, nunca en la dirección: él devuelve la
+    // vuelta a Claude con un código CIFRADO que dura 5 minutos y solo sirve
+    // con el reto PKCE de esta conversación. Antes el código era la llave en
+    // claro y quedaba en el historial del navegador.
+    try {
+      const r = await fetch('/api/oauth/aprobar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ llave, redirect_uri: redirectUri, state, code_challenge: reto }),
+      });
+      const d = (await r.json().catch(() => ({}))) as {
+        destino?: string;
+        error_description?: string;
+      };
+      if (!r.ok || !d.destino || !redirectPermitido(d.destino)) {
+        throw new Error(d.error_description || `HTTP ${r.status}`);
+      }
+      window.location.replace(d.destino);
+    } catch (e) {
+      console.error(e);
+      setEnviando(false);
+      setError(
+        navigator.onLine
+          ? `No se pudo completar la conexión (${e instanceof Error ? e.message : String(e)}). Vuelve a intentarlo.`
+          : 'Sin conexión. Revisa el internet y vuelve a tocar «Permitir».',
+      );
+    }
   };
 
   // "Cancelar" le responde a Claude que no se dio permiso, como pide OAuth.
@@ -212,7 +227,7 @@ export function AuthorizePage() {
 
       <button
         type="button"
-        onClick={aceptar}
+        onClick={() => void aceptar()}
         disabled={enviando}
         className="btn-primary mt-4 min-h-[52px] w-full"
       >

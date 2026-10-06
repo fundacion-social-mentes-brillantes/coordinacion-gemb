@@ -96,19 +96,12 @@ escritorio, Claude Code. Es la misma dirección para todo el mundo.
 > tocar "Permitir", tu acceso viajara al sitio de otro. Si Claude cambiara de
 > dominio, hay que añadirlo ahí — y en ningún otro sitio.
 
-<details>
-<summary>Alternativa sin entrar con Google (para clientes que no hagan OAuth)</summary>
-
-El servidor acepta además la llave directamente, como cabecera
-`Authorization: Bearer <llave>`. Sirve para clientes que no hagan el ingreso
-con Google. En la dirección (`?k=<llave>`) ya **no** se acepta: quedaba escrita
-en los registros de Vercel y en el historial del navegador. La llave es el permiso de sesión
-que Firebase le dio al navegador (`user.refreshToken`); ya no hay ninguna
-pantalla que la entregue, precisamente porque quien la tenga entra como tú, y
-una dirección con un secreto dentro acaba en historiales y registros de
-servidores. Si necesitas una, sácala a mano y trátala como una contraseña.
-
-</details>
+La conexión **solo** funciona entrando con Google desde Claude. Lo que Claude
+guarda es un permiso **cifrado** por el servidor (ver `mcp/src/sobre.ts`): fuera
+de este servidor no sirve para nada, y la llave de sesión de Firebase nunca
+viaja en una dirección (antes iba dentro del código de vuelta, en claro, y
+quedaba en el historial del navegador). Tampoco se acepta ya la llave en la
+dirección (`?k=…`) ni una llave en claro en la cabecera.
 
 ### Para cortar el acceso
 
@@ -117,6 +110,9 @@ servidores. Si necesitas una, sácala a mano y trátala como una contraseña.
   ese celular o computador, no el permiso que ya tiene Claude.
 - **La administración:** app → **Usuarios** → desactivar esa cuenta. Deja de
   funcionar de inmediato, porque las reglas exigen `active == true`.
+- **A todo el mundo de una vez** (por ejemplo, si se sospecha una filtración):
+  cambiar la variable `MCP_SECRETO` en Vercel y volver a desplegar. Todas las
+  conexiones con Claude dejan de valer y cada quien vuelve a tocar "Conectar".
 
 ---
 
@@ -188,6 +184,10 @@ no pueden decir números distintos.
   servidor no recuerda nada entre llamadas.
 - `mcp/src/informes.ts` — el texto de cada respuesta. Lógica pura, probada con
   datos armados a mano.
+- `mcp/src/oauth.ts` y `mcp/src/sobre.ts` — el ingreso con Google (OAuth con
+  PKCE obligatorio) y el cifrado AES-256-GCM de códigos y permisos. Necesitan
+  la variable de entorno **`MCP_SECRETO`** en Vercel (32+ caracteres
+  aleatorios); sin ella la conexión con Claude responde un error que lo dice.
 - `mcp/src/http.ts` — el servidor HTTP. **Fuente**; lo que se despliega es
   `api/mcp.js`, generado con `npm run build:api` (Vercel compila cada archivo
   de `api/` por separado y no arrastra módulos de otras carpetas).
