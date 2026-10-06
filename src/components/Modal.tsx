@@ -1,5 +1,26 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { XIcon } from './Icons';
+
+/* ------------------------------------------------------------------ */
+/* Botón atrás del celular                                             */
+/* ------------------------------------------------------------------ */
+// Cada modal abierto deja una entrada en el historial: así el botón atrás de
+// Android (o deslizar atrás en el iPhone) cierra el modal, en vez de sacar a
+// la coordinadora de la reunión y perder lo que estaba escribiendo.
+//
+// Al cerrar el modal con la X, el fondo o "Guardar", esa entrada se quita con
+// history.back(). Ese "atrás" lo provoca la app, no la persona: hay que
+// reconocerlo para no cerrar por error OTRO modal que se acabe de abrir. Este
+// oyente se registra primero (al cargar el módulo), así que marca cada evento
+// antes de que lo vean los modales.
+let atrasPropios = 0;
+let atrasActualEsPropio = false;
+if (typeof window !== 'undefined') {
+  window.addEventListener('popstate', () => {
+    atrasActualEsPropio = atrasPropios > 0;
+    if (atrasPropios > 0) atrasPropios--;
+  });
+}
 
 /**
  * Modal responsivo: hoja inferior en móvil, centrado en escritorio.
@@ -50,6 +71,38 @@ export function Modal({
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
+  // Botón atrás = cerrar el modal (ver arriba). El `setTimeout` evita que, en
+  // desarrollo, React (que monta los efectos dos veces) deje dos entradas.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!open) return;
+    const id = `${Date.now()}-${Math.random()}`;
+    let empujado = false;
+    let cerradoConAtras = false;
+    const onPop = () => {
+      if (atrasActualEsPropio) return;
+      cerradoConAtras = true;
+      onCloseRef.current();
+    };
+    const t = setTimeout(() => {
+      // Se conserva el estado del enrutador (React Router lo usa).
+      const prev = (window.history.state ?? {}) as Record<string, unknown>;
+      window.history.pushState({ ...prev, gembModal: id }, '');
+      empujado = true;
+      window.addEventListener('popstate', onPop);
+    }, 0);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('popstate', onPop);
+      const estado = window.history.state as { gembModal?: string } | null;
+      if (empujado && !cerradoConAtras && estado?.gembModal === id) {
+        atrasPropios++;
+        window.history.back();
+      }
+    };
+  }, [open]);
+
   // Congela el fondo sin perder la posición del scroll. Depende SOLO de
   // `open`: si se repitiera en cada tecleo, guardaría una posición de scroll
   // equivocada y al cerrar la página saltaría al principio.
@@ -68,12 +121,16 @@ export function Modal({
     body.style.width = '100%';
     body.style.overflow = 'hidden';
 
+    const ruta = window.location.pathname;
     return () => {
       body.style.position = prev.position;
       body.style.top = prev.top;
       body.style.width = prev.width;
       body.style.overflow = prev.overflow;
-      window.scrollTo(0, scrollY);
+      // Volver a la posición de antes solo si seguimos en la misma pantalla:
+      // si el modal se cerró al navegar (p. ej. "Abrir esa sesión"), la nueva
+      // pantalla debe empezar arriba.
+      if (window.location.pathname === ruta) window.scrollTo(0, scrollY);
     };
   }, [open]);
 

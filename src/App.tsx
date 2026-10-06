@@ -1,8 +1,9 @@
 import { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { RequireAuth } from './components/RequireAuth';
 import { Layout } from './components/Layout';
 import { FullScreenSpinner } from './components/Spinner';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Carga diferida de las pantallas: así las librerías pesadas de exportación
 // (PDF) e importación (Excel) NO se descargan hasta que se usan. La toma de
@@ -56,7 +57,9 @@ const ALL = ['coordinador', 'admin', 'super_admin'] as const;
 const ADMIN = ['admin', 'super_admin'] as const;
 
 export default function App() {
+  const location = useLocation();
   return (
+    <ErrorBoundary resetKey={location.pathname}>
     <Suspense fallback={<FullScreenSpinner />}>
       <Routes>
         {/* Públicas */}
@@ -93,5 +96,6 @@ export default function App() {
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </Suspense>
+    </ErrorBoundary>
   );
 }

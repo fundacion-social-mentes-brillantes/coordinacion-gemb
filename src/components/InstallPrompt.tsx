@@ -1,15 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { InstallIcon } from './Icons';
 import { authIsFirstParty } from '../lib/firebase';
 import { isAppleMobile, isStandalone } from '../lib/device';
+import { eventoInstalar, instalar, suscribirInstalar } from '../lib/instalar';
 
-// Captura el evento `beforeinstallprompt` (Android/Chrome) para ofrecer
-// "Instalar app". En iPhone se instala desde Safari (Compartir → Añadir a
-// pantalla de inicio); ahí este botón no aparece (el navegador no lo soporta).
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-}
+// "Instalar app" en Android/Chrome. En iPhone se instala desde Safari
+// (Compartir → Añadir a pantalla de inicio); ahí este botón no aparece.
 
 /**
  * ¿El navegador ofrece instalar la app? (Android/Chrome.)
@@ -19,23 +15,8 @@ interface BeforeInstallPromptEvent extends Event {
  * la nada, que es lo que pasaba en Ajustes.
  */
 export function usePuedeInstalar() {
-  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      e.preventDefault();
-      setDeferred(e as BeforeInstallPromptEvent);
-    };
-    const installed = () => setDeferred(null);
-    window.addEventListener('beforeinstallprompt', handler);
-    window.addEventListener('appinstalled', installed);
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handler);
-      window.removeEventListener('appinstalled', installed);
-    };
-  }, []);
-
-  return [deferred, setDeferred] as const;
+  const evento = useSyncExternalStore(suscribirInstalar, eventoInstalar, () => null);
+  return [evento] as const;
 }
 
 /**
@@ -58,19 +39,15 @@ export function useNecesitaAyudaIos() {
 }
 
 export function InstallButton({ className }: { className?: string }) {
-  const [deferred, setDeferred] = usePuedeInstalar();
+  const [evento] = usePuedeInstalar();
 
-  if (!deferred) return null;
+  if (!evento) return null;
 
   return (
     <button
       type="button"
       className={className ?? 'btn-secondary text-sm'}
-      onClick={async () => {
-        await deferred.prompt();
-        await deferred.userChoice;
-        setDeferred(null);
-      }}
+      onClick={() => void instalar()}
     >
       <InstallIcon className="text-lg" />
       Instalar app

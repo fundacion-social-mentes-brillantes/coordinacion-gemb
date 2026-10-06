@@ -18,13 +18,26 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Cuenta de Google con el correo verificado. Hoy Google es el único método
+    // de ingreso habilitado, pero dar roles no debe depender de esa
+    // configuración: con correo/contraseña cualquiera podría registrarse con
+    // el correo de una persona invitada (o con el del super admin).
+    function isGoogle() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.firebase.sign_in_provider == 'google.com';
+    }
+    function myEmail() {
+      return request.auth.token.email.lower();
+    }
+
     // Correo del super administrador (admin de admins). Debe coincidir con
     // SUPER_ADMIN_EMAIL en src/lib/firebase.ts.
     function superEmail() {
       return 'fundacionsocial@gimnasioemocionalmb.com';
     }
     function isSuperEmail(email) {
-      return email == superEmail();
+      return email.lower() == superEmail();
     }
 
     function userExists() {
@@ -57,25 +70,43 @@ service cloud.firestore {
       return isSignedIn() && role() != 'pending' && role() != 'none' && isActive();
     }
 
+    function sessionData(sessionId) {
+      return get(/databases/$(database)/documents/sessions/$(sessionId)).data;
+    }
     function sessionIsOpen(sessionId) {
-      return get(/databases/$(database)/documents/sessions/$(sessionId)).data.status == 'open';
+      return sessionData(sessionId).status == 'open';
+    }
+    // ¿Es el momento de tomar lista en esta sesión? La fecha se guarda al
+    // mediodía de Bogotá (17:00 UTC), así que se puede marcar desde la
+    // medianoche de Bogotá del día de la reunión (12 h antes) hasta 3 días
+    // después. Así una sesión agendada para otro día no recibe por error la
+    // lista de hoy, y una que alguien olvidó finalizar no se sigue llenando
+    // semanas después. La administración no tiene esta restricción.
+    function sessionInWindow(sessionId) {
+      let d = sessionData(sessionId).date;
+      return d <= request.time + duration.value(12, 'h')
+        && d >= request.time - duration.value(3, 'd');
     }
 
-    function hasInvite(email, r) {
-      return exists(/databases/$(database)/documents/invites/$(email)) &&
-        get(/databases/$(database)/documents/invites/$(email)).data.role == r;
+    // Las invitaciones se guardan con el correo en minúsculas como id.
+    function hasInvite(r) {
+      return exists(/databases/$(database)/documents/invites/$(myEmail())) &&
+        get(/databases/$(database)/documents/invites/$(myEmail())).data.role == r;
     }
 
     // -------------------- users --------------------
     match /users/{userId} {
-      // Cada quien lee su propio documento; admin/super leen todos.
-      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      // Cada quien lee su propio documento; la administración activa lee
+      // todos (una administradora a la que se le quitó el acceso, no).
+      allow read: if isSignedIn()
+        && (request.auth.uid == userId || (isAdmin() && isActive()));
 
       // Alta del propio documento en el primer ingreso.
       // El correo guardado DEBE ser el del propio usuario autenticado: así
       // nadie puede crear su documento con el correo de otra persona (ni el
       // del super admin) para suplantar identidad o bloquear la administración.
-      allow create: if request.auth.uid == userId
+      allow create: if isGoogle()
+        && request.auth.uid == userId
         && request.resource.data.email == request.auth.token.email
         && (
           // El super admin se crea a sí mismo como super_admin.
@@ -88,13 +119,14 @@ service cloud.firestore {
           ||
           // Con una invitación previa se crea con el rol invitado.
           (request.resource.data.role in ['admin', 'coordinador']
-            && hasInvite(request.auth.token.email, request.resource.data.role))
+            && hasInvite(request.resource.data.role))
         );
 
       // Actualización.
       allow update: if isSignedIn() && (
         // A) El super admin corrige/mantiene su propio documento.
         (request.auth.uid == userId
+          && isGoogle()
           && isSuperEmail(request.auth.token.email)
           && request.resource.data.role == 'super_admin'
           && request.resource.data.active == true)
@@ -120,15 +152,21 @@ service cloud.firestore {
     // -------------------- invites (pre-autorizaciones) --------------------
     // ID del documento = correo en minúsculas.
     match /invites/{inviteId} {
-      // Al ingresar, el propio usuario consulta si tiene invitación.
-      allow read: if isSignedIn();
+      // Al ingresar, cada quien consulta SOLO su propia invitación. La lista
+      // completa (correos y roles de todas) es solo para la administración.
+      allow get: if isSignedIn() && inviteId == myEmail();
+      allow list: if isAdmin() && isActive();
 
       // El super invita coordinadores y admins; el admin solo coordinadores.
       allow create, update: if isActive() && (
         (isSuper() && request.resource.data.role in ['admin', 'coordinador'])
         || (isAdmin() && request.resource.data.role == 'coordinador')
       );
-      allow delete: if isAdmin() && isActive();
+      // La administración las borra; la propia invitada, una vez usada (ya
+      // tiene su documento): así no vuelve a dar el rol si la cuenta se recrea.
+      allow delete: if (isAdmin() && isActive())
+        || (isSignedIn() && inviteId == myEmail()
+            && exists(/databases/$(database)/documents/users/$(request.auth.uid)));
     }
 
     // -------------------- members (personas) --------------------
@@ -172,10 +210,19 @@ service cloud.firestore {
     // -------------------- sessions (reuniones) --------------------
     match /sessions/{sessionId} {
       allow read: if canRead();
-      // Crear sesiones: coordinador y admin.
-      allow create: if isStaff() && isActive();
-      // Actualizar:
-      allow update: if isActive() && (
+      // Crear sesiones: coordinador y admin. Toda sesión nace abierta y en 0.
+      allow create: if isStaff() && isActive()
+        && request.resource.data.status == 'open'
+        && request.resource.data.presentCount == 0
+        && request.resource.data.type in ['entrega_pasos', 'reduccion_ego']
+        && request.resource.data.modality in ['presencial', 'virtual']
+        && request.resource.data.date is timestamp;
+      // Actualizar. Nadie reescribe quién ni cuándo la creó: así crear dos
+      // veces la misma sesión (dos celulares, mismo id) no pisa la primera.
+      allow update: if isActive()
+        && !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['createdAt', 'createdBy'])
+        && (
         // El admin puede todo (incluido reabrir y editar).
         isAdmin()
         ||
@@ -204,13 +251,34 @@ service cloud.firestore {
       // -------------------- attendance (asistencia) --------------------
       match /attendance/{memberId} {
         allow read: if canRead();
-        // Marcar/desmarcar solo si la sesión está ABIERTA.
-        // El admin también puede corregir sesiones cerradas (p. ej. ponerle
-        // el nombre real a una persona "Por identificar" días después).
-        allow create, update, delete: if isActive() && (
-          isAdmin()
-          || (isStaff() && sessionIsOpen(sessionId))
-        );
+
+        // La coordinadora marca y quita solo con la sesión ABIERTA y en su
+        // día (ver sessionInWindow). La administración también corrige
+        // sesiones cerradas (p. ej. poner el nombre real días después).
+        function staffCanMark() {
+          return isStaff() && sessionIsOpen(sessionId) && sessionInWindow(sessionId);
+        }
+
+        // Marcar = crear. El id es el de la persona.
+        allow create: if isActive()
+          && request.resource.data.memberId == memberId
+          && request.resource.data.sessionId == sessionId
+          && request.resource.data.status == 'present'
+          && (isAdmin() || staffCanMark());
+
+        // Una asistencia ya registrada solo admite corregir el nombre. Volver
+        // a "marcar" a quien ya estaba (dos celulares a la vez, o uno que
+        // estaba sin señal) reescribiría su hora de llegada y sumaría dos
+        // veces al contador: se rechaza, y con ella todo su lote.
+        allow update: if isActive()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fullName'])
+          && (isAdmin() || (isStaff() && sessionIsOpen(sessionId)));
+
+        // Quitar = borrar. Solo lo que existe: sin esa condición, quitar dos
+        // veces a la misma persona restaría dos al contador.
+        allow delete: if isActive()
+          && resource != null
+          && (isAdmin() || staffCanMark());
       }
     }
 

@@ -25,6 +25,10 @@ export function ImportPage() {
   const navigate = useNavigate();
 
   const [members, setMembers] = useState<Member[]>([]);
+  // Hasta tener la lista DEL SERVIDOR no se sabe quién ya existe: antes, si
+  // no había cargado (o fallaba), todas las filas salían como "nuevas".
+  const [membersReady, setMembersReady] = useState(false);
+  const [membersError, setMembersError] = useState(false);
   const [raw, setRaw] = useState<RawTable | null>(null);
   const [fileName, setFileName] = useState('');
   const [reading, setReading] = useState(false);
@@ -39,16 +43,31 @@ export function ImportPage() {
 
   useEffect(() => {
     const unsub = listenMembers(
-      (list) => setMembers(list),
-      (e) => console.error(e),
+      (list, meta) => {
+        setMembers(list);
+        if (!meta.fromCache) setMembersReady(true);
+      },
+      (e) => {
+        console.error(e);
+        setMembersError(true);
+      },
     );
     return unsub;
   }, []);
 
-  const existingSet = useMemo(
-    () => new Set(members.map((m) => m.searchName || normalizeText(m.fullName))),
-    [members],
-  );
+  // Nombres y ALIAS de quienes ya existen: si "Rous" es alias de una ficha,
+  // una fila "Rous" no es una persona nueva.
+  const existingSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of members) {
+      set.add(m.searchName || normalizeText(m.fullName));
+      for (const a of m.aliases ?? []) {
+        const k = normalizeText(a);
+        if (k) set.add(k);
+      }
+    }
+    return set;
+  }, [members]);
 
   const colCount = useMemo(
     () => (raw ? Math.max(0, ...raw.matrix.map((r) => r.length)) : 0),
@@ -352,12 +371,23 @@ export function ImportPage() {
           <button
             type="button"
             onClick={doImport}
-            disabled={importing || stats.toImport.length === 0}
+            disabled={importing || !membersReady || stats.toImport.length === 0}
             className="btn-primary w-full"
           >
             {importing ? <Spinner className="h-5 w-5 text-white" /> : null}
             Importar {stats.toImport.length} personas
           </button>
+          {!membersReady && (
+            <p className="flex items-center justify-center gap-2 text-center text-sm text-slate-500">
+              {membersError ? (
+                'No se pudo cargar la lista de personas. Revisa la conexión y vuelve a entrar.'
+              ) : (
+                <>
+                  <Spinner className="h-4 w-4" /> Revisando quiénes ya están en la lista…
+                </>
+              )}
+            </p>
+          )}
         </>
       )}
     </div>

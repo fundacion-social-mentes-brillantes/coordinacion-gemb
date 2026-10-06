@@ -1,8 +1,7 @@
-import Papa from 'papaparse';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
-
-// Utilidades de exportación a CSV y PDF, reutilizables en todo el panel.
+// Utilidades de exportación a Excel y PDF, reutilizables en todo el panel.
+//
+// Las librerías (xlsx, jsPDF) pesan cientos de KB y solo las usa la
+// administración al exportar: se cargan en ese momento, no al abrir el Panel.
 
 /**
  * Descarga un archivo. En el iPhone con la app instalada el atributo
@@ -56,11 +55,43 @@ function ensureExt(name: string, ext: string) {
   return name.toLowerCase().endsWith('.' + ext) ? name : `${name}.${ext}`;
 }
 
-/** Exporta un arreglo de objetos a CSV (con BOM para acentos en Excel). */
-export function exportCSV(filename: string, rows: Record<string, unknown>[]) {
-  const csv = Papa.unparse(rows);
-  const BOM = String.fromCharCode(0xfeff); // ayuda a Excel a leer los acentos
-  downloadBlob(BOM + csv, ensureExt(filename, 'csv'), 'text/csv;charset=utf-8;');
+/**
+ * Exporta un arreglo de objetos a un Excel de verdad (.xlsx).
+ *
+ * Antes era un CSV separado por comas: en un Excel configurado para Colombia
+ * (separador ";") cada fila quedaba entera en la columna A. Además, en un CSV
+ * un nombre que empiece por = + - @ se ejecuta como fórmula; aquí cada celda
+ * se escribe como texto o número, nunca como fórmula.
+ *
+ * `columns` fija el orden de las columnas y hace que, aunque no haya filas,
+ * el archivo traiga los encabezados (antes salía completamente vacío).
+ */
+export async function exportExcel(
+  filename: string,
+  rows: Record<string, unknown>[],
+  columns?: string[],
+) {
+  const XLSX = await import('xlsx');
+  const cols = columns ?? (rows[0] ? Object.keys(rows[0]) : []);
+  const celda = (v: unknown) =>
+    typeof v === 'number' ? v : v == null ? '' : String(v);
+  const aoa = [cols, ...rows.map((r) => cols.map((c) => celda(r[c])))];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // Ancho de columna según el contenido (máx. 45 caracteres).
+  ws['!cols'] = cols.map((c, i) => ({
+    wch: Math.min(
+      45,
+      Math.max(c.length, ...aoa.slice(1).map((r) => String(r[i] ?? '').length)) + 2,
+    ),
+  }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Asistencia');
+  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
+  downloadBlob(
+    out,
+    ensureExt(filename, 'xlsx'),
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  );
 }
 
 export interface PdfOptions {
@@ -72,29 +103,38 @@ export interface PdfOptions {
 }
 
 /** Exporta una tabla a PDF con encabezado y estilo de la marca. */
-export function exportPDF({
+export async function exportPDF({
   title,
   subtitle,
   columns,
   rows,
   filename,
 }: PdfOptions) {
+  const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
   const marginX = 40;
+  const ancho = doc.internal.pageSize.getWidth() - 2 * marginX;
 
+  // Título y subtítulo se parten en líneas: con un nombre o una lista de
+  // coordinadoras larga se salían por el borde derecho de la hoja.
   doc.setFontSize(16);
   doc.setTextColor(31, 120, 98); // primary-600
-  doc.text(title, marginX, 46);
+  const lineasTitulo: string[] = doc.splitTextToSize(title, ancho);
+  doc.text(lineasTitulo, marginX, 46);
+  let startY = 46 + lineasTitulo.length * 18 - 2;
 
-  let startY = 62;
   doc.setFontSize(10);
   doc.setTextColor(90, 90, 90);
-  const stamp = new Date().toLocaleString('es');
+  const stamp = new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' });
   doc.text(`Generado: ${stamp}`, marginX, startY);
   startY += 14;
   if (subtitle) {
-    doc.text(subtitle, marginX, startY);
-    startY += 14;
+    const lineas: string[] = doc.splitTextToSize(subtitle, ancho);
+    doc.text(lineas, marginX, startY);
+    startY += lineas.length * 13;
   }
 
   autoTable(doc, {

@@ -406,7 +406,7 @@ export function attendanceImageName(type: SessionType, dateLabel: string) {
   return `asistencia-${kind}-${slug}.png`;
 }
 
-export type ShareOutcome = 'shared' | 'cancelled' | 'downloaded' | 'opened';
+export type ShareOutcome = 'shared' | 'cancelled' | 'downloaded' | 'opened' | 'blocked';
 
 /**
  * Comparte la imagen con el menú nativo del celular (WhatsApp, etc.).
@@ -459,7 +459,13 @@ export async function shareOrDownloadImage(
     return 'downloaded';
   }
 
-  window.open(url, '_blank');
+  // Si pasó mucho tiempo desde el toque (la imagen no estaba lista), el
+  // navegador puede bloquear la ventana: entonces no se puede decir "se abrió".
+  const ventana = window.open(url, '_blank');
+  if (!ventana) {
+    URL.revokeObjectURL(url);
+    return 'blocked';
+  }
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
   return 'opened';
 }

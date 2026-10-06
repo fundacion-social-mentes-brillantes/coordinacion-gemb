@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import {
   listenMembers,
   createMember,
@@ -11,10 +12,12 @@ import {
 import { propagateNameToAttendance } from '../services/identify';
 import { buildNameParts } from '../lib/normalize';
 import type { Member } from '../types';
-import { buildFuse, searchMembers, toSearchable } from '../lib/search';
+import { buildFuse, findSimilarMembers, searchMembers, toSearchable } from '../lib/search';
 import { Modal } from '../components/Modal';
+import { MergeModal } from '../components/MergeModal';
 import { Spinner } from '../components/Spinner';
 import { EmptyState } from '../components/EmptyState';
+import { esperarConLimite } from '../lib/esperar';
 import {
   PlusIcon,
   SearchIcon,
@@ -35,21 +38,28 @@ export function MembersPage() {
   const { profile } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const online = useOnlineStatus();
 
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fromCache, setFromCache] = useState(false);
   const [query, setQuery] = useState('');
+  // La lista se vuelve a pintar con la búsqueda "diferida": escribir no se
+  // traba aunque haya cientos de personas.
+  const deferredQuery = useDeferredValue(query);
   const [showInactive, setShowInactive] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Member | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
+  const [mergeSource, setMergeSource] = useState<Member | null>(null);
 
   useEffect(() => {
     const unsub = listenMembers(
-      (list) => {
+      (list, meta) => {
         setMembers(list);
+        setFromCache(meta.fromCache);
         setLoading(false);
       },
       (e) => {
@@ -79,14 +89,23 @@ export function MembersPage() {
 
   const visible = useMemo(() => {
     let list: Member[] =
-      query.trim().length >= 2
-        ? searchMembers(fuse, searchable, query, 300)
+      deferredQuery.trim().length >= 2
+        ? searchMembers(fuse, searchable, deferredQuery, 300)
         : oficiales;
     if (!showInactive) list = list.filter((m) => m.active);
     return list;
-  }, [oficiales, query, fuse, searchable, showInactive]);
+  }, [oficiales, deferredQuery, fuse, searchable, showInactive]);
 
-  const activeCount = oficiales.filter((m) => m.active).length;
+  const activeCount = useMemo(() => oficiales.filter((m) => m.active).length, [oficiales]);
+
+  // Al AGREGAR: ¿ya existe alguien así (también inactivas o por revisar)?
+  const parecidas = useMemo(
+    () =>
+      modalOpen && !editing && form.fullName.trim().length >= 2
+        ? findSimilarMembers(members, form.fullName, 5)
+        : [],
+    [modalOpen, editing, form.fullName, members],
+  );
 
   const openAdd = () => {
     setEditing(null);
@@ -115,46 +134,64 @@ export function MembersPage() {
       .split(',')
       .map((a) => a.trim())
       .filter(Boolean);
+    if (saving) return;
     setSaving(true);
     try {
       if (editing) {
         const clean = buildNameParts(fullName).fullName;
         const nameChanged = clean !== editing.fullName;
-        await updateMember(editing.id, {
-          fullName,
-          phone: form.phone.trim(),
-          aliases,
-          notes: form.notes.trim(),
-          // Al ponerle nombre real a una "Por identificar", deja de serlo.
-          ...(editing.pendingIdentify && nameChanged
-            ? { pendingIdentify: false }
-            : {}),
-        });
-        if (nameChanged && !navigator.onLine) {
+        const enviado = await esperarConLimite(
+          updateMember(editing.id, {
+            fullName,
+            phone: form.phone.trim(),
+            aliases,
+            notes: form.notes.trim(),
+            // Al ponerle nombre real a una "Por identificar", deja de serlo.
+            ...(editing.pendingIdentify && nameChanged
+              ? { pendingIdentify: false }
+              : {}),
+          }),
+        );
+        if (!enviado) {
           toast(
-            'Nombre guardado. Su historial se corrige con internet: vuelve a guardar entonces.',
+            nameChanged
+              ? 'Guardado en este celular; se enviará al recuperar la señal. Su historial se corrige con internet: vuelve a guardar entonces.'
+              : 'Guardado en este celular; se enviará al recuperar la señal.',
             'info',
           );
         } else if (nameChanged) {
           // El nombre vive copiado en cada asistencia: corrige el historial.
-          const res = await propagateNameToAttendance(editing.id, clean);
-          if (res.failed > 0) {
+          try {
+            const res = await propagateNameToAttendance(editing.id, clean);
             toast(
-              `Persona actualizada; ${res.failed} registro(s) antiguos no se pudieron corregir.`,
+              res.failed > 0
+                ? `Persona actualizada; ${res.failed} registro(s) antiguos no se pudieron corregir.`
+                : 'Persona actualizada (también su historial).',
+              res.failed > 0 ? 'info' : 'success',
+            );
+          } catch (e) {
+            console.error(e);
+            toast(
+              'Nombre guardado, pero su historial no se pudo corregir ahora: vuelve a guardar con buena señal.',
               'info',
             );
-          } else {
-            toast('Persona actualizada (también su historial).', 'success');
           }
         } else {
           toast('Persona actualizada.', 'success');
         }
       } else {
-        await createMember(
-          { fullName, phone: form.phone.trim(), aliases, notes: form.notes.trim() },
-          profile.uid,
+        const enviado = await esperarConLimite(
+          createMember(
+            { fullName, phone: form.phone.trim(), aliases, notes: form.notes.trim() },
+            profile.uid,
+          ),
         );
-        toast('Persona agregada.', 'success');
+        toast(
+          enviado
+            ? 'Persona agregada.'
+            : 'Persona agregada en este celular; se enviará al recuperar la señal.',
+          'success',
+        );
       }
       setModalOpen(false);
     } catch (e) {
@@ -165,14 +202,13 @@ export function MembersPage() {
     }
   };
 
-  const toggleActive = async (m: Member) => {
-    try {
-      await setMemberActive(m.id, !m.active);
-      toast(m.active ? 'Persona desactivada.' : 'Persona reactivada.', 'success');
-    } catch (e) {
+  const toggleActive = (m: Member) => {
+    // Sin esperar al servidor: sin señal se envía al reconectar.
+    setMemberActive(m.id, !m.active).catch((e) => {
       console.error(e);
       toast('No se pudo cambiar el estado.', 'error');
-    }
+    });
+    toast(m.active ? 'Persona desactivada.' : 'Persona reactivada.', 'success');
   };
 
   return (
@@ -246,6 +282,14 @@ export function MembersPage() {
         <div className="flex justify-center py-12">
           <Spinner className="h-8 w-8" />
         </div>
+      ) : visible.length === 0 && members.length === 0 && (fromCache || !online) ? (
+        // Sin señal y sin nada guardado en el teléfono, "No hay personas ·
+        // Importar base" invitaba a reimportar toda la base.
+        <EmptyState
+          icon={<UsersIcon />}
+          title="Sin conexión"
+          description="La lista de personas se cargará en cuanto haya internet."
+        />
       ) : visible.length === 0 ? (
         <EmptyState
           icon={<UsersIcon />}
@@ -329,8 +373,11 @@ export function MembersPage() {
       >
         <div className="space-y-4">
           <div>
-            <label className="label">Nombre completo *</label>
+            <label className="label" htmlFor="persona-nombre">
+              Nombre completo *
+            </label>
             <input
+              id="persona-nombre"
               autoFocus
               className="input"
               value={form.fullName}
@@ -338,6 +385,31 @@ export function MembersPage() {
               placeholder="Ej. Johana Rendón"
             />
           </div>
+          {parecidas.length > 0 && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">
+              <p className="font-semibold text-amber-900">
+                Ojo, ya hay fichas con un nombre parecido:
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {parecidas.map(({ member: p, exact }) => (
+                  <li key={p.id} className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate text-slate-800">
+                      {p.fullName}
+                      {p.active === false && ' (inactiva)'}
+                      {p.pendingReview && ' (por revisar)'}
+                    </span>
+                    {exact && (
+                      <span className="shrink-0 text-xs font-bold text-rose-600">igual</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 text-xs text-amber-800">
+                Si es la misma persona, no la agregues: edita su ficha (o
+                actívala si está inactiva).
+              </p>
+            </div>
+          )}
           <div>
             <label className="label">Teléfono (opcional)</label>
             <input
@@ -374,8 +446,28 @@ export function MembersPage() {
             {saving ? <Spinner className="h-5 w-5 text-white" /> : null}
             {editing ? 'Guardar cambios' : 'Agregar persona'}
           </button>
+          {editing && (
+            <button
+              type="button"
+              onClick={() => {
+                setModalOpen(false);
+                setMergeSource(editing);
+              }}
+              className="btn-ghost min-h-[44px] w-full text-sm"
+            >
+              <UsersIcon className="text-base" /> Es la misma persona que otra ficha: unirlas
+            </button>
+          )}
         </div>
       </Modal>
+
+      {/* Dos fichas de la misma persona: toda la asistencia pasa a una. */}
+      <MergeModal
+        source={mergeSource}
+        members={members}
+        candidata={(m) => !m.pendingIdentify}
+        onClose={() => setMergeSource(null)}
+      />
     </div>
   );
 }

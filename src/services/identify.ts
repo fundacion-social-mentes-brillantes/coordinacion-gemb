@@ -1,6 +1,9 @@
 import {
+  arrayUnion,
   collectionGroup,
-  getDocs,
+  getDocsFromServer,
+  query,
+  where,
   doc,
   updateDoc,
   deleteDoc,
@@ -8,7 +11,7 @@ import {
   increment,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { buildNameParts } from '../lib/normalize';
+import { buildNameParts, normalizeText } from '../lib/normalize';
 import { UNKNOWN_PREFIX } from '../lib/constants';
 import { updateMember } from './members';
 import type { Attendance, Member } from '../types';
@@ -17,15 +20,24 @@ import type { Attendance, Member } from '../types';
 // después se corrige. Como la asistencia denormaliza `fullName` (y su ID de
 // documento es el memberId), corregir implica tocar TODAS sus asistencias.
 
-/** Trae todos los documentos de asistencia de una persona (en cualquier sesión). */
+/**
+ * Trae los documentos de asistencia de UNA persona (en cualquier sesión).
+ *
+ * Antes se descargaba TODA la asistencia de la historia (cientos de lecturas
+ * cobradas) para quedarse con unos pocos. Ahora la consulta filtra en el
+ * servidor (índice de grupo de colección sobre memberId, en
+ * firestore.indexes.json).
+ *
+ * Siempre DEL SERVIDOR: sin internet real, Firestore respondería con lo
+ * guardado en el teléfono, y actuar sobre esa foto incompleta borraría de
+ * menos o dejaría asistencias huérfanas. Sin conexión, esto falla y la
+ * corrección se pide con señal.
+ */
 async function attendanceDocsOf(memberId: string) {
-  const snap = await getDocs(collectionGroup(db, 'attendance'));
-  const mine = snap.docs.filter(
-    (d) => (d.data() as Attendance).memberId === memberId,
+  const snap = await getDocsFromServer(
+    query(collectionGroup(db, 'attendance'), where('memberId', '==', memberId)),
   );
-  // Sin internet real, Firestore responde con lo guardado en el teléfono en
-  // vez de fallar. Actuar sobre esa foto incompleta puede borrar de menos.
-  return { snap, mine, fromCache: snap.metadata.fromCache };
+  return snap.docs;
 }
 
 export interface PropagateResult {
@@ -42,9 +54,13 @@ export async function propagateNameToAttendance(
   memberId: string,
   cleanFullName: string,
 ): Promise<PropagateResult> {
-  const { mine } = await attendanceDocsOf(memberId);
+  const mine = await attendanceDocsOf(memberId);
+  // Solo las que de verdad tienen otro nombre (antes se reescribían todas).
+  const pendientes = mine.filter(
+    (d) => (d.data() as Attendance).fullName !== cleanFullName,
+  );
   const results = await Promise.allSettled(
-    mine.map((d) => updateDoc(d.ref, { fullName: cleanFullName })),
+    pendientes.map((d) => updateDoc(d.ref, { fullName: cleanFullName })),
   );
   return {
     updated: results.filter((r) => r.status === 'fulfilled').length,
@@ -87,14 +103,19 @@ export async function approveMember(
   // Si se aprueba sin ponerle un nombre real, sigue "por identificar": no se
   // puede dar por resuelta a alguien que se llama "Por identificar (…)".
   const sigueSinNombre = parts.fullName.startsWith(UNKNOWN_PREFIX);
+  // Primero el historial y DESPUÉS la aprobación: si la corrección del
+  // historial falla, la persona sigue "por revisar" (se puede reintentar) en
+  // vez de quedar aprobada con el nombre viejo en sus asistencias mientras
+  // la pantalla dice "No se pudo aprobar".
+  // Se propaga SIEMPRE, aunque el nombre no cambie aquí: si una coordinadora
+  // ya lo había corregido y algún registro se quedó atrás, esto lo repara.
+  const res = await propagateNameToAttendance(memberId, parts.fullName);
   await updateMember(memberId, {
     ...(cambioNombre ? { fullName: parts.fullName } : {}),
     pendingReview: false,
     pendingIdentify: sigueSinNombre,
   });
-  // Se propaga SIEMPRE, aunque el nombre no cambie aquí: si una coordinadora
-  // ya lo había corregido y algún registro se quedó atrás, esto lo repara.
-  return propagateNameToAttendance(memberId, parts.fullName);
+  return res;
 }
 
 export interface DiscardResult {
@@ -111,15 +132,19 @@ export interface DiscardResult {
 export async function discardPendingMember(
   memberId: string,
 ): Promise<DiscardResult> {
-  const { mine, fromCache } = await attendanceDocsOf(memberId);
-  // Si la lista viene del teléfono podría faltar asistencia: borrar la ficha
-  // dejaría registros huérfanos imposibles de encontrar después.
-  if (fromCache) {
+  let mine;
+  try {
+    mine = await attendanceDocsOf(memberId);
+  } catch (e) {
+    // Sin conexión real no se puede saber qué borrar: no se toca nada.
+    console.error(e);
     throw new Error('SIN_CONEXION_REAL');
   }
 
   // TODO en un único lote: o se borra la persona con todas sus asistencias, o
-  // no se borra nada. Nunca queda a medio camino.
+  // no se borra nada. Nunca queda a medio camino. Si mientras tanto otra
+  // persona quitó alguna de esas asistencias, las reglas rechazan el lote
+  // (no se resta dos veces) y se puede reintentar.
   const batch = writeBatch(db);
   for (const d of mine) {
     const data = d.data() as Omit<Attendance, 'id'>;
@@ -146,28 +171,35 @@ export interface MergeResult {
 }
 
 /**
- * "Era alguien que ya está en la base": pasa las asistencias de la persona
- * "Por identificar" a la persona real y borra la ficha provisional.
+ * "Era alguien que ya está en la base": pasa las asistencias de una ficha
+ * (la provisional "Por identificar", la registrada en plena reunión, o una
+ * ficha oficial duplicada) a la persona real, y borra la ficha sobrante.
  *
  * Por cada sesión (en un lote atómico):
  * - si la persona real NO estaba marcada → se crea su asistencia (mismos
- *   datos/hora) y se borra la provisional (el contador no cambia: +1 −1);
- * - si la persona real YA estaba marcada → solo se borra la provisional y el
+ *   datos/hora) y se borra la de la ficha sobrante (el contador no cambia);
+ * - si la persona real YA estaba marcada → solo se borra la sobrante y el
  *   contador baja en 1 (eran la misma persona contada dos veces).
  *
- * La ficha provisional solo se borra si TODO se pudo mover (las sesiones
- * cerradas pueden fallar si quien fusiona no es admin).
+ * Si mientras tanto alguien marcó o quitó en esa sesión, las reglas rechazan
+ * ese lote (nada queda a medias ni se cuenta doble) y esa sesión se cuenta
+ * en `failedSessions` para reintentar.
+ *
+ * La ficha sobrante solo se borra si TODO se pudo mover (las sesiones
+ * cerradas pueden fallar si quien fusiona no es admin). Su nombre queda como
+ * alias de la persona real: así la próxima vez que la escriban igual, la
+ * búsqueda la encuentra en vez de invitar a crearla otra vez.
  */
 export async function mergeMemberInto(
   placeholderId: string,
   target: Pick<Member, 'id' | 'fullName'>,
+  placeholderName?: string,
 ): Promise<MergeResult> {
-  const { snap, mine } = await attendanceDocsOf(placeholderId);
-  const targetPaths = new Set(
-    snap.docs
-      .filter((d) => (d.data() as Attendance).memberId === target.id)
-      .map((d) => d.ref.path),
-  );
+  const [mine, deTarget] = await Promise.all([
+    attendanceDocsOf(placeholderId),
+    attendanceDocsOf(target.id),
+  ]);
+  const targetPaths = new Set(deTarget.map((d) => d.ref.path));
 
   let moved = 0;
   let failedSessions = 0;
@@ -208,6 +240,23 @@ export async function mergeMemberInto(
     } catch (e) {
       console.error('No se pudo borrar la ficha provisional', e);
     }
+  }
+
+  // El nombre con que la registraron pasa a ser alias de la persona real
+  // (salvo "Por identificar…", que no es un nombre). Solo la administración
+  // puede tocar una ficha aprobada: si lo hace una coordinadora, se omite.
+  const alias = placeholderName?.trim();
+  if (
+    memberDeleted &&
+    alias &&
+    !alias.startsWith(UNKNOWN_PREFIX) &&
+    normalizeText(alias) !== normalizeText(target.fullName)
+  ) {
+    await updateDoc(doc(db, 'members', target.id), { aliases: arrayUnion(alias) }).catch(
+      () => {
+        /* sin permiso (coordinadora): el alias es un extra, no un requisito */
+      },
+    );
   }
   return { moved, failedSessions, memberDeleted };
 }

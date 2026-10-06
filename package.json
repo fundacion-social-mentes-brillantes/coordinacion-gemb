@@ -3,9 +3,15 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "PWA de control de asistencia para la fundaci\u00f3n Gimnasio Emocional Mentes Brillantes (GEMB).",
+  "description": "PWA de control de asistencia para la fundación Gimnasio Emocional Mentes Brillantes (GEMB).",
   "scripts": {
     "dev": "vite",
+    "dev:emulador": "vite --mode emulador",
+    "emuladores": "node scripts/emuladores.mjs emulators:start --only auth,firestore --project demo-gemb",
+    "test:reglas": "node scripts/emuladores.mjs emulators:exec --only firestore --project demo-gemb-reglas \"node --test tests/reglas.test.mjs\"",
+    "test:varias": "node scripts/emuladores.mjs emulators:exec --only auth,firestore --project demo-gemb \"node --test --test-concurrency=1 tests/varias-personas.test.mjs\"",
+    "test:mcp": "npm run build:api && node scripts/emuladores.mjs emulators:exec --only auth,firestore --project demo-gemb \"node --test --test-concurrency=1 tests/mcp.test.mjs\"",
+    "test": "npm run test:reglas && npm run test:varias && npm run test:mcp",
     "build": "npm run typecheck && npm run check:auth && npm run build:api && vite build",
     "check:auth": "node scripts/check-auth-hosts.mjs",
     "preview": "vite preview",
@@ -26,6 +32,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
     "@types/node": "^22.10.0",
     "@types/papaparse": "^5.3.15",
     "@types/react": "^18.3.12",

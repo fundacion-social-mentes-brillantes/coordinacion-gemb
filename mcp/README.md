@@ -100,8 +100,9 @@ escritorio, Claude Code. Es la misma dirección para todo el mundo.
 <summary>Alternativa sin entrar con Google (para clientes que no hagan OAuth)</summary>
 
 El servidor acepta además la llave directamente, como cabecera
-`Authorization: Bearer <llave>` o como `?k=<llave>` en la dirección. Sirve para
-clientes que no hagan el ingreso con Google. La llave es el permiso de sesión
+`Authorization: Bearer <llave>`. Sirve para clientes que no hagan el ingreso
+con Google. En la dirección (`?k=<llave>`) ya **no** se acepta: quedaba escrita
+en los registros de Vercel y en el historial del navegador. La llave es el permiso de sesión
 que Firebase le dio al navegador (`user.refreshToken`); ya no hay ninguna
 pantalla que la entregue, precisamente porque quien la tenga entra como tú, y
 una dirección con un secreto dentro acaba en historiales y registros de
@@ -111,8 +112,9 @@ servidores. Si necesitas una, sácala a mano y trátala como una contraseña.
 
 ### Para cortar el acceso
 
-- **Tú mismo:** sal de la app con el botón de salir. La llave deja de servir al
-  instante.
+- **Tú mismo:** en Claude, quita el conector (Personalizar → Conectores).
+  **Salir de la app no lo desconecta**: cerrar sesión solo borra la sesión de
+  ese celular o computador, no el permiso que ya tiene Claude.
 - **La administración:** app → **Usuarios** → desactivar esa cuenta. Deja de
   funcionar de inmediato, porque las reglas exigen `active == true`.
 
@@ -190,4 +192,5 @@ no pueden decir números distintos.
   `api/mcp.js`, generado con `npm run build:api` (Vercel compila cada archivo
   de `api/` por separado y no arrastra módulos de otras carpetas).
 - `mcp/src/index.ts` — el mismo servidor por terminal (`GEMB_LLAVE=… node
-  dist/index.js`), para desarrollar.
+  mcp/dist/index.js`, compilándolo antes con esbuild), solo para desarrollar.
+  El `.mcp.json` del proyecto usa el servidor de Vercel.

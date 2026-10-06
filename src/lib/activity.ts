@@ -1,5 +1,5 @@
 import type { Attendance, Session, SessionType } from '../types';
-import { toDate, fmtDate } from './dates';
+import { dayKey, endOfTodayBogota, toDate, fmtDate } from './dates';
 import { SESSION_TYPE_LABELS, MODALITY_LABELS } from './constants';
 
 // ---------------------------------------------------------------------------
@@ -54,6 +54,12 @@ export interface ActivityReport {
   /** LA CIFRA: personas distintas que vinieron al menos una vez. */
   activas: number;
   activasPrevias: number;
+  /**
+   * ¿Tiene sentido comparar `activas` con `activasPrevias`? Solo si los dos
+   * períodos tienen el mismo número de reuniones: 45 personas en 8 reuniones
+   * contra 25 en 2 no es "20 más".
+   */
+  activasComparables: boolean;
   /** Promedio de presentes por reunión. */
   promedio: number;
   promedioPrevio: number;
@@ -94,33 +100,63 @@ export function buildActivityReport(
   ventana: number,
   hoy: Date = new Date(),
 ): ActivityReport {
-  const finDeHoy = new Date(
-    hoy.getFullYear(),
-    hoy.getMonth(),
-    hoy.getDate(),
-    23,
-    59,
-    59,
-    999,
-  ).getTime();
+  // "Hoy" en Bogotá, aunque esto corra en el servidor del MCP (UTC): allí el
+  // día cambiaba a las 7 p. m. de Colombia y la reunión de mañana contaba
+  // como hecha.
+  const finDeHoy = endOfTodayBogota(hoy).getTime() - 1;
 
-  // Solo reuniones de este tipo que YA ocurrieron: una reunión agendada para
-  // la próxima semana no debe bajar el promedio de presentes.
-  const realizadas = sessions
-    .filter((s) => s.type === type && toDate(s.date).getTime() <= finDeHoy)
-    .sort((a, b) => toDate(b.date).getTime() - toDate(a.date).getTime());
+  // Quiénes vinieron a cada sesión (solo asistencia de reuniones que YA
+  // ocurrieron: lo marcado por error en una sesión agendada no cuenta).
+  const presentesDe = new Map<string, Set<string>>();
+  for (const a of attendance) {
+    if (a.sessionType !== type) continue;
+    if (toDate(a.sessionDate).getTime() > finDeHoy) continue;
+    let set = presentesDe.get(a.sessionId);
+    if (!set) presentesDe.set(a.sessionId, (set = new Set()));
+    set.add(a.memberId);
+  }
+
+  // Una REUNIÓN es un día: si quedaron dos sesiones del mismo tipo el mismo
+  // día (duplicadas), cuentan como una sola, juntando su gente. Y una sesión
+  // sin nadie no es una reunión hecha (la de hoy antes de empezar, o la
+  // duplicada vacía): antes bajaban el promedio y desplazaban de la ventana
+  // a una reunión real.
+  const porDia = new Map<string, { session: Session; ids: Set<string>; gente: Set<string> }>();
+  for (const s of sessions) {
+    if (s.type !== type || toDate(s.date).getTime() > finDeHoy) continue;
+    const gente = presentesDe.get(s.id);
+    if (!gente || gente.size === 0) continue;
+    const k = dayKey(s.date);
+    const r = porDia.get(k);
+    if (!r) {
+      porDia.set(k, { session: s, ids: new Set([s.id]), gente: new Set(gente) });
+    } else {
+      r.ids.add(s.id);
+      gente.forEach((m) => r.gente.add(m));
+      // La que representa al día es la que más gente tiene.
+      if (gente.size > (presentesDe.get(r.session.id)?.size ?? 0)) r.session = s;
+    }
+  }
+  const realizadas = [...porDia.values()].sort(
+    (a, b) => toDate(b.session.date).getTime() - toDate(a.session.date).getTime(),
+  );
 
   const recientesS = realizadas.slice(0, ventana);
   const previasS = realizadas.slice(ventana, ventana * 2);
-  const idsRecientes = new Set(recientesS.map((s) => s.id));
-  const idsPrevias = new Set(previasS.map((s) => s.id));
+  // sessionId → día de la reunión, en cada ventana.
+  const diaReciente = new Map<string, string>();
+  const diaPrevio = new Map<string, string>();
+  for (const r of recientesS) r.ids.forEach((id) => diaReciente.set(id, dayKey(r.session.date)));
+  for (const r of previasS) r.ids.forEach((id) => diaPrevio.set(id, dayKey(r.session.date)));
 
-  const mapa = new Map<string, PersonActivity>();
-  const presentesPorSesion = new Map<string, number>();
+  const mapa = new Map<string, PersonActivity & { _rec: Set<string>; _prev: Set<string> }>();
 
   for (const a of attendance) {
     if (a.sessionType !== type) continue;
     const fecha = toDate(a.sessionDate);
+    // Una asistencia en una reunión que todavía no ocurre no puede ser su
+    // "última vez" ni cambiar su grupo.
+    if (fecha.getTime() > finDeHoy) continue;
 
     let p = mapa.get(a.memberId);
     if (!p) {
@@ -132,6 +168,8 @@ export function buildActivityReport(
         primera: fecha,
         ultima: fecha,
         grupo: 'dormidas',
+        _rec: new Set(),
+        _prev: new Set(),
       };
       mapa.set(a.memberId, p);
     }
@@ -143,15 +181,16 @@ export function buildActivityReport(
     }
     if (fecha.getTime() < p.primera.getTime()) p.primera = fecha;
 
-    if (idsRecientes.has(a.sessionId)) {
-      p.recientes++;
-      presentesPorSesion.set(
-        a.sessionId,
-        (presentesPorSesion.get(a.sessionId) ?? 0) + 1,
-      );
-    } else if (idsPrevias.has(a.sessionId)) {
-      p.previas++;
-    }
+    // Por DÍA de reunión: estar en las dos sesiones duplicadas de un mismo
+    // día es una sola asistencia.
+    const dr = diaReciente.get(a.sessionId);
+    const dp = diaPrevio.get(a.sessionId);
+    if (dr) p._rec.add(dr);
+    else if (dp) p._prev.add(dp);
+  }
+  for (const p of mapa.values()) {
+    p.recientes = p._rec.size;
+    p.previas = p._prev.size;
   }
 
   // "Firme" = vino al 60% o más de las reuniones de la ventana (mínimo 1).
@@ -160,7 +199,7 @@ export function buildActivityReport(
   // Frontera de la ventana: quien no tiene NINGUNA asistencia anterior a esta
   // fecha se estrenó dentro del período.
   const inicioVentana = recientesS.length
-    ? toDate(recientesS[recientesS.length - 1].date).getTime()
+    ? toDate(recientesS[recientesS.length - 1].session.date).getTime()
     : null;
 
   // "Nueva" no puede significar solo "su primera vez cae en la ventana": con
@@ -169,7 +208,7 @@ export function buildActivityReport(
   // sea, que su última vez esté en la mitad más reciente del período.
   const inicioMitad = recientesS.length
     ? toDate(
-        recientesS[Math.ceil(recientesS.length / 2) - 1].date,
+        recientesS[Math.ceil(recientesS.length / 2) - 1].session.date,
       ).getTime()
     : null;
 
@@ -208,7 +247,9 @@ export function buildActivityReport(
     grupos[p.grupo]++;
   }
 
-  const personas = [...mapa.values()].sort(
+  const personas: PersonActivity[] = [...mapa.values()]
+    .map(({ _rec: _r, _prev: _p, ...p }) => p)
+    .sort(
     (a, b) =>
       GROUP_ORDER.indexOf(a.grupo) - GROUP_ORDER.indexOf(b.grupo) ||
       b.recientes - a.recientes ||
@@ -232,15 +273,16 @@ export function buildActivityReport(
     ventana,
     // De la más antigua a la más nueva: así se lee la tendencia de izquierda
     // a derecha, como en el gráfico por mes del resumen.
-    recientes: [...recientesS].reverse().map((session) => ({
-      session,
-      presentes: presentesPorSesion.get(session.id) ?? 0,
+    recientes: [...recientesS].reverse().map((r) => ({
+      session: r.session,
+      presentes: r.gente.size,
     })),
     previasCount: previasS.length,
-    desde: recientesS.length ? toDate(recientesS[recientesS.length - 1].date) : null,
-    hasta: recientesS.length ? toDate(recientesS[0].date) : null,
+    desde: recientesS.length ? toDate(recientesS[recientesS.length - 1].session.date) : null,
+    hasta: recientesS.length ? toDate(recientesS[0].session.date) : null,
     activas,
     activasPrevias,
+    activasComparables: previasS.length > 0 && previasS.length === recientesS.length,
     promedio: recientesS.length ? totalRec / recientesS.length : 0,
     promedioPrevio: previasS.length ? totalPrev / previasS.length : 0,
     umbralFirmes,
@@ -282,7 +324,11 @@ export function resumenActividad(r: ActivityReport, conNombres = true): string {
   const lineas = [
     `${SESSION_TYPE_LABELS[r.type]} — últimas ${n} reuniones (${fmtDate(r.desde)} a ${fmtDate(r.hasta)})`,
     '',
-    `PERSONAS DISTINTAS QUE VINIERON: ${r.activas}${cmp(r.activas, r.activasPrevias)}`,
+    `PERSONAS DISTINTAS QUE VINIERON: ${r.activas}${
+      r.activasComparables || r.previasCount === 0
+        ? cmp(r.activas, r.activasPrevias)
+        : ` (el período anterior solo tuvo ${r.previasCount} reunión(es): no es comparable)`
+    }`,
     `Promedio de presentes por reunión: ${Math.round(r.promedio * 10) / 10}${cmp(
       r.promedio,
       r.promedioPrevio,

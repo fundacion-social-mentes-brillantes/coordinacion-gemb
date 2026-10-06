@@ -18,15 +18,29 @@ import {
 import { listenMembers } from '../services/members';
 import { resolvePlaceholderName, mergeMemberInto } from '../services/identify';
 import type { Attendance, Member, Session } from '../types';
-import { buildFuse, searchMembers, toSearchable } from '../lib/search';
+import {
+  buildFuse,
+  findSimilarMembers,
+  searchMembers,
+  toSearchable,
+} from '../lib/search';
 import { UNKNOWN_PREFIX, SESSION_TYPE_LABELS } from '../lib/constants';
+import { tidyName } from '../lib/normalize';
 import {
   buildAttendanceImage,
   attendanceImageName,
   shareOrDownloadImage,
   preloadLogo,
 } from '../lib/shareImage';
-import { fmtDateLong, fmtTime, toDate } from '../lib/dates';
+import {
+  capitalizeFirst,
+  daysFromToday,
+  fmtDate,
+  fmtDateLong,
+  fmtTime,
+  inMarkingWindow,
+  toDate,
+} from '../lib/dates';
 import { Spinner } from '../components/Spinner';
 import { EmptyState } from '../components/EmptyState';
 import { Modal } from '../components/Modal';
@@ -55,9 +69,37 @@ function buzz(ms = 12) {
   }
 }
 
-/** ¿El error viene de que la sesión ya se finalizó desde otro dispositivo? */
-function esSesionCerrada(e: unknown) {
+/**
+ * ¿Las reglas rechazaron la escritura? Pasa si la sesión se finalizó desde
+ * otro celular, si otra coordinadora ya había marcado (o quitado) a esa
+ * persona, o si la sesión no es de hoy.
+ */
+function esRechazo(e: unknown) {
   return (e as { code?: string })?.code === 'permission-denied';
+}
+
+/** "mañana", "en 5 días", "ayer", "hace 12 días". */
+function cuandoEs(dias: number) {
+  if (dias === 1) return 'mañana';
+  if (dias > 1) return `en ${dias} días`;
+  if (dias === -1) return 'ayer';
+  return `hace ${-dias} días`;
+}
+
+/** Alto disponible por encima del teclado (iPhone/Android), en px. */
+function useAltoVisible(activo: boolean) {
+  const [alto, setAlto] = useState(() =>
+    typeof window === 'undefined' ? 800 : window.visualViewport?.height ?? window.innerHeight,
+  );
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!activo || !vv) return;
+    const sync = () => setAlto(vv.height);
+    sync();
+    vv.addEventListener('resize', sync);
+    return () => vv.removeEventListener('resize', sync);
+  }, [activo]);
+  return alto;
 }
 
 export function AttendancePage() {
@@ -70,13 +112,21 @@ export function AttendancePage() {
   const [session, setSession] = useState<Session | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [members, setMembers] = useState<Member[]>([]);
+  // Estado de la lista de personas. Sin esto, mientras carga (o si falla)
+  // toda búsqueda dice "Nadie coincide" y ofrece crear una ficha nueva: así
+  // nacían muchas fichas duplicadas.
+  const [membersReady, setMembersReady] = useState(false);
+  const [membersStale, setMembersStale] = useState(false);
+  const [membersError, setMembersError] = useState(false);
+  // Una administradora puede corregir una sesión de otro día, pero primero
+  // tiene que decir que es a propósito.
+  const [desbloqueoFecha, setDesbloqueoFecha] = useState(false);
   const [rows, setRows] = useState<Attendance[]>([]);
   const [pendingSync, setPendingSync] = useState(false);
   const [rowsFromServer, setRowsFromServer] = useState(false);
   const [query, setQuery] = useState('');
   const [walkinOpen, setWalkinOpen] = useState(false);
   const [walkinName, setWalkinName] = useState('');
-  const [walkinSaving, setWalkinSaving] = useState(false);
   // Modo "no sé su nombre" del modal de agregar.
   const [walkinUnknown, setWalkinUnknown] = useState(false);
   const [walkinDesc, setWalkinDesc] = useState('');
@@ -117,11 +167,20 @@ export function AttendancePage() {
     return unsub;
   }, [id]);
 
+  // TODAS las personas, también las inactivas: si alguien vuelve después de
+  // meses tiene que aparecer al buscarla, o se le crea otra ficha.
   useEffect(() => {
     const unsub = listenMembers(
-      (list) => setMembers(list),
-      (e) => console.error(e),
-      { activeOnly: true },
+      (list, meta) => {
+        setMembers(list);
+        setMembersReady(true);
+        setMembersStale(meta.fromCache);
+        setMembersError(false);
+      },
+      (e) => {
+        console.error(e);
+        setMembersError(true);
+      },
     );
     return unsub;
   }, []);
@@ -171,6 +230,14 @@ export function AttendancePage() {
     () => searchMembers(fuse, searchable, query),
     [fuse, searchable, query],
   );
+  const buscando = query.trim().length >= 2;
+  // Los resultados no pueden quedar debajo del teclado del celular.
+  const altoVisible = useAltoVisible(buscando);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
+  const resultsMaxH = (() => {
+    const abajo = searchBoxRef.current?.getBoundingClientRect().bottom ?? 160;
+    return Math.max(180, Math.round(altoVisible - abajo - 16));
+  })();
 
   const presentIds = useMemo(() => new Set(rows.map((r) => r.memberId)), [rows]);
   // Orden de llegada: primero en llegar = número 1.
@@ -197,18 +264,69 @@ export function AttendancePage() {
         session.id,
         session.type,
         session.modality,
+        String(toDate(session.date).getTime()),
         session.coordinator ?? '',
-        presentByArrival.map((r) => r.memberId).join(','),
+        // Con los nombres: si alguien corrige "Por identificar" por el nombre
+        // real, la imagen ya preparada tiene que rehacerse.
+        presentByArrival.map((r) => `${r.memberId}:${r.fullName}`).join(','),
       ].join('|')
     : '';
 
   const isOpen = session?.status === 'open';
+  // ¿Es esta la sesión de hoy? Mismo criterio que las reglas de Firestore.
+  const diasSesion = session ? daysFromToday(session.date) : 0;
+  const fueraDeFecha = session ? !inMarkingWindow(session.date) : false;
   /**
    * Una vez finalizada la sesión, la coordinadora ya no puede tocar nada:
    * solo una administradora puede corregirla. Esto vale para marcar, agregar
-   * personas, poner nombres y cambiar quién coordina.
+   * personas, poner nombres y cambiar quién coordina. Tampoco se toma lista
+   * en una sesión de otro día (agendada, o abierta hace semanas): ahí la
+   * administradora debe confirmar primero que es a propósito.
    */
-  const canEdit = isOpen || isAdmin;
+  const canEdit =
+    (isOpen || isAdmin) && (!fueraDeFecha || (isAdmin && desbloqueoFecha));
+  const motivoNoEditable = !isOpen
+    ? 'La sesión ya se finalizó. Solo una administradora puede modificarla.'
+    : diasSesion > 0
+      ? 'Esta sesión es de otro día: todavía no se puede tomar lista en ella.'
+      : 'Esta sesión es de hace varios días: ya no se puede tomar lista en ella.';
+
+  // La respuesta del servidor puede llegar mucho después (sin señal, al
+  // reconectar). Para explicar un rechazo hace falta el estado de ESE
+  // momento, no el de cuando se tocó: por eso van en refs.
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const isAdminRef = useRef(isAdmin);
+  isAdminRef.current = isAdmin;
+
+  /** Explica por qué el servidor rechazó marcar o quitar a alguien. */
+  const avisarRechazo = (e: unknown, nombre: string, accion: 'marcar' | 'quitar') => {
+    // Un rechazo de las reglas es lo esperado cuando dos celulares marcan a
+    // la misma persona: no es un error de la app.
+    if (esRechazo(e)) console.info('Cambio rechazado por las reglas:', e);
+    else console.error(e);
+    if (!esRechazo(e)) {
+      toast(
+        `No se pudo guardar lo de ${nombre}. Revisa la conexión e inténtalo de nuevo.`,
+        'error',
+      );
+      return;
+    }
+    const s = sessionRef.current;
+    if (s && s.status !== 'open' && !isAdminRef.current) {
+      // No mentir con "se reintentará": ese cambio NO se va a guardar nunca.
+      toast(
+        `${nombre} NO quedó ${accion === 'marcar' ? 'marcada' : 'quitada'}: alguien finalizó la sesión. Pide a una administradora que la reabra.`,
+        'error',
+      );
+    } else if (s && !inMarkingWindow(s.date) && !isAdminRef.current) {
+      toast(`${nombre} NO quedó guardada: esta sesión no es de hoy.`, 'error');
+    } else if (accion === 'marcar') {
+      toast(`${nombre} ya estaba presente: la marcó otra coordinadora.`, 'info');
+    } else {
+      toast(`${nombre} ya no estaba en la lista: la quitó otra coordinadora.`, 'info');
+    }
+  };
 
   /**
    * Cuadra el contador de presentes con la cantidad real de nombres.
@@ -261,37 +379,27 @@ export function AttendancePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageKey, session]);
 
-  const toggle = async (member: Pick<Member, 'id' | 'fullName'>) => {
+  /**
+   * Marca o quita a alguien. NO espera al servidor: la marca queda en el
+   * teléfono al instante (y la pantalla se actualiza sola); sin señal, la
+   * promesa no se resuelve hasta reconectar. Si al final el servidor la
+   * rechaza, se avisa entonces con el motivo.
+   */
+  const toggle = (member: Pick<Member, 'id' | 'fullName'>) => {
     if (!session || !profile) return;
     if (!canEdit) {
-      toast(
-        'La sesión ya se finalizó. Solo una administradora puede modificarla.',
-        'info',
-      );
+      toast(motivoNoEditable, 'info');
       return;
     }
-    const wasPresent = presentIds.has(member.id);
-    try {
-      if (wasPresent) {
-        await unmarkPresent(session.id, member.id);
-        buzz(20);
-        toast(`Quitaste a ${member.fullName}.`, 'info');
-      } else {
-        await markPresent(session, member, profile);
-        buzz();
-        toast(`${member.fullName} · presente ✓`, 'success');
-      }
-    } catch (e) {
-      console.error(e);
-      if (esSesionCerrada(e)) {
-        // No mentir con "se reintentará": ese cambio NO se va a guardar nunca.
-        toast(
-          `${member.fullName} NO quedó guardada: alguien finalizó la sesión. Pide a una administradora que la reabra.`,
-          'error',
-        );
-      } else {
-        toast('No se pudo guardar. Se reintentará al reconectar.', 'error');
-      }
+    const nombre = member.fullName;
+    if (presentIds.has(member.id)) {
+      unmarkPresent(session.id, member.id).catch((e) => avisarRechazo(e, nombre, 'quitar'));
+      buzz(20);
+      toast(`Quitaste a ${nombre}.`, 'info');
+    } else {
+      markPresent(session, member, profile).catch((e) => avisarRechazo(e, nombre, 'marcar'));
+      buzz();
+      toast(`${nombre} · presente ✓`, 'success');
     }
   };
 
@@ -329,6 +437,7 @@ export function AttendancePage() {
               coordinator: session.coordinator,
               names: presentByArrival.map((r) => r.fullName),
             });
+      imageCache.current = { key: imageKey, blob };
       const outcome = await shareOrDownloadImage(
         blob,
         attendanceImageName(session.type, dateLabel),
@@ -341,6 +450,10 @@ export function AttendancePage() {
           'Se abrió la imagen: mantén pulsado sobre ella para guardarla o enviarla.',
           'info',
         );
+      } else if (outcome === 'blocked') {
+        // Para entonces la imagen ya quedó preparada: el segundo toque abre
+        // el menú de compartir al instante.
+        toast('La imagen ya está lista: toca «Compartir» otra vez.', 'info');
       }
     } catch (e) {
       console.error(e);
@@ -377,7 +490,7 @@ export function AttendancePage() {
       console.error(e);
       // Si otra coordinadora la finalizó primero, la reunión SÍ quedó
       // cerrada: no tiene sentido asustar con un error rojo.
-      if (esSesionCerrada(e)) {
+      if (esRechazo(e)) {
         toast('La sesión ya la había finalizado otra persona.', 'info');
       } else {
         toast('No se pudo finalizar la sesión.', 'error');
@@ -388,83 +501,112 @@ export function AttendancePage() {
     setJustFinished(true);
   };
 
-  const handleWalkin = async () => {
-    if (!session || !profile) return;
-    // La sesión pudo cerrarse desde otro dispositivo con este modal abierto.
-    if (!canEdit) {
-      toast('La sesión ya se finalizó. Solo una administradora puede modificarla.', 'info');
-      setWalkinOpen(false);
-      return;
-    }
-    const name = walkinName.trim();
-    if (!name) return;
-    setWalkinSaving(true);
-    try {
-      await addWalkinAndMarkPresent(session, { fullName: name }, profile);
-      buzz();
-      toast(`${name} quedó presente. La coordinación revisará el nombre.`, 'success');
-      setWalkinName('');
-      setWalkinOpen(false);
-    } catch (e) {
-      console.error(e);
-      toast(
-        esSesionCerrada(e)
-          ? 'No se agregó: la sesión ya se finalizó desde otro dispositivo.'
-          : 'No se pudo agregar la persona.',
-        'error',
-      );
-    } finally {
-      setWalkinSaving(false);
+  /** Explica por qué el servidor rechazó agregar a una persona nueva. */
+  const avisarRechazoNueva = (e: unknown, nombre: string) => {
+    console.error(e);
+    const s = sessionRef.current;
+    if (!esRechazo(e)) {
+      toast(`No se pudo agregar a ${nombre}. Revisa la conexión e inténtalo de nuevo.`, 'error');
+    } else if (s && s.status !== 'open' && !isAdminRef.current) {
+      toast(`${nombre} NO se agregó: la sesión ya se finalizó desde otro dispositivo.`, 'error');
+    } else {
+      // Mismo nombre en la misma reunión = misma ficha: ya la había agregado
+      // otra coordinadora (o se envió dos veces).
+      toast(`${nombre} ya estaba en la lista: la agregó otra coordinadora.`, 'info');
     }
   };
 
-  // Marca presente a alguien cuyo nombre aún no se sabe: se crea como
-  // "Por identificar N — seña" y después se corrige con "Poner nombre".
-  const handleUnknownWalkin = async () => {
-    if (!session || !profile) return;
+  // Un segundo Enter mientras se guarda (o el doble toque) no puede crear
+  // otra ficha. Un ref y no el estado: el estado llega tarde al segundo evento.
+  const walkinEnCurso = useRef(false);
+
+  const cerrarWalkin = () => {
+    setWalkinOpen(false);
+    setWalkinUnknown(false);
+    setWalkinName('');
+    setWalkinDesc('');
+  };
+
+  /** Agrega a alguien que no está en la lista (queda "por revisar"). */
+  const handleWalkin = () => {
+    if (!session || !profile || walkinEnCurso.current) return;
+    // La sesión pudo cerrarse desde otro dispositivo con este modal abierto.
     if (!canEdit) {
-      toast('La sesión ya se finalizó. Solo una administradora puede modificarla.', 'info');
-      setWalkinOpen(false);
-      setWalkinUnknown(false);
+      toast(motivoNoEditable, 'info');
+      cerrarWalkin();
       return;
     }
-    setWalkinSaving(true);
-    try {
-      const desc = walkinDesc.trim();
-      // Se identifica por la seña o, si no la dieron, por la hora de llegada.
-      // Un número correlativo se repetiría si dos coordinadoras marcan a la
-      // vez (o una está sin señal) y quedarían dos "Por identificar 1".
-      const marca = desc || `llegó ${fmtTime(new Date())}`;
-      const name = `${UNKNOWN_PREFIX} (${marca})`;
-      await addWalkinAndMarkPresent(
-        session,
-        {
-          fullName: name,
-          notes: desc ? `Señas: ${desc}` : '',
-          pendingIdentify: true,
-        },
-        profile,
-      );
-      buzz();
-      toast(
-        'Quedó presente. Cuando sepas su nombre, usa "Poner nombre" en la hoja.',
-        'success',
-      );
-      setWalkinDesc('');
-      setWalkinUnknown(false);
-      setWalkinOpen(false);
-    } catch (e) {
-      console.error(e);
-      toast(
-        esSesionCerrada(e)
-          ? 'No se agregó: la sesión ya se finalizó desde otro dispositivo.'
-          : 'No se pudo agregar la persona.',
-        'error',
-      );
-    } finally {
-      setWalkinSaving(false);
+    const name = walkinName.trim().replace(/\s+/g, ' ');
+    if (name.length < 2) return;
+    if (!membersReady) {
+      toast('Espera un momento: todavía se está cargando la lista de personas.', 'info');
+      return;
     }
+    walkinEnCurso.current = true;
+    const { done } = addWalkinAndMarkPresent(session, { fullName: name }, profile);
+    // Como queda guardado ("kata blum" → "Kata Blum"), no como se tecleó.
+    const visto = tidyName(name);
+    done.catch((e) => avisarRechazoNueva(e, visto));
+    buzz();
+    toast(
+      online
+        ? `${visto} quedó presente. La coordinación revisará el nombre.`
+        : `${visto} quedó presente (se enviará al recuperar la señal).`,
+      'success',
+    );
+    cerrarWalkin();
+    setTimeout(() => {
+      walkinEnCurso.current = false;
+    }, 800);
   };
+
+  // Marca presente a alguien cuyo nombre aún no se sabe: se crea como
+  // "Por identificar (seña)" y después se corrige con "Poner nombre".
+  const handleUnknownWalkin = () => {
+    if (!session || !profile || walkinEnCurso.current) return;
+    if (!canEdit) {
+      toast(motivoNoEditable, 'info');
+      cerrarWalkin();
+      return;
+    }
+    walkinEnCurso.current = true;
+    const desc = walkinDesc.trim();
+    // Se identifica por la seña o, si no la dieron, por la hora de llegada.
+    // Un número correlativo se repetiría si dos coordinadoras marcan a la
+    // vez (o una está sin señal) y quedarían dos "Por identificar 1".
+    const marca = desc || `llegó ${fmtTime(new Date())}`;
+    const name = `${UNKNOWN_PREFIX} (${marca})`;
+    const { done } = addWalkinAndMarkPresent(
+      session,
+      { fullName: name, notes: desc ? `Señas: ${desc}` : '', pendingIdentify: true },
+      profile,
+    );
+    done.catch((e) => avisarRechazoNueva(e, name));
+    buzz();
+    toast('Quedó presente. Cuando sepas su nombre, usa "Poner nombre" en la hoja.', 'success');
+    cerrarWalkin();
+    setTimeout(() => {
+      walkinEnCurso.current = false;
+    }, 800);
+  };
+
+  /** "Ya existe": en vez de crear una ficha nueva, marca a la que ya estaba. */
+  const marcarExistente = (m: Pick<Member, 'id' | 'fullName'>) => {
+    cerrarWalkin();
+    setQuery('');
+    if (presentIds.has(m.id)) toast(`${m.fullName} ya estaba presente.`, 'info');
+    else toggle(m);
+  };
+
+  // Fichas parecidas a lo que se está escribiendo en "Agregar persona".
+  const similares = useMemo(
+    () =>
+      walkinOpen && !walkinUnknown && walkinName.trim().length >= 2
+        ? findSimilarMembers(members, walkinName)
+        : [],
+    [walkinOpen, walkinUnknown, walkinName, members],
+  );
+  const hayIdentica = similares.some((s) => s.exact);
 
   const saveCoordinator = async () => {
     if (!session) return;
@@ -500,10 +642,14 @@ export function AttendancePage() {
     }
   };
 
-  const reopenAndMark = async () => {
+  const reopenAndMark = () => {
     if (!session) return;
-    await setSessionStatus(session.id, 'open');
-    toast('Sesión reabierta.', 'success');
+    // Como finalizar: sin esperar al servidor (sin señal se quedaría colgado).
+    setSessionStatus(session.id, 'open').catch((e) => {
+      console.error(e);
+      toast('No se pudo reabrir la sesión. Revisa la conexión e inténtalo de nuevo.', 'error');
+    });
+    toast(online ? 'Sesión reabierta.' : 'Sesión reabierta (se enviará al recuperar la señal).', 'success');
   };
 
   if (sessionLoading) {
@@ -539,8 +685,8 @@ export function AttendancePage() {
         >
           <ArrowLeftIcon className="text-lg" /> Sesiones
         </button>
-        <h2 className="text-lg font-bold capitalize text-primary-900">
-          {fmtDateLong(session.date)}
+        <h2 className="text-lg font-bold text-primary-900">
+          {capitalizeFirst(fmtDateLong(session.date))}
         </h2>
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           <TypeBadge type={session.type} />
@@ -585,6 +731,46 @@ export function AttendancePage() {
           Sincronizando cambios…
         </div>
       )}
+
+      {/* ¿Es la sesión de hoy? Una agendada aparece de primera en la lista y
+          era fácil tomar ahí la lista de hoy. */}
+      {isOpen && fueraDeFecha && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-semibold">
+            {diasSesion > 0
+              ? `Esta sesión es para ${cuandoEs(diasSesion)} (${fmtDate(session.date)}).`
+              : `Esta sesión es de ${cuandoEs(diasSesion)} (${fmtDate(session.date)}) y quedó abierta.`}
+          </p>
+          <p className="mt-1">
+            {diasSesion > 0
+              ? 'Todavía no se puede tomar lista aquí. Si la reunión es hoy, vuelve a Sesiones y abre (o crea) la de hoy.'
+              : 'Ya no se puede tomar lista aquí. Si la reunión es hoy, vuelve a Sesiones y abre (o crea) la de hoy.'}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => navigate('/sesiones')}
+              className="btn-secondary min-h-[44px] flex-1 text-sm"
+            >
+              Ir a Sesiones
+            </button>
+            {isAdmin && !desbloqueoFecha && (
+              <button
+                type="button"
+                onClick={() => setDesbloqueoFecha(true)}
+                className="btn-ghost min-h-[44px] flex-1 text-sm"
+              >
+                Corregirla igual (administración)
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      {isOpen && !fueraDeFecha && diasSesion < 0 && (
+        <div className="rounded-xl bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          Ojo: esta sesión es de {cuandoEs(diasSesion)} ({fmtDate(session.date)}), no de hoy.
+        </div>
+      )}
       {!isOpen && (
         <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-600">
           <p className="flex items-center gap-2 font-semibold text-slate-700">
@@ -606,23 +792,36 @@ export function AttendancePage() {
         </div>
       )}
 
-      {/* Compartir la lista como imagen (siempre disponible) */}
-      <button
-        type="button"
-        onClick={shareList}
-        disabled={sharing}
-        className="btn-secondary w-full py-3"
-      >
-        {sharing ? <Spinner className="h-5 w-5" /> : <ShareIcon className="text-lg" />}
-        Compartir lista como imagen
-      </button>
+      {/* Compartir la lista (siempre) y finalizar (mientras esté abierta), a
+          la vista. Antes "Finalizar" quedaba al fondo, debajo de toda la
+          hoja, y era fácil compartir e irse sin cerrar la sesión. */}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={shareList}
+          disabled={sharing}
+          className="btn-secondary min-h-[48px] flex-1 py-3"
+        >
+          {sharing ? <Spinner className="h-5 w-5" /> : <ShareIcon className="text-lg" />}
+          Compartir lista
+        </button>
+        {isOpen && diasSesion <= 0 && (
+          <button
+            type="button"
+            onClick={() => setFinishOpen(true)}
+            className="btn-primary min-h-[48px] flex-1 py-3"
+          >
+            <FlagIcon className="text-lg" /> Finalizar
+          </button>
+        )}
+      </div>
 
       {/* Buscador */}
       <div
         className="sticky z-30 -mx-4 bg-surface px-4 pb-2 pt-1"
         style={{ top: 'var(--header-h, 57px)' }}
       >
-        <div className="relative">
+        <div className="relative" ref={searchBoxRef}>
           <SearchIcon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xl text-slate-400" />
           <input
             ref={searchRef}
@@ -654,17 +853,34 @@ export function AttendancePage() {
           {/* Resultados: van ANCLADOS al buscador. Si estuvieran más abajo en
               la página, con la hoja larga se dibujarían fuera de la pantalla
               y parecería que la búsqueda no hace nada. */}
-          {query.trim().length >= 2 && (
+          {buscando && (
             <div
-              className="absolute inset-x-0 top-full z-40 mt-2 max-h-[46dvh] overflow-y-auto overscroll-contain rounded-2xl border p-2 shadow-lg"
+              className="absolute inset-x-0 top-full z-40 mt-2 overflow-y-auto overscroll-contain rounded-2xl border p-2 shadow-lg"
               style={{
                 background: 'var(--app-panel-solid)',
                 borderColor: 'var(--app-border)',
+                maxHeight: `${resultsMaxH}px`,
               }}
             >
-              {results.length === 0 ? (
+              {!membersReady ? (
+                <div className="flex items-center justify-center gap-2 p-4 text-sm text-slate-500">
+                  {membersError ? (
+                    'No se pudo cargar la lista de personas. Revisa la conexión y vuelve a abrir la sesión.'
+                  ) : (
+                    <>
+                      <Spinner className="h-4 w-4" /> Cargando la lista de personas…
+                    </>
+                  )}
+                </div>
+              ) : results.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-500">
                   Nadie coincide con “{query}”.
+                  {membersStale && (
+                    <span className="mt-1 block text-xs text-amber-700">
+                      La lista de este celular puede estar desactualizada: si
+                      la persona es conocida, espera a tener señal.
+                    </span>
+                  )}
                   {canEdit && (
                     <button
                       type="button"
@@ -680,6 +896,11 @@ export function AttendancePage() {
                 </div>
               ) : (
                 <ul className="space-y-2">
+                  {results.partial && (
+                    <li className="px-1 pb-1 text-xs font-semibold text-amber-700">
+                      Nadie coincide con todo lo escrito. ¿Es alguna de estas?
+                    </li>
+                  )}
                   {results.map((m) => {
                     const present = presentIds.has(m.id);
                     return (
@@ -714,6 +935,11 @@ export function AttendancePage() {
                                   sin revisar
                                 </span>
                               )}
+                              {m.active === false && (
+                                <span className="chip shrink-0 bg-slate-200 py-0 text-[11px] text-slate-600">
+                                  inactiva
+                                </span>
+                              )}
                             </span>
                             <span
                               className={`block text-xs ${
@@ -731,6 +957,20 @@ export function AttendancePage() {
                       </li>
                     );
                   })}
+                  {results.partial && canEdit && (
+                    <li>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWalkinName(query.trim());
+                          setWalkinOpen(true);
+                        }}
+                        className="block min-h-[44px] w-full text-sm text-primary-600 underline"
+                      >
+                        No es ninguna: agregar “{query.trim()}” como persona nueva
+                      </button>
+                    </li>
+                  )}
                 </ul>
               )}
             </div>
@@ -863,21 +1103,16 @@ export function AttendancePage() {
         )}
       </section>
 
-      {/* Finalizar la sesión */}
-      {isOpen && (
-        <div className="card p-4">
-          <p className="text-sm text-slate-600">
-            Cuando termine la reunión, finalízala para que la lista quede
-            guardada y nadie la cambie por accidente.
-          </p>
-          <button
-            type="button"
-            onClick={() => setFinishOpen(true)}
-            className="btn-primary btn-lg mt-3"
-          >
-            <FlagIcon className="text-xl" /> Finalizar sesión
-          </button>
-        </div>
+      {/* Recordatorio al final de la hoja: se llega aquí al terminar de
+          revisar la lista. */}
+      {isOpen && rows.length > 0 && diasSesion <= 0 && (
+        <button
+          type="button"
+          onClick={() => setFinishOpen(true)}
+          className="btn-ghost min-h-[48px] w-full text-sm"
+        >
+          <FlagIcon className="text-lg" /> ¿Terminó la reunión? Finaliza la sesión
+        </button>
       )}
 
       {/* Confirmación de finalizar */}
@@ -956,39 +1191,37 @@ export function AttendancePage() {
       {/* Modal walk-in (con nombre o sin saberlo todavía) */}
       <Modal
         open={walkinOpen}
-        onClose={() => {
-          setWalkinOpen(false);
-          setWalkinUnknown(false);
-        }}
+        onClose={cerrarWalkin}
         title={walkinUnknown ? 'Marcar sin saber el nombre' : 'Agregar persona nueva'}
       >
         {walkinUnknown ? (
-          <div className="space-y-4">
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleUnknownWalkin();
+            }}
+          >
             <p className="text-sm text-slate-500">
               Quedará presente como «{UNKNOWN_PREFIX}». Cuando sepas quién es,
               toca <strong>Poner nombre</strong> en la hoja de asistencia y el
               registro se corrige solo.
             </p>
             <div>
-              <label className="label">¿Cómo la reconoces? (opcional)</label>
+              <label className="label" htmlFor="walkin-desc">
+                ¿Cómo la reconoces? (opcional)
+              </label>
               <input
+                id="walkin-desc"
                 autoFocus
                 className="input"
                 value={walkinDesc}
                 onChange={(e) => setWalkinDesc(e.target.value)}
                 placeholder="Ej. saco rojo, vino con Marta"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleUnknownWalkin();
-                }}
+                enterKeyHint="done"
               />
             </div>
-            <button
-              type="button"
-              onClick={handleUnknownWalkin}
-              disabled={walkinSaving}
-              className="btn-primary w-full"
-            >
-              {walkinSaving ? <Spinner className="h-5 w-5 text-white" /> : null}
+            <button type="submit" className="btn-primary w-full">
               Marcar presente sin nombre
             </button>
             <button
@@ -998,36 +1231,94 @@ export function AttendancePage() {
             >
               ← Sí sé su nombre
             </button>
-          </div>
+          </form>
         ) : (
-          <div className="space-y-4">
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              // Con una ficha idéntica, Enter no crea otra: hay que elegir.
+              if (!hayIdentica) handleWalkin();
+            }}
+          >
             <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
               Escribe su <strong>nombre completo</strong>: si no lo sabes,
               pregúntaselo. Si solo alcanzas el primer nombre, sirve igual —
               la coordinación lo revisa antes de sumarla a la lista oficial.
             </p>
             <div>
-              <label className="label">Nombre completo</label>
+              <label className="label" htmlFor="walkin-name">
+                Nombre completo
+              </label>
               <input
+                id="walkin-name"
                 autoFocus
                 className="input"
                 value={walkinName}
                 onChange={(e) => setWalkinName(e.target.value)}
                 placeholder="Ej. Johana Rendón"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleWalkin();
-                }}
+                autoComplete="off"
+                enterKeyHint="done"
               />
             </div>
-            <button
-              type="button"
-              onClick={handleWalkin}
-              disabled={walkinSaving || !walkinName.trim()}
-              className="btn-primary w-full"
-            >
-              {walkinSaving ? <Spinner className="h-5 w-5 text-white" /> : null}
-              Agregar y marcar presente
-            </button>
+
+            {!membersReady && (
+              <p className="flex items-center gap-2 text-sm text-slate-500">
+                <Spinner className="h-4 w-4" /> Revisando si ya existe…
+              </p>
+            )}
+            {similares.length > 0 && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+                <p className="text-sm font-semibold text-amber-900">
+                  {hayIdentica
+                    ? 'Ya hay alguien con ese nombre. ¿Es esta persona?'
+                    : '¿Es alguna de estas personas?'}
+                </p>
+                <ul className="mt-2 space-y-1.5">
+                  {similares.map(({ member: m }) => (
+                    <li key={m.id}>
+                      <button
+                        type="button"
+                        onClick={() => marcarExistente(m)}
+                        className="flex min-h-[44px] w-full items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-left text-sm"
+                      >
+                        <span className="min-w-0 truncate font-medium text-slate-800">
+                          {m.fullName}
+                        </span>
+                        <span className="shrink-0 text-xs font-semibold text-primary-600">
+                          {presentIds.has(m.id)
+                            ? 'ya está presente'
+                            : m.active === false
+                              ? 'inactiva · marcar'
+                              : 'Sí, es ella'}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {hayIdentica ? (
+              <button
+                type="button"
+                onClick={handleWalkin}
+                disabled={walkinName.trim().length < 2}
+                className="btn-secondary w-full"
+              >
+                No, es otra persona: agregarla igual
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={walkinName.trim().length < 2 || !membersReady}
+                className="btn-primary w-full"
+              >
+                {similares.length > 0
+                  ? 'No es ninguna: agregar y marcar presente'
+                  : 'Agregar y marcar presente'}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setWalkinUnknown(true)}
@@ -1035,7 +1326,7 @@ export function AttendancePage() {
             >
               ¿No sabes su nombre? Márcala igual →
             </button>
-          </div>
+          </form>
         )}
       </Modal>
 
@@ -1074,13 +1365,25 @@ export function AttendancePage() {
 /* "¿Quién es esta persona?" — escribir su nombre o fusionarla con     */
 /* alguien que ya está en la base.                                     */
 /* ------------------------------------------------------------------ */
-function ResolveNameModal({
+function ResolveNameModal(props: {
+  target: { id: string; name: string } | null;
+  onClose: () => void;
+  members: Member[];
+  presentIds: Set<string>;
+}) {
+  // El contenido (y su índice de búsqueda) solo existe con el modal abierto;
+  // la `key` lo reinicia limpio al abrirlo para otra persona.
+  if (!props.target) return null;
+  return <ResolveNameContent key={props.target.id} {...props} target={props.target} />;
+}
+
+function ResolveNameContent({
   target,
   onClose,
   members,
   presentIds,
 }: {
-  target: { id: string; name: string } | null;
+  target: { id: string; name: string };
   onClose: () => void;
   members: Member[];
   presentIds: Set<string>;
@@ -1092,28 +1395,23 @@ function ResolveNameModal({
   const [pick, setPick] = useState<Member | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Al abrir para otra persona, limpia el formulario.
-  useEffect(() => {
-    setMode('write');
-    setName('');
-    setQ('');
-    setPick(null);
-  }, [target?.id]);
-
-  // Candidatas para fusión: personas reales (no provisionales) activas.
-  const searchable = useMemo(
-    () =>
-      toSearchable(
-        members.filter(
-          (m) => m.id !== target?.id && !m.pendingIdentify && m.active,
-        ),
-      ),
-    [members, target?.id],
+  // Candidatas para fusión: personas reales (no provisionales), también las
+  // inactivas (si alguien vuelve, no hay que duplicarla).
+  const reales = useMemo(
+    () => members.filter((m) => m.id !== target.id && !m.pendingIdentify),
+    [members, target.id],
   );
+  const searchable = useMemo(() => toSearchable(reales), [reales]);
   const fuse = useMemo(() => buildFuse(searchable), [searchable]);
   const candidates = useMemo(
     () => searchMembers(fuse, searchable, q, 8),
     [fuse, searchable, q],
+  );
+  // Al escribir el nombre real: ¿ya existe alguien así? Entonces no es una
+  // persona nueva, es fusionarla con esa ficha.
+  const parecidas = useMemo(
+    () => (name.trim().length >= 2 ? findSimilarMembers(reales, name, 4) : []),
+    [reales, name],
   );
 
   const doRename = async () => {
@@ -1152,10 +1450,11 @@ function ResolveNameModal({
     }
     setBusy(true);
     try {
-      const res = await mergeMemberInto(target.id, {
-        id: pick.id,
-        fullName: pick.fullName,
-      });
+      const res = await mergeMemberInto(
+        target.id,
+        { id: pick.id, fullName: pick.fullName },
+        target.name,
+      );
       if (res.failedSessions > 0) {
         toast(
           `Se pasaron ${res.moved} registro(s); ${res.failedSessions} de sesiones cerradas los corrige una administradora.`,
@@ -1178,8 +1477,6 @@ function ResolveNameModal({
       setBusy(false);
     }
   };
-
-  if (!target) return null;
 
   return (
     <Modal open onClose={onClose} title="¿Quién es esta persona?">
@@ -1223,17 +1520,47 @@ function ResolveNameModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') doRename();
+                if (e.key === 'Enter' && !busy && parecidas.length === 0) doRename();
               }}
             />
+            {parecidas.length > 0 && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+                <p className="text-sm font-semibold text-amber-900">
+                  Ya hay alguien así en la base. Si es ella, pásale la
+                  asistencia en vez de crear otra ficha:
+                </p>
+                <ul className="mt-2 space-y-1.5">
+                  {parecidas.map(({ member: m }) => (
+                    <li key={m.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPick(m);
+                          setQ(m.fullName);
+                          setMode('pick');
+                        }}
+                        className="flex min-h-[44px] w-full items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-left text-sm"
+                      >
+                        <span className="min-w-0 truncate font-medium text-slate-800">
+                          {m.fullName}
+                        </span>
+                        <span className="shrink-0 text-xs font-semibold text-primary-600">
+                          Es ella
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <button
               type="button"
               onClick={doRename}
               disabled={busy || !name.trim()}
-              className="btn-primary w-full"
+              className={parecidas.length > 0 ? 'btn-secondary w-full' : 'btn-primary w-full'}
             >
-              {busy ? <Spinner className="h-5 w-5 text-white" /> : null}
-              Guardar nombre
+              {busy ? <Spinner className="h-5 w-5" /> : null}
+              {parecidas.length > 0 ? 'No es ninguna: guardar este nombre' : 'Guardar nombre'}
             </button>
           </>
         ) : (

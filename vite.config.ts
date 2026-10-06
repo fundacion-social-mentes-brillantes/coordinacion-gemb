@@ -4,7 +4,9 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 // Configuración de Vite + React + PWA.
 // La PWA usa `prompt`: cuando hay versión nueva se AVISA con un botón, en vez
-// de recargarse sola (recargarse en plena reunión perdería el hilo).
+// de recargarse en la cara de nadie (en plena reunión perdería el hilo). Se
+// instala sola solo cuando no estorba: al abrir, o tras un minuto en segundo
+// plano (ver main.tsx).
 export default defineConfig({
   plugins: [
     react(),
@@ -50,6 +52,27 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        // Las librerías de exportar/importar (Excel y PDF, más de 1 MB) solo
+        // las usa la administración: no se descargan de antemano en el
+        // celular de cada coordinadora. Se bajan la primera vez que se usan y
+        // desde ahí quedan guardadas (ver runtimeCaching).
+        globIgnores: [
+          '**/xlsx-*.js',
+          '**/pdf-*.js',
+          '**/html2canvas*.js',
+          '**/purify*.js',
+          '**/index.es-*.js',
+        ],
+        runtimeCaching: [
+          {
+            urlPattern: /\/assets\/(xlsx|pdf|html2canvas|purify|index\.es)[-.][^/]*\.js$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'gemb-librerias-admin',
+              expiration: { maxEntries: 12, maxAgeSeconds: 60 * 60 * 24 * 60 },
+            },
+          },
+        ],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         // NO TOCAR NINGUNA DE LAS DOS.
@@ -87,6 +110,10 @@ export default defineConfig({
             'firebase/firestore',
           ],
           react: ['react', 'react-dom', 'react-router-dom'],
+          // Con nombre propio para poder dejarlas fuera de la descarga
+          // anticipada (globIgnores, arriba).
+          xlsx: ['xlsx'],
+          pdf: ['jspdf', 'jspdf-autotable'],
         },
       },
     },

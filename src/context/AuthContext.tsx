@@ -15,12 +15,16 @@ import {
   type User,
 } from 'firebase/auth';
 import {
+  clearIndexedDbPersistence,
+  deleteDoc,
   doc,
   getDoc,
   setDoc,
+  terminate,
   updateDoc,
   onSnapshot,
   serverTimestamp,
+  waitForPendingWrites,
 } from 'firebase/firestore';
 import {
   auth,
@@ -41,7 +45,8 @@ interface AuthContextValue {
   /** Hay sesión pero el perfil no llega (red o permisos): hay que dar salida. */
   stuck: boolean;
   signIn: () => Promise<void>;
-  logout: () => Promise<void>;
+  /** false = la persona decidió no salir (había cambios sin enviar). */
+  logout: () => Promise<boolean>;
   isSuperAdmin: boolean;
   isAdmin: boolean; // admin o super_admin
   isCoordinador: boolean; // coordinador, admin o super_admin (puede marcar)
@@ -175,6 +180,10 @@ async function ensureUserDoc(u: User) {
   if (invitedRole) {
     try {
       await setDoc(ref, { ...base, role: invitedRole });
+      // La invitación ya cumplió: se borra para que no vuelva a dar el rol
+      // si algún día se recrea la cuenta (y para que la lista de Usuarios
+      // muestre solo las que siguen pendientes).
+      await deleteDoc(doc(db, 'invites', emailLower)).catch(() => {});
       return;
     } catch {
       /* si las reglas rechazan el auto-rol, cae a pendiente */
@@ -390,9 +399,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // ingreso que sí está en marcha.
       if (code.includes('cancelled-popup')) return;
       // Si el popup no funciona (frecuente en algunos móviles), usa redirect.
+      // OJO: "popup-closed" NO está aquí: es la persona cerrando la ventana
+      // para cancelar, y sacarla de la app hacia Google sería ignorarla.
       if (
         code.includes('popup-blocked') ||
-        code.includes('popup-closed') ||
         code.includes('operation-not-supported') ||
         // Navegador que bloquea el almacenamiento de la ventana emergente
         // (Safari y algunos navegadores con el rastreo muy restringido).
@@ -406,10 +416,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const logout = useCallback(async () => {
+  /**
+   * Cierra la sesión. Devuelve false si la persona decidió no salir.
+   *
+   * Antes de salir espera (un momento) a que se envíen las marcas hechas sin
+   * señal: Firestore las guarda por usuaria, así que si se sale con marcas
+   * pendientes solo se envían cuando ESA usuaria vuelva a entrar en ESE
+   * teléfono (y si mientras tanto alguien finaliza la sesión, se pierden).
+   *
+   * Si todo se envió, borra además lo guardado en el teléfono (nombres y
+   * datos de las personas): un celular prestado no debe quedar con ellos.
+   */
+  const logout = useCallback(async (): Promise<boolean> => {
+    const enviado = await Promise.race([
+      waitForPendingWrites(db).then(() => true),
+      new Promise<boolean>((r) => setTimeout(() => r(false), 4000)),
+    ]);
+    if (
+      !enviado &&
+      !window.confirm(
+        'Hay cambios que todavía no se enviaron (parece que no hay señal).\n\nSi sales ahora, quedan guardados en este teléfono y se enviarán cuando vuelvas a entrar aquí con tu cuenta.\n\n¿Salir de todas formas?',
+      )
+    ) {
+      return false;
+    }
     clearRedirectFlag();
     setStuck(false);
     await signOut(auth);
+    if (enviado) {
+      try {
+        await terminate(db);
+        await clearIndexedDbPersistence(db);
+      } catch (e) {
+        console.warn('No se pudo borrar lo guardado en el teléfono', e);
+      }
+      // Firestore quedó cerrado: se arranca limpio en la pantalla de ingreso.
+      window.location.replace('/login');
+    }
+    return true;
   }, []);
 
   const role = profile?.role;

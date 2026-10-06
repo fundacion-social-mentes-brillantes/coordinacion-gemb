@@ -1,13 +1,22 @@
 import { buscarHerramienta, catalogoPara, permitida } from './herramientas';
-import { AccesoError, ConfigError, abrirSesion, type Cliente } from './rest';
+import {
+  AccesoError,
+  ConfigError,
+  LlaveInvalidaError,
+  abrirSesion,
+  type Cliente,
+} from './rest';
+
+// Las fechas que se escriben en los textos (fmtDate) usan la zona del
+// proceso. Vercel corre en UTC; la fundación vive en Bogotá.
+process.env.TZ = 'America/Bogota';
 
 // ---------------------------------------------------------------------------
 //  Servidor MCP por HTTP, desplegado junto a la app en Vercel.
 //
-//  Cada persona lo conecta a SU Claude con SU propia llave, sacada de la app.
-//  El servidor no guarda ningún secreto: la llave llega en cada petición, se
-//  canjea por un permiso de una hora y se descarta. Si el servidor se ve
-//  comprometido, no hay nada que robar.
+//  Cada persona lo conecta a SU Claude entrando con Google (OAuth). El
+//  servidor no guarda ningún secreto: la llave llega en cada petición, se
+//  canjea por un permiso de una hora y se descarta.
 //
 //  Quién ve qué lo deciden dos capas, no este archivo:
 //    1. El rol de la persona en la app filtra la lista de herramientas.
@@ -161,27 +170,30 @@ interface Req {
 }
 
 /**
- * De dónde sale la llave de la persona.
- *
- * Lo más limpio sería solo la cabecera Authorization, pero la pantalla de
- * conectores de claude.ai únicamente pide una dirección: no hay dónde poner
- * cabeceras. Así que también se acepta en la propia URL (?k=…), que es lo que
- * permite instalarlo desde el celular sin pelearse con nada.
+ * La llave de la persona, SOLO de la cabecera Authorization (la pone Claude
+ * después de entrar con Google). Antes también se aceptaba en la URL
+ * (?k=…), pero así quedaba escrita en los registros de Vercel y en el
+ * historial: cualquiera que los viera podía entrar como esa persona.
  */
 function llaveDe(req: Req): string {
   const cabecera = req.headers.authorization;
-  const enCabecera = (Array.isArray(cabecera) ? cabecera[0] : cabecera ?? '')
+  return (Array.isArray(cabecera) ? cabecera[0] : cabecera ?? '')
     .replace(/^Bearer\s+/i, '')
     .trim();
-  if (enCabecera) return enCabecera;
+}
 
+function llaveEnUrl(req: Req): boolean {
   try {
     const u = new URL(req.url ?? '', 'http://x');
-    return (u.searchParams.get('k') ?? u.searchParams.get('llave') ?? '').trim();
+    return u.searchParams.has('k') || u.searchParams.has('llave');
   } catch {
-    return '';
+    return false;
   }
 }
+
+const DONDE_ENTRAR =
+  'Bearer realm="coordinacion-gemb", ' +
+  'resource_metadata="https://coordinacion-gemb.vercel.app/.well-known/oauth-protected-resource"';
 interface Res {
   status: (n: number) => Res;
   setHeader: (k: string, v: string) => void;
@@ -239,38 +251,58 @@ export default async function handler(req: Req, res: Res) {
     return;
   }
 
+  if (llaveEnUrl(req)) {
+    res.status(400).json(
+      fallo(
+        null,
+        -32600,
+        'La llave ya no se acepta en la dirección (?k=…): quedaba guardada en los ' +
+          'registros. Quita ese pedazo de la dirección del conector y entra con Google ' +
+          'desde Claude ("Conectar").',
+      ),
+    );
+    return;
+  }
+
   const llave = llaveDe(req);
+  const cuerpo = req.body;
+  const peticiones: Peticion[] = Array.isArray(cuerpo)
+    ? (cuerpo as Peticion[])
+    : [(cuerpo ?? {}) as Peticion];
+  // initialize y las notificaciones se atienden sin llave, para que el
+  // saludo no falle.
+  const soloSaludo = peticiones.every((p) => saludo(p) !== undefined);
 
   // Sin llave: se responde 401 diciendo dónde se entra con Google. Eso es lo
   // que hace que el cliente ofrezca "Conectar" en vez de quedarse mudo.
-  // Excepción: initialize y las notificaciones, para que el saludo no falle.
-  if (!llave) {
-    const cuerpoPrevio = req.body;
-    const lista: Peticion[] = Array.isArray(cuerpoPrevio)
-      ? (cuerpoPrevio as Peticion[])
-      : [(cuerpoPrevio ?? {}) as Peticion];
-    const soloSaludo = lista.every((p) => saludo(p) !== undefined);
-    if (!soloSaludo) {
-      res.setHeader(
-        'WWW-Authenticate',
-        'Bearer realm="coordinacion-gemb", ' +
-          'resource_metadata="https://coordinacion-gemb.vercel.app/.well-known/oauth-protected-resource"',
-      );
-      res.status(401).json(
-        fallo(null, -32001, 'Hay que entrar con Google. Conecta el conector desde Claude.'),
-      );
-      return;
-    }
+  if (!llave && !soloSaludo) {
+    res.setHeader('WWW-Authenticate', DONDE_ENTRAR);
+    res.status(401).json(
+      fallo(null, -32001, 'Hay que entrar con Google. Conecta el conector desde Claude.'),
+    );
+    return;
   }
 
   // Se abre una sola vez por petición aunque vengan varias llamadas juntas.
   let abierta: Promise<Cliente> | null = null;
   const obtener = () => (abierta ??= abrirSesion(llave));
 
-  const cuerpo = req.body;
-  const peticiones: Peticion[] = Array.isArray(cuerpo)
-    ? (cuerpo as Peticion[])
-    : [(cuerpo ?? {}) as Peticion];
+  // Llave vencida o revocada: también 401, con invalid_token. Antes se
+  // respondía 200 con un texto de error y Claude nunca ofrecía "Reconectar":
+  // el conector quedaba roto sin que se notara. (Cuenta desactivada o
+  // pendiente siguen yendo como texto: eso no se arregla reconectando.)
+  if (!soloSaludo) {
+    try {
+      await obtener();
+    } catch (e) {
+      if (e instanceof LlaveInvalidaError) {
+        res.setHeader('WWW-Authenticate', `${DONDE_ENTRAR}, error="invalid_token"`);
+        res.status(401).json(fallo(null, -32001, e.message));
+        return;
+      }
+      // Los demás errores los explica atender() como texto.
+    }
+  }
 
   const respuestas: object[] = [];
   for (const p of peticiones) {

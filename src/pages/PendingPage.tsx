@@ -16,7 +16,7 @@ export function PendingPage() {
   const deactivated = profile && profile.role !== 'pending' && !profile.active;
 
   const handleLogout = async () => {
-    await logout();
+    if (!(await logout())) return;
     navigate('/login', { replace: true });
   };
 

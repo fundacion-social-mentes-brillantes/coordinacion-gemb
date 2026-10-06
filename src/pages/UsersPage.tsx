@@ -17,6 +17,7 @@ import { ROLE_LABELS } from '../lib/constants';
 import { Spinner } from '../components/Spinner';
 import { EmptyState } from '../components/EmptyState';
 import { UsersIcon, TrashIcon, CheckIcon, PlusIcon } from '../components/Icons';
+import { esperarConLimite } from '../lib/esperar';
 
 export function UsersPage() {
   const { profile, isSuperAdmin } = useAuth();
@@ -72,45 +73,119 @@ export function UsersPage() {
     return true;
   };
 
-  const approve = async (u: UserProfile, role: Role) => {
+  // Quién se está guardando ahora mismo: evita el doble toque y deja ver
+  // que la acción está en curso.
+  const [busy, setBusy] = useState<string | null>(null);
+  const nombre = (u: UserProfile) => u.displayName || u.email;
+
+  /**
+   * Corre una escritura con aviso. Sin señal, Firestore la guarda en el
+   * teléfono y la envía al volver: en vez de dejar el botón girando para
+   * siempre, se avisa de eso.
+   */
+  const guardar = async (
+    id: string,
+    escritura: () => Promise<unknown>,
+    ok: string,
+    fallo: string,
+  ) => {
+    setBusy(id);
     try {
-      await approveUser(u.uid, role);
-      toast(`${u.displayName || u.email} ahora es ${ROLE_LABELS[role]}.`, 'success');
+      const enviado = await esperarConLimite(escritura());
+      toast(
+        enviado ? ok : 'Sin conexión: el cambio se enviará cuando vuelva la señal.',
+        enviado ? 'success' : 'info',
+      );
     } catch (e) {
       console.error(e);
-      toast('No se pudo aprobar.', 'error');
-    }
-  };
-  const changeRole = async (u: UserProfile, role: Role) => {
-    try {
-      await updateUserRole(u.uid, role);
-      toast('Rol actualizado.', 'success');
-    } catch (e) {
-      console.error(e);
-      toast('No se pudo cambiar el rol.', 'error');
-    }
-  };
-  const toggleActive = async (u: UserProfile) => {
-    try {
-      await setUserActive(u.uid, !u.active);
-      toast(u.active ? 'Acceso quitado.' : 'Acceso reactivado.', 'success');
-    } catch (e) {
-      console.error(e);
-      toast('No se pudo cambiar el estado.', 'error');
+      toast(fallo, 'error');
+    } finally {
+      setBusy(null);
     }
   };
 
+  const approve = (u: UserProfile, role: Role) => {
+    if (
+      role === 'admin' &&
+      !window.confirm(
+        `¿Dar acceso a ${nombre(u)} como ${ROLE_LABELS.admin}? Podrá ver el panel, editar personas y aprobar usuarios.`,
+      )
+    )
+      return;
+    void guardar(
+      u.uid,
+      () => approveUser(u.uid, role),
+      `${nombre(u)} ahora es ${ROLE_LABELS[role]}.`,
+      'No se pudo aprobar.',
+    );
+  };
+  const changeRole = (u: UserProfile, role: Role) => {
+    if (role === u.role) return;
+    if (
+      (role === 'admin' || u.role === 'admin') &&
+      !window.confirm(
+        `¿Cambiar el permiso de ${nombre(u)} de ${ROLE_LABELS[u.role]} a ${ROLE_LABELS[role]}?`,
+      )
+    )
+      return;
+    void guardar(
+      u.uid,
+      () => updateUserRole(u.uid, role),
+      'Permiso actualizado.',
+      'No se pudo cambiar el permiso.',
+    );
+  };
+  const toggleActive = (u: UserProfile) => {
+    if (
+      u.active &&
+      !window.confirm(
+        `¿Quitarle el acceso a ${nombre(u)}? Ya no podrá entrar a la app ni tomar asistencia. Puedes reactivarla cuando quieras.`,
+      )
+    )
+      return;
+    void guardar(
+      u.uid,
+      () => setUserActive(u.uid, !u.active),
+      u.active ? 'Acceso quitado.' : 'Acceso reactivado.',
+      'No se pudo cambiar el acceso.',
+    );
+  };
+
   const sendInvite = async () => {
-    if (!profile) return;
+    if (!profile || savingInvite) return;
     const email = inviteEmail.trim().toLowerCase();
-    if (!/^\S+@\S+\.\S+$/.test(email)) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       toast('Escribe un correo válido.', 'error');
+      return;
+    }
+    // Si la persona ya entró, la invitación no sirve de nada (solo se lee en
+    // el primer ingreso): lo que toca es cambiarle el permiso arriba.
+    const yaEntro = users.find((u) => u.email.toLowerCase() === email);
+    if (yaEntro) {
+      toast(
+        yaEntro.role === 'pending'
+          ? 'Esa persona ya entró: apruébala arriba en “Solicitudes nuevas”.'
+          : 'Esa persona ya tiene acceso: cambia su permiso en la lista de arriba.',
+        'info',
+      );
+      return;
+    }
+    const previa = invites.find((i) => i.id === email);
+    if (previa && previa.role === inviteRole) {
+      toast('Ese correo ya estaba invitado.', 'info');
       return;
     }
     setSavingInvite(true);
     try {
-      await createInvite(email, inviteRole, profile);
-      toast('Invitación creada.', 'success');
+      const enviado = await esperarConLimite(createInvite(email, inviteRole, profile));
+      toast(
+        enviado
+          ? previa
+            ? 'Invitación actualizada.'
+            : 'Invitación creada.'
+          : 'Sin conexión: la invitación se enviará cuando vuelva la señal.',
+        enviado ? 'success' : 'info',
+      );
       setInviteEmail('');
     } catch (e) {
       console.error(e);
@@ -118,6 +193,16 @@ export function UsersPage() {
     } finally {
       setSavingInvite(false);
     }
+  };
+
+  const removeInvite = (inv: Invite) => {
+    if (!window.confirm(`¿Eliminar la invitación de ${inv.email}?`)) return;
+    void guardar(
+      inv.id,
+      () => deleteInvite(inv.id),
+      'Invitación eliminada.',
+      'No se pudo eliminar la invitación.',
+    );
   };
 
   if (loading) {
@@ -170,6 +255,7 @@ export function UsersPage() {
                       key={r}
                       type="button"
                       onClick={() => approve(u, r)}
+                      disabled={busy === u.uid}
                       className={
                         r === 'coordinador' ? 'btn-primary py-2.5' : 'btn-secondary py-2.5'
                       }
@@ -236,6 +322,7 @@ export function UsersPage() {
                       <select
                         className="input w-auto flex-1 py-2"
                         value={u.role}
+                        disabled={busy === u.uid}
                         onChange={(e) => changeRole(u, e.target.value as Role)}
                       >
                         {assignable.map((r) => (
@@ -250,13 +337,20 @@ export function UsersPage() {
                       <button
                         type="button"
                         onClick={() => toggleActive(u)}
-                        className={`chip ${
+                        disabled={busy === u.uid}
+                        className={`min-h-[44px] rounded-full px-4 text-sm font-semibold disabled:opacity-60 ${
                           u.active
-                            ? 'bg-rose-100 text-rose-600'
-                            : 'bg-primary-100 text-primary-700'
+                            ? 'bg-rose-100 text-rose-600 active:bg-rose-200'
+                            : 'bg-primary-100 text-primary-700 active:bg-primary-200'
                         }`}
                       >
-                        {u.active ? 'Quitar acceso' : 'Reactivar'}
+                        {busy === u.uid ? (
+                          <Spinner className="h-4 w-4" />
+                        ) : u.active ? (
+                          'Quitar acceso'
+                        ) : (
+                          'Reactivar'
+                        )}
                       </button>
                     </div>
                   ) : (
@@ -292,40 +386,54 @@ export function UsersPage() {
               entró</strong>, no uses esto: apruébala arriba en “Solicitudes
               nuevas”.
             </p>
-            <input
-              className="input"
-              placeholder="correo@ejemplo.com"
-              value={inviteEmail}
-              onChange={(e) => setInviteEmail(e.target.value)}
-              inputMode="email"
-              autoComplete="off"
-            />
-            <div className="flex gap-2">
-              <select
-                className="input flex-1"
-                value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as Role)}
-              >
-                {assignable.map((r) => (
-                  <option key={r} value={r}>
-                    {ROLE_LABELS[r]}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={sendInvite}
-                disabled={savingInvite}
-                className="btn-primary"
-              >
-                {savingInvite ? (
-                  <Spinner className="h-5 w-5 text-white" />
-                ) : (
-                  <PlusIcon className="text-lg" />
-                )}
-                Invitar
-              </button>
-            </div>
+            <form
+              className="space-y-3"
+              noValidate
+              onSubmit={(e) => {
+                e.preventDefault();
+                void sendInvite();
+              }}
+            >
+              <input
+                className="input"
+                type="email"
+                placeholder="correo@ejemplo.com"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                inputMode="email"
+                autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="send"
+                aria-label="Correo de la persona a invitar"
+              />
+              <div className="flex gap-2">
+                <select
+                  className="input flex-1"
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as Role)}
+                >
+                  {assignable.map((r) => (
+                    <option key={r} value={r}>
+                      {ROLE_LABELS[r]}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  disabled={savingInvite}
+                  className="btn-primary"
+                >
+                  {savingInvite ? (
+                    <Spinner className="h-5 w-5 text-white" />
+                  ) : (
+                    <PlusIcon className="text-lg" />
+                  )}
+                  Invitar
+                </button>
+              </div>
+            </form>
 
             {invites.length > 0 && (
               <ul className="divide-y divide-slate-100">
@@ -342,9 +450,10 @@ export function UsersPage() {
                     </span>
                     <button
                       type="button"
-                      onClick={() => deleteInvite(inv.id)}
-                      className="rounded-full p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-500"
-                      aria-label="Eliminar invitación"
+                      onClick={() => removeInvite(inv)}
+                      disabled={busy === inv.id}
+                      className="tap rounded-full text-slate-400 hover:bg-rose-50 hover:text-rose-500 active:bg-rose-50 disabled:opacity-50"
+                      aria-label={`Eliminar la invitación de ${inv.email}`}
                     >
                       <TrashIcon className="text-base" />
                     </button>

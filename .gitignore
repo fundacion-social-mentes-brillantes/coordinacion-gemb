@@ -43,3 +43,10 @@ pnpm-debug.log*
 *service-account*.json
 *firebase-adminsdk*.json
 coordinacion-gemb-*.json
+
+.env*
+
+# Registros de los emuladores de Firebase (pruebas locales)
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*

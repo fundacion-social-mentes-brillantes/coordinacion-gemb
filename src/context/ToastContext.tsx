@@ -2,6 +2,8 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from 'react';
@@ -29,8 +31,31 @@ const STYLES: Record<ToastType, string> = {
   info: '#1f2937',
 };
 
+/**
+ * Alto del teclado en pantalla. En el iPhone (y Chrome Android reciente) el
+ * teclado tapa la parte de abajo sin achicar la página: los avisos, que van
+ * abajo, quedaban detrás de él y un error ("No se pudo agregar…") no se veía.
+ */
+function useAltoTeclado() {
+  const [alto, setAlto] = useState(0);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const sync = () => setAlto(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+    sync();
+    vv.addEventListener('resize', sync);
+    vv.addEventListener('scroll', sync);
+    return () => {
+      vv.removeEventListener('resize', sync);
+      vv.removeEventListener('scroll', sync);
+    };
+  }, []);
+  return alto;
+}
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
+  const teclado = useAltoTeclado();
 
   const dismiss = useCallback(
     (id: number) => setItems((s) => s.filter((t) => t.id !== id)),
@@ -48,12 +73,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [dismiss],
   );
 
+  // Mismo objeto mientras `toast` no cambie: si no, cada aviso hacía volver a
+  // pintar todas las pantallas que usan avisos.
+  const value = useMemo(() => ({ toast }), [toast]);
+
   return (
-    <Ctx.Provider value={{ toast }}>
+    <Ctx.Provider value={value}>
       {children}
       <div
         className="pointer-events-none fixed inset-x-0 z-[60] flex flex-col items-center gap-2 px-4"
-        style={{ bottom: 'calc(env(safe-area-inset-bottom) + 5.5rem)' }}
+        style={{
+          bottom: teclado > 0
+            ? `${teclado + 12}px`
+            : 'calc(env(safe-area-inset-bottom) + 5.5rem)',
+        }}
       >
         {items.map((t) => (
           <button

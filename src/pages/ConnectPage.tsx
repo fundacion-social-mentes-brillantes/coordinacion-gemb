@@ -147,10 +147,10 @@ export function ConnectPage() {
         <p className="flex items-start gap-2 text-sm text-amber-900">
           <LockIcon className="mt-0.5 shrink-0 text-base" />
           <span>
-            <strong>Si alguna vez quieres cortarla:</strong> sal de la app con el
-            botón de salir (arriba a la derecha). Eso corta el acceso de Claude al
-            instante y habrá que volver a conectar. Una administradora también
-            puede desactivar tu cuenta en Usuarios.
+            <strong>Si alguna vez quieres cortarla:</strong> en Claude, quita el
+            conector (Personalizar → Conectores). Salir de esta app{' '}
+            <strong>no</strong> lo desconecta. Si una administradora desactiva tu
+            cuenta en Usuarios, Claude deja de poder usarla al instante.
           </span>
         </p>
       </div>
@@ -158,9 +158,9 @@ export function ConnectPage() {
       <p className="flex items-start gap-2 px-1 text-xs text-slate-400">
         <CheckIcon className="mt-0.5 shrink-0" />
         <span>
-          El permiso no se guarda en ningún servidor nuestro: viaja con cada
-          consulta, se usa y se descarta. Por eso Claude ve exactamente lo mismo
-          que tú, ni más ni menos.
+          Nuestro servidor no guarda tu permiso: lo guarda Claude y lo manda con
+          cada consulta. Cada vez se comprueba tu cuenta y tu rol en la app, así
+          que Claude ve exactamente lo mismo que tú, ni más ni menos.
         </span>
       </p>
 

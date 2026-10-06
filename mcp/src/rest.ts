@@ -18,14 +18,58 @@ import type { Attendance, Member, Role, Session } from '../../src/types';
 //  Sin dependencias: solo fetch.
 // ---------------------------------------------------------------------------
 
-const PROJECT_ID = 'coordinacion-gemb';
+// Con los emuladores de Firebase encendidos (pruebas: tests/mcp.test.mjs) se
+// habla con ellos y con un proyecto de prueba. En Vercel estas variables no
+// existen, así que siempre se usa la base real.
+const EMU_FIRESTORE = process.env.FIRESTORE_EMULATOR_HOST;
+const EMU_AUTH = process.env.FIREBASE_AUTH_EMULATOR_HOST;
+const PROJECT_ID = (EMU_FIRESTORE && process.env.GEMB_PROJECT_ID) || 'coordinacion-gemb';
 /** Llave pública de la app web: viaja en el bundle del navegador, no es secreta. */
 const API_KEY = 'AIzaSyB-KQMYvpKun5oxQhqTSyF-ElhJxAp-eGQ';
 
-const DOCS = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
+const RAIZ_DOCS = `projects/${PROJECT_ID}/databases/(default)/documents`;
+const DOCS = EMU_FIRESTORE
+  ? `http://${EMU_FIRESTORE}/v1/${RAIZ_DOCS}`
+  : `https://firestore.googleapis.com/v1/${RAIZ_DOCS}`;
+const TOKEN_URL = EMU_AUTH
+  ? `http://${EMU_AUTH}/securetoken.googleapis.com/v1/token?key=${API_KEY}`
+  : `https://securetoken.googleapis.com/v1/token?key=${API_KEY}`;
 
 export class ConfigError extends Error {}
 export class AccesoError extends Error {}
+/**
+ * La llave ya no sirve (caducó, la revocaron, la cuenta se borró). Es el
+ * único caso que se arregla volviendo a entrar con Google: el servidor
+ * responde 401 para que Claude ofrezca "Reconectar" solo.
+ */
+export class LlaveInvalidaError extends AccesoError {}
+/** Al guardar, el documento ya existía (o ya no existía): no se tocó nada. */
+export class ConflictoError extends AccesoError {
+  constructor(
+    message: string,
+    readonly motivo: 'ya_existe' | 'no_existe',
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Un cambio dentro de un lote. Todos los del lote se guardan juntos o
+ * ninguno (como el `writeBatch` de la app).
+ *
+ *  crear       solo si el documento NO existe. Repetir la misma operación
+ *              (Claude confirmando dos veces) no crea nada nuevo.
+ *  actualizar  solo esos campos y solo si el documento existe: una ficha
+ *              fusionada o una reunión borrada no "resucitan".
+ *  borrar      solo si existe: quitar dos veces no resta dos al contador.
+ *  sumar       suma atómica a un número, como `increment()` en la app: no
+ *              pisa lo que marcan a la vez las coordinadoras.
+ */
+export type Escritura =
+  | { tipo: 'crear'; ruta: string; datos: Record<string, unknown> }
+  | { tipo: 'actualizar'; ruta: string; datos: Record<string, unknown> }
+  | { tipo: 'borrar'; ruta: string }
+  | { tipo: 'sumar'; ruta: string; campo: string; cantidad: number };
 
 export type MemberPublico = Omit<Member, 'phone' | 'notes'>;
 
@@ -36,13 +80,19 @@ export interface Cliente {
   rol: Role;
   /** true = puede escribir. Las coordinadoras solo leen. */
   esAdmin: boolean;
+  /** Hasta cuándo vale el permiso de Firestore (ms). */
+  expira: number;
   cargarSesiones(): Promise<Session[]>;
   cargarAsistencia(): Promise<Attendance[]>;
   cargarPersonas(): Promise<MemberPublico[]>;
-  /** Crea o reemplaza un documento. Solo para administración. */
-  escribir(ruta: string, campos: Record<string, unknown>, mascara?: string[]): Promise<void>;
-  /** Borra un documento. Solo para administración. */
-  borrar(ruta: string): Promise<void>;
+  /** Un solo documento, recién leído (sin caché). null si no existe. */
+  leer<T>(ruta: string): Promise<(T & { id: string }) | null>;
+  /** La asistencia de UNA reunión, recién leída. */
+  asistenciaDe(sessionId: string): Promise<Attendance[]>;
+  /** Las asistencias de UNA persona en cualquier reunión, con su ruta. */
+  asistenciasDePersona(memberId: string): Promise<{ ruta: string; datos: Attendance }[]>;
+  /** Guarda varios cambios juntos (todo o nada). Solo administración. */
+  guardar(escrituras: Escritura[]): Promise<void>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -63,7 +113,7 @@ interface Credencial {
  * usa y se descarta.
  */
 async function canjear(llave: string): Promise<Credencial> {
-  const r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${API_KEY}`, {
+  const r = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(llave)}`,
@@ -81,15 +131,16 @@ async function canjear(llave: string): Promise<Credencial> {
       codigo.startsWith('TOKEN_EXPIRED') ||
       codigo.startsWith('USER_NOT_FOUND') ||
       codigo.startsWith('INVALID_REFRESH_TOKEN') ||
-      codigo.startsWith('INVALID_GRANT_TYPE')
+      codigo.startsWith('INVALID_GRANT_TYPE') ||
+      codigo.startsWith('MISSING_REFRESH_TOKEN')
     ) {
-      throw new AccesoError(
-        'El acceso ya no sirve (caducó, o cerraste la sesión en la app). ' +
+      throw new LlaveInvalidaError(
+        'El acceso ya no sirve (caducó o lo revocaron). ' +
           'Vuelve a conectar el conector desde Claude y entra otra vez con Google.',
       );
     }
     if (codigo.startsWith('USER_DISABLED')) {
-      throw new AccesoError('Esta cuenta está deshabilitada.');
+      throw new LlaveInvalidaError('Esta cuenta está deshabilitada.');
     }
     throw new AccesoError(`No se pudo validar la llave: ${codigo}`);
   }
@@ -113,9 +164,19 @@ interface DocRest {
 async function pedir(url: string, idToken: string, toleraFalta = false): Promise<unknown> {
   const r = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
   if (r.status === 404 && toleraFalta) return null;
-  if (r.status === 403) throw new AccesoError('PERMISSION_DENIED');
+  revisarRespuesta(r);
   if (!r.ok) throw new AccesoError(`Firestore respondió HTTP ${r.status}`);
   return r.json();
+}
+
+/** 401 y 403 significan cosas distintas: llave vencida vs. reglas. */
+function revisarRespuesta(r: Response) {
+  if (r.status === 401) {
+    throw new LlaveInvalidaError(
+      'El permiso de la sesión venció a mitad de la consulta. Vuelve a intentarlo.',
+    );
+  }
+  if (r.status === 403) throw new AccesoError('PERMISSION_DENIED');
 }
 
 /** Convierte el formato de Firestore REST a valores normales de JavaScript. */
@@ -155,7 +216,11 @@ async function coleccion<T>(nombre: string, idToken: string): Promise<T[]> {
   const salida: T[] = [];
   let token = '';
   do {
-    const url = `${DOCS}/${nombre}?pageSize=300${token ? `&pageToken=${token}` : ''}`;
+    // El pageToken puede traer "+", "/" o "=": sin codificar, la segunda
+    // página se pedía mal y se cortaba la lista.
+    const url = `${DOCS}/${nombre}?pageSize=300${
+      token ? `&pageToken=${encodeURIComponent(token)}` : ''
+    }`;
     const r = (await pedir(url, idToken)) as { documents?: DocRest[]; nextPageToken?: string };
     for (const d of r.documents ?? []) salida.push(aObjeto<T>(d));
     token = r.nextPageToken ?? '';
@@ -184,7 +249,7 @@ async function todaLaAsistencia(idToken: string): Promise<Attendance[]> {
       headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ structuredQuery }),
     });
-    if (r.status === 403) throw new AccesoError('PERMISSION_DENIED');
+    revisarRespuesta(r);
     if (!r.ok) throw new AccesoError(`Firestore respondió HTTP ${r.status} al leer la asistencia`);
 
     const filas = (await r.json()) as { document?: DocRest }[];
@@ -195,6 +260,42 @@ async function todaLaAsistencia(idToken: string): Promise<Attendance[]> {
     ultimo = docs[docs.length - 1].name;
   }
   return salida;
+}
+
+/**
+ * Las asistencias de una persona, filtradas en el servidor (índice de grupo
+ * de colección sobre memberId, el mismo que usa la app al corregir nombres).
+ */
+async function asistenciasDePersona(
+  memberId: string,
+  idToken: string,
+): Promise<{ ruta: string; datos: Attendance }[]> {
+  const r = await fetch(`${DOCS}:runQuery`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: 'attendance', allDescendants: true }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: 'memberId' },
+            op: 'EQUAL',
+            value: { stringValue: memberId },
+          },
+        },
+      },
+    }),
+  });
+  revisarRespuesta(r);
+  if (!r.ok) throw new AccesoError(`Firestore respondió HTTP ${r.status} al leer el historial`);
+  const filas = (await r.json()) as { document?: DocRest }[];
+  return filas
+    .map((f) => f.document)
+    .filter((d): d is DocRest => !!d)
+    .map((d) => ({
+      ruta: d.name.slice(d.name.indexOf('/documents/') + '/documents/'.length),
+      datos: aObjeto<Attendance>(d),
+    }));
 }
 
 /* ------------------------------------------------------------------ */
@@ -267,6 +368,7 @@ export async function abrirSesion(llave: string): Promise<Cliente> {
     nombre: perfil.displayName || perfil.email || 'Sin nombre',
     rol,
     esAdmin,
+    expira: cred.expira,
     cargarSesiones: () => cacheado('sessions', () => coleccion<Session>('sessions', cred.idToken)),
     cargarAsistencia: () => cacheado('attendance', () => todaLaAsistencia(cred.idToken)),
     cargarPersonas: () =>
@@ -275,15 +377,21 @@ export async function abrirSesion(llave: string): Promise<Cliente> {
         // Ni teléfonos ni notas privadas salen de aquí, para nadie.
         return todas.map(({ phone: _p, notes: _n, ...resto }) => resto as MemberPublico);
       }),
-    async escribir(ruta, datos, mascara) {
-      exigirAdmin(esAdmin);
-      await escribirDoc(ruta, datos, cred.idToken, mascara);
-      olvidar(cred.uid);
+    async leer<T>(ruta: string) {
+      const d = (await pedir(`${DOCS}/${ruta}`, cred.idToken, true)) as DocRest | null;
+      return d ? aObjeto<T & { id: string }>(d) : null;
     },
-    async borrar(ruta) {
+    asistenciaDe: (sessionId) =>
+      coleccion<Attendance>(`sessions/${sessionId}/attendance`, cred.idToken),
+    asistenciasDePersona: (memberId) => asistenciasDePersona(memberId, cred.idToken),
+    async guardar(escrituras) {
       exigirAdmin(esAdmin);
-      await borrarDoc(ruta, cred.idToken);
-      olvidar(cred.uid);
+      try {
+        await guardarLote(escrituras, cred.idToken);
+      } finally {
+        // Es todo o nada, pero aun si falla la caché puede estar vieja.
+        olvidar(cred.uid);
+      }
     },
   };
 }
@@ -310,40 +418,79 @@ function aValorRest(v: unknown): Record<string, unknown> {
   return { stringValue: String(v) };
 }
 
-async function escribirDoc(
-  ruta: string,
-  datos: Record<string, unknown>,
-  idToken: string,
-  mascara?: string[],
-): Promise<void> {
-  const fields: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(datos)) fields[k] = aValorRest(v);
+const nombreDoc = (ruta: string) => `${RAIZ_DOCS}/${ruta}`;
 
-  // Con máscara se tocan SOLO esos campos; sin ella se reemplaza el documento.
-  const query = mascara?.length
-    ? '?' + mascara.map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`).join('&')
-    : '';
+/** Nombres de campo con caracteres raros van entre comillas invertidas. */
+const rutaCampo = (campo: string) =>
+  /^[A-Za-z_][A-Za-z0-9_]*$/.test(campo) ? campo : '`' + campo.replace(/[`\\]/g, '\\$&') + '`';
 
-  const r = await fetch(`${DOCS}/${ruta}${query}`, {
-    method: 'PATCH',
-    headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fields }),
-  });
-  if (r.status === 403) throw new AccesoError('PERMISSION_DENIED');
-  if (!r.ok) {
-    throw new AccesoError(`No se pudo guardar (HTTP ${r.status}) en ${ruta}`);
+function aEscrituraRest(e: Escritura): Record<string, unknown> {
+  switch (e.tipo) {
+    case 'crear':
+    case 'actualizar': {
+      const fields: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(e.datos)) fields[k] = aValorRest(v);
+      return {
+        update: { name: nombreDoc(e.ruta), fields },
+        // Al crear se escribe el documento entero; al actualizar, SOLO esos
+        // campos (lo demás queda como estaba).
+        ...(e.tipo === 'actualizar'
+          ? { updateMask: { fieldPaths: Object.keys(e.datos).map(rutaCampo) } }
+          : {}),
+        currentDocument: { exists: e.tipo === 'actualizar' },
+      };
+    }
+    case 'borrar':
+      return { delete: nombreDoc(e.ruta), currentDocument: { exists: true } };
+    case 'sumar':
+      return {
+        transform: {
+          document: nombreDoc(e.ruta),
+          fieldTransforms: [
+            { fieldPath: rutaCampo(e.campo), increment: { integerValue: String(e.cantidad) } },
+          ],
+        },
+        currentDocument: { exists: true },
+      };
   }
 }
 
-async function borrarDoc(ruta: string, idToken: string): Promise<void> {
-  const r = await fetch(`${DOCS}/${ruta}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${idToken}` },
-  });
-  if (r.status === 403) throw new AccesoError('PERMISSION_DENIED');
-  if (!r.ok && r.status !== 404) {
-    throw new AccesoError(`No se pudo borrar (HTTP ${r.status}) ${ruta}`);
+async function guardarLote(escrituras: Escritura[], idToken: string): Promise<void> {
+  if (escrituras.length === 0) return;
+  // Firestore acepta hasta 500 cambios por lote.
+  if (escrituras.length > 500) {
+    throw new AccesoError('Son demasiados cambios para hacerlos de una vez (más de 500).');
   }
+  const r = await fetch(`${DOCS}:commit`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ writes: escrituras.map(aEscrituraRest) }),
+  });
+  if (r.ok) return;
+  revisarRespuesta(r);
+
+  let estado = '';
+  let detalle = '';
+  try {
+    const cuerpo = (await r.json()) as { error?: { status?: string; message?: string } };
+    estado = cuerpo.error?.status ?? '';
+    detalle = cuerpo.error?.message ?? '';
+  } catch {
+    /* sin cuerpo legible */
+  }
+  if (r.status === 409 || estado === 'ALREADY_EXISTS') {
+    throw new ConflictoError('Ya existía. No se guardó nada.', 'ya_existe');
+  }
+  if (r.status === 404 || estado === 'NOT_FOUND') {
+    throw new ConflictoError('Ya no existe. No se guardó nada.', 'no_existe');
+  }
+  if (estado === 'FAILED_PRECONDITION' && /exist/i.test(detalle)) {
+    throw new ConflictoError(
+      'Los datos cambiaron mientras tanto. No se guardó nada.',
+      /not exist|no document/i.test(detalle) ? 'no_existe' : 'ya_existe',
+    );
+  }
+  throw new AccesoError(`No se pudo guardar (HTTP ${r.status}${estado ? ` ${estado}` : ''}).`);
 }
 
 /**

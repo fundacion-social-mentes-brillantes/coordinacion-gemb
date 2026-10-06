@@ -9,8 +9,17 @@ import {
   SESSION_TYPES,
   MODALITY_LABELS,
 } from '../lib/constants';
-import { fmtDate, fmtDateLong, fmtDayMonth, toDate, MONTH_NAMES } from '../lib/dates';
-import { exportCSV, exportPDF } from '../lib/export';
+import {
+  capitalizeFirst,
+  dayKey,
+  endOfTodayBogota,
+  fmtDate,
+  fmtDateLong,
+  fmtDayMonth,
+  toDate,
+  MONTH_NAMES,
+} from '../lib/dates';
+import { exportExcel, exportPDF } from '../lib/export';
 import { normalizeText } from '../lib/normalize';
 import { buildActivityReport, resumenActividad } from '../lib/activity';
 import type { ActivityGroup, ActivityReport } from '../lib/activity';
@@ -34,6 +43,8 @@ interface PersonAgg {
   pasos: number;
   ego: number;
   total: number;
+  /** Puesto en el ranking (con empates: 1, 1, 1, 4…). */
+  rank: number;
 }
 
 export function DashboardPage() {
@@ -48,30 +59,37 @@ export function DashboardPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
-    let ready = 0;
+    // Una bandera por cada lista: antes se contaban respuestas, y dos de
+    // sesiones (caché y servidor) quitaban el spinner con la asistencia aún
+    // vacía ("0 personas", PDF vacío…).
+    let sOk = false;
+    let aOk = false;
     const done = () => {
-      ready++;
-      if (ready >= 2) setLoading(false);
+      if (sOk && aOk) setLoading(false);
     };
     const u1 = listenSessions(
       (list) => {
         setSessions(list);
+        sOk = true;
         done();
       },
       (e) => {
         console.error(e);
         toast('No se pudo cargar el panel.', 'error');
+        sOk = true;
         done();
       },
     );
     const u2 = listenAllAttendance(
       (list) => {
         setAttendance(list);
+        aOk = true;
         done();
       },
       (e) => {
         console.error(e);
         toast('No se pudo cargar la asistencia.', 'error');
+        aOk = true;
         done();
       },
     );
@@ -89,31 +107,73 @@ export function DashboardPage() {
     return [...set].sort((a, b) => b - a);
   }, [sessions, attendance]);
 
+  // Solo lo que YA ocurrió: lo marcado por error en una sesión agendada no
+  // cuenta en el año (aparece aparte en "Por sesión").
+  const finDeHoy = endOfTodayBogota().getTime() - 1;
   const yearAtt = useMemo(
-    () => attendance.filter((a) => toDate(a.sessionDate).getFullYear() === year),
-    [attendance, year],
+    () =>
+      attendance.filter((a) => {
+        const t = toDate(a.sessionDate);
+        return t.getFullYear() === year && t.getTime() <= finDeHoy;
+      }),
+    [attendance, year, finDeHoy],
   );
-  const yearSessions = useMemo(
-    () => sessions.filter((s) => toDate(s.date).getFullYear() === year),
-    [sessions, year],
-  );
+  // "Reuniones realizadas" = días con reunión de ese tipo y con gente: las
+  // agendadas a futuro y las sesiones duplicadas vacías no cuentan (antes
+  // inflaban el total y bajaban el % de asistencia de cada persona).
+  const yearSessions = useMemo(() => {
+    const conGente = new Set(yearAtt.map((a) => a.sessionId));
+    const porDia = new Map<string, Session>();
+    for (const s of sessions) {
+      if (!conGente.has(s.id)) continue;
+      const k = `${s.type}|${dayKey(s.date)}`;
+      if (!porDia.has(k)) porDia.set(k, s);
+    }
+    return [...porDia.values()];
+  }, [sessions, yearAtt]);
 
-  // Agregado por persona (para el ranking y el detalle).
+  // Agregado por persona (para el ranking y el detalle). Una persona en dos
+  // sesiones duplicadas del mismo día cuenta una sola vez.
   const perPerson = useMemo<PersonAgg[]>(() => {
-    const map = new Map<string, PersonAgg>();
+    const map = new Map<string, PersonAgg & { _ultima: number; _dias: Set<string> }>();
     for (const a of yearAtt) {
+      const t = toDate(a.sessionDate).getTime();
       let e = map.get(a.memberId);
       if (!e) {
-        e = { memberId: a.memberId, fullName: a.fullName, pasos: 0, ego: 0, total: 0 };
+        e = {
+          memberId: a.memberId,
+          fullName: a.fullName,
+          pasos: 0,
+          ego: 0,
+          total: 0,
+          rank: 0,
+          _ultima: t,
+          _dias: new Set(),
+        };
         map.set(a.memberId, e);
       }
+      // El nombre de la asistencia MÁS RECIENTE (si se corrigió un "Por
+      // identificar", las viejas pueden tener el provisional).
+      if (t >= e._ultima) {
+        e._ultima = t;
+        e.fullName = a.fullName;
+      }
+      const dia = `${a.sessionType}|${dayKey(a.sessionDate)}`;
+      if (e._dias.has(dia)) continue;
+      e._dias.add(dia);
       if (a.sessionType === 'entrega_pasos') e.pasos++;
       else if (a.sessionType === 'reduccion_ego') e.ego++;
       e.total++;
     }
-    return [...map.values()].sort(
-      (a, b) => b.total - a.total || a.fullName.localeCompare(b.fullName, 'es'),
-    );
+    const lista: PersonAgg[] = [...map.values()]
+      .map(({ _ultima: _u, _dias: _d, ...p }) => p)
+      .sort((a, b) => b.total - a.total || a.fullName.localeCompare(b.fullName, 'es'));
+    // Puesto con empates (1, 1, 1, 4…): quienes tienen el mismo total
+    // comparten puesto y medalla.
+    lista.forEach((p, i) => {
+      p.rank = i > 0 && lista[i - 1].total === p.total ? lista[i - 1].rank : i + 1;
+    });
+    return lista;
   }, [yearAtt]);
 
   const groups = useMemo(() => {
@@ -334,6 +394,17 @@ function ListaGrupo({ rep, grupo }: { rep: ActivityReport; grupo: ActivityGroup 
   );
 }
 
+/** Exporta y, si falla (p. ej. sin conexión), lo dice. */
+function useExportar() {
+  const { toast } = useToast();
+  return (p: Promise<void>) => {
+    p.catch((e) => {
+      console.error(e);
+      toast('No se pudo generar el archivo. Revisa la conexión e inténtalo de nuevo.', 'error');
+    });
+  };
+}
+
 function ActividadView({
   sessions,
   attendance,
@@ -341,6 +412,7 @@ function ActividadView({
   sessions: Session[];
   attendance: Attendance[];
 }) {
+  const exportar = useExportar();
   const { toast } = useToast();
   const [type, setType] = useState<SessionType>('entrega_pasos');
   const [ventana, setVentana] = useState(4);
@@ -409,7 +481,7 @@ function ActividadView({
     const nombre = `como-vamos-${SESSION_TYPE_SHORT[type].toLowerCase()}-${nReuniones}`;
 
     if (kind === 'csv') {
-      exportCSV(
+      exportar(exportExcel(
         nombre,
         rep.personas.map((p) => ({
           Nombre: p.fullName,
@@ -418,9 +490,12 @@ function ActividadView({
           Antes: p.previas,
           'Última vez': fmtDate(p.ultima),
         })),
-      );
+        // Las columnas van explícitas: sin filas, el archivo sale con los
+        // encabezados en vez de completamente vacío.
+        ['Nombre', 'Situación', `Vino (de ${nReuniones})`, 'Antes', 'Última vez'],
+      ));
     } else {
-      exportPDF({
+      exportar(exportPDF({
         title: `¿Cómo vamos? — ${SESSION_TYPE_LABELS[type]}`,
         subtitle: subtitulo,
         columns: ['Nombre', 'Situación', `Vino (de ${nReuniones})`, 'Antes', 'Última vez'],
@@ -432,7 +507,7 @@ function ActividadView({
           fmtDate(p.ultima),
         ]),
         filename: nombre,
-      });
+      }));
     }
   };
 
@@ -457,10 +532,19 @@ function ActividadView({
           {fmtDate(rep.hasta)}
         </p>
         <div className="mt-2">
-          <Delta
-            diff={rep.activas - rep.activasPrevias}
-            previasCount={rep.previasCount}
-          />
+          {/* Personas distintas solo se comparan entre períodos del mismo
+              tamaño: 45 en 8 reuniones contra 25 en 2 no es "20 más". */}
+          {rep.activasComparables ? (
+            <Delta diff={rep.activas - rep.activasPrevias} previasCount={rep.previasCount} />
+          ) : (
+            rep.previasCount > 0 && (
+              <p className="text-xs text-slate-500">
+                Antes solo hubo {rep.previasCount}{' '}
+                {rep.previasCount === 1 ? 'reunión' : 'reuniones'}: todavía no se
+                puede comparar.
+              </p>
+            )
+          )}
         </div>
       </div>
 
@@ -641,6 +725,7 @@ function RankingView({
   yearSelector: ReactNode;
   onSelect: (id: string) => void;
 }) {
+  const exportar = useExportar();
   const [query, setQuery] = useState('');
   const filtered = useMemo(() => {
     const q = normalizeText(query);
@@ -649,23 +734,25 @@ function RankingView({
   }, [perPerson, query]);
 
   const doExport = (kind: 'csv' | 'pdf') => {
-    const rows = perPerson.map((p, i) => ({
-      Puesto: i + 1,
+    const rows = perPerson.map((p) => ({
+      Puesto: p.rank,
       Nombre: p.fullName,
       Total: p.total,
       Pasos: p.pasos,
       Ego: p.ego,
     }));
     if (kind === 'csv') {
-      exportCSV(`ranking-asistencia-${year}`, rows);
+      exportar(
+        exportExcel(`ranking-asistencia-${year}`, rows, ['Puesto', 'Nombre', 'Total', 'Pasos', 'Ego']),
+      );
     } else {
-      exportPDF({
+      exportar(exportPDF({
         title: `Ranking de asistencia ${year}`,
         subtitle: 'Gimnasio Emocional Mentes Brillantes',
         columns: ['#', 'Nombre', 'Total', 'Pasos', 'Ego'],
-        rows: perPerson.map((p, i) => [i + 1, p.fullName, p.total, p.pasos, p.ego]),
+        rows: perPerson.map((p) => [p.rank, p.fullName, p.total, p.pasos, p.ego]),
         filename: `ranking-asistencia-${year}`,
-      });
+      }));
     }
   };
 
@@ -708,7 +795,7 @@ function RankingView({
 
           <ul className="space-y-2">
             {filtered.map((p) => {
-              const rank = perPerson.indexOf(p) + 1;
+              const rank = p.rank;
               const medal =
                 rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : null;
               return (
@@ -765,6 +852,7 @@ function ResumenView({
   year: number;
   yearSelector: ReactNode;
 }) {
+  const exportar = useExportar();
   const byType = useMemo(() => {
     const t = { entrega_pasos: 0, reduccion_ego: 0 };
     yearAtt.forEach((a) => {
@@ -799,15 +887,15 @@ function ResumenView({
       { Métrica: 'Asistencias virtuales', Valor: byModality.virtual },
       ...byMonth.map((m) => ({ Métrica: `Asistencias en ${m.label}`, Valor: m.value })),
     ];
-    if (kind === 'csv') exportCSV(`resumen-${year}`, rows);
+    if (kind === 'csv') exportar(exportExcel(`resumen-${year}`, rows));
     else
-      exportPDF({
+      exportar(exportPDF({
         title: `Resumen de asistencia ${year}`,
         subtitle: 'Gimnasio Emocional Mentes Brillantes',
         columns: ['Dato', 'Valor'],
         rows: rows.map((r) => [r.Métrica, r.Valor]),
         filename: `resumen-${year}`,
-      });
+      }));
   };
 
   return (
@@ -845,7 +933,7 @@ function ResumenView({
             Sin datos para {year}.
           </p>
         ) : (
-          <div className="flex items-end gap-1.5" style={{ height: 165 }}>
+          <div className="flex gap-1.5" style={{ height: 165 }}>
             {byMonth.map((d, i) => (
               <div key={i} className="flex flex-1 flex-col items-center gap-1">
                 <span className="text-[11px] font-bold tabular-nums text-primary-700">
@@ -898,8 +986,22 @@ function BySessionView({
   sessions: Session[];
   attendance: Attendance[];
 }) {
-  const [sessionId, setSessionId] = useState(sessions[0]?.id ?? '');
-  const selected = sessions.find((s) => s.id === sessionId) ?? sessions[0];
+  const exportar = useExportar();
+  // Por defecto, la última reunión que YA ocurrió (no una agendada para la
+  // otra semana, que saldría con "0 presentes").
+  const porDefecto = useMemo(() => {
+    const fin = endOfTodayBogota().getTime();
+    return sessions.find((s) => toDate(s.date).getTime() < fin) ?? sessions[0];
+  }, [sessions]);
+  const [sessionId, setSessionId] = useState(() => porDefecto?.id ?? '');
+  const selected = sessions.find((s) => s.id === sessionId) ?? porDefecto;
+  // Presentes por sesión, para distinguir en el selector dos sesiones del
+  // mismo día (una duplicada suele estar vacía).
+  const cuantos = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of attendance) m.set(a.sessionId, (m.get(a.sessionId) ?? 0) + 1);
+    return m;
+  }, [attendance]);
   const rows = useMemo(
     () =>
       attendance
@@ -915,19 +1017,20 @@ function BySessionView({
   const doExport = (kind: 'csv' | 'pdf') => {
     const label = `${SESSION_TYPE_SHORT[selected.type]}-${fmtDate(selected.date)}`;
     if (kind === 'csv') {
-      exportCSV(
+      exportar(exportExcel(
         `asistencia-${label}`,
         rows.map((r) => ({ Nombre: r.fullName, 'Registrado por': r.checkedInByName })),
-      );
+        ['Nombre', 'Registrado por'],
+      ));
     } else {
       const coord = selected.coordinator ? ` · Coordinó: ${selected.coordinator}` : '';
-      exportPDF({
+      exportar(exportPDF({
         title: `Asistencia — ${SESSION_TYPE_LABELS[selected.type]}`,
         subtitle: `${fmtDateLong(selected.date)} · ${MODALITY_LABELS[selected.modality]} · ${rows.length} presentes${coord}`,
         columns: ['Nombre', 'Registrado por'],
         rows: rows.map((r) => [r.fullName, r.checkedInByName]),
         filename: `asistencia-${label}`,
-      });
+      }));
     }
   };
 
@@ -943,15 +1046,16 @@ function BySessionView({
           {sessions.map((s) => (
             <option key={s.id} value={s.id}>
               {fmtDate(s.date)} · {SESSION_TYPE_SHORT[s.type]} ·{' '}
-              {MODALITY_LABELS[s.modality]}
+              {MODALITY_LABELS[s.modality]} · {cuantos.get(s.id) ?? 0} pres.
+              {toDate(s.date).getTime() >= endOfTodayBogota().getTime() ? ' · agendada' : ''}
             </option>
           ))}
         </select>
       </div>
 
       <div className="card p-4">
-        <p className="font-semibold capitalize text-primary-900">
-          {fmtDateLong(selected.date)}
+        <p className="font-semibold text-primary-900">
+          {capitalizeFirst(fmtDateLong(selected.date))}
         </p>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           <TypeBadge type={selected.type} />
@@ -1009,6 +1113,7 @@ function PersonModal({
   totalSessions: number;
   year: number;
 }) {
+  const exportar = useExportar();
   const rows = useMemo(
     () =>
       attendance
@@ -1027,7 +1132,7 @@ function PersonModal({
   const pct = totalSessions > 0 ? Math.round((total / totalSessions) * 100) : 0;
 
   const doExport = () => {
-    exportPDF({
+    exportar(exportPDF({
       title: `Asistencia de ${name} — ${year}`,
       subtitle: `${total} asistencias · Pasos: ${pasos} · Ego: ${ego} · ${pct}% de ${totalSessions} reuniones`,
       columns: ['Fecha', 'Tipo', 'Modalidad'],
@@ -1037,7 +1142,7 @@ function PersonModal({
         MODALITY_LABELS[r.modality],
       ]),
       filename: `asistencia-${normalizeText(name).replace(/\s+/g, '-')}-${year}`,
-    });
+    }));
   };
 
   return (
@@ -1072,7 +1177,7 @@ function PersonModal({
             <ul className="space-y-2">
               {rows.map((r) => (
                 <li
-                  key={r.id}
+                  key={r.sessionId}
                   className="flex items-center justify-between rounded-xl border border-primary-100 bg-white px-3 py-2"
                 >
                   <span className="text-sm font-medium capitalize text-slate-700">

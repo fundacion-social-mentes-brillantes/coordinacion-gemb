@@ -12,7 +12,7 @@ export function AuthStuck() {
   const { user, logout } = useAuth();
 
   const handleLogout = async () => {
-    await logout();
+    if (!(await logout())) return;
     window.location.replace('/login');
   };
 

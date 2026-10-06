@@ -1,13 +1,25 @@
 // mcp/src/rest.ts
-var PROJECT_ID = "coordinacion-gemb";
+var EMU_FIRESTORE = process.env.FIRESTORE_EMULATOR_HOST;
+var EMU_AUTH = process.env.FIREBASE_AUTH_EMULATOR_HOST;
+var PROJECT_ID = EMU_FIRESTORE && process.env.GEMB_PROJECT_ID || "coordinacion-gemb";
 var API_KEY = "AIzaSyB-KQMYvpKun5oxQhqTSyF-ElhJxAp-eGQ";
-var DOCS = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
+var RAIZ_DOCS = `projects/${PROJECT_ID}/databases/(default)/documents`;
+var DOCS = EMU_FIRESTORE ? `http://${EMU_FIRESTORE}/v1/${RAIZ_DOCS}` : `https://firestore.googleapis.com/v1/${RAIZ_DOCS}`;
+var TOKEN_URL = EMU_AUTH ? `http://${EMU_AUTH}/securetoken.googleapis.com/v1/token?key=${API_KEY}` : `https://securetoken.googleapis.com/v1/token?key=${API_KEY}`;
 var ConfigError = class extends Error {
 };
 var AccesoError = class extends Error {
 };
+var LlaveInvalidaError = class extends AccesoError {
+};
+var ConflictoError = class extends AccesoError {
+  constructor(message2, motivo) {
+    super(message2);
+    this.motivo = motivo;
+  }
+};
 async function canjear(llave) {
-  const r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${API_KEY}`, {
+  const r = await fetch(TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(llave)}`
@@ -15,13 +27,13 @@ async function canjear(llave) {
   const d = await r.json();
   if (!r.ok || !d.id_token) {
     const codigo = d.error?.message ?? `HTTP ${r.status}`;
-    if (codigo.startsWith("TOKEN_EXPIRED") || codigo.startsWith("USER_NOT_FOUND") || codigo.startsWith("INVALID_REFRESH_TOKEN") || codigo.startsWith("INVALID_GRANT_TYPE")) {
-      throw new AccesoError(
-        "El acceso ya no sirve (caduc\xF3, o cerraste la sesi\xF3n en la app). Vuelve a conectar el conector desde Claude y entra otra vez con Google."
+    if (codigo.startsWith("TOKEN_EXPIRED") || codigo.startsWith("USER_NOT_FOUND") || codigo.startsWith("INVALID_REFRESH_TOKEN") || codigo.startsWith("INVALID_GRANT_TYPE") || codigo.startsWith("MISSING_REFRESH_TOKEN")) {
+      throw new LlaveInvalidaError(
+        "El acceso ya no sirve (caduc\xF3 o lo revocaron). Vuelve a conectar el conector desde Claude y entra otra vez con Google."
       );
     }
     if (codigo.startsWith("USER_DISABLED")) {
-      throw new AccesoError("Esta cuenta est\xE1 deshabilitada.");
+      throw new LlaveInvalidaError("Esta cuenta est\xE1 deshabilitada.");
     }
     throw new AccesoError(`No se pudo validar la llave: ${codigo}`);
   }
@@ -34,9 +46,17 @@ async function canjear(llave) {
 async function pedir(url, idToken, toleraFalta = false) {
   const r = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
   if (r.status === 404 && toleraFalta) return null;
-  if (r.status === 403) throw new AccesoError("PERMISSION_DENIED");
+  revisarRespuesta(r);
   if (!r.ok) throw new AccesoError(`Firestore respondi\xF3 HTTP ${r.status}`);
   return r.json();
+}
+function revisarRespuesta(r) {
+  if (r.status === 401) {
+    throw new LlaveInvalidaError(
+      "El permiso de la sesi\xF3n venci\xF3 a mitad de la consulta. Vuelve a intentarlo."
+    );
+  }
+  if (r.status === 403) throw new AccesoError("PERMISSION_DENIED");
 }
 function valor(v) {
   if (v === null || typeof v !== "object") return v;
@@ -69,7 +89,7 @@ async function coleccion(nombre, idToken) {
   const salida = [];
   let token = "";
   do {
-    const url = `${DOCS}/${nombre}?pageSize=300${token ? `&pageToken=${token}` : ""}`;
+    const url = `${DOCS}/${nombre}?pageSize=300${token ? `&pageToken=${encodeURIComponent(token)}` : ""}`;
     const r = await pedir(url, idToken);
     for (const d of r.documents ?? []) salida.push(aObjeto(d));
     token = r.nextPageToken ?? "";
@@ -94,7 +114,7 @@ async function todaLaAsistencia(idToken) {
       headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ structuredQuery })
     });
-    if (r.status === 403) throw new AccesoError("PERMISSION_DENIED");
+    revisarRespuesta(r);
     if (!r.ok) throw new AccesoError(`Firestore respondi\xF3 HTTP ${r.status} al leer la asistencia`);
     const filas = await r.json();
     const docs = filas.map((f) => f.document).filter((d) => !!d);
@@ -103,6 +123,31 @@ async function todaLaAsistencia(idToken) {
     ultimo = docs[docs.length - 1].name;
   }
   return salida;
+}
+async function asistenciasDePersona(memberId, idToken) {
+  const r = await fetch(`${DOCS}:runQuery`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: "attendance", allDescendants: true }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: "memberId" },
+            op: "EQUAL",
+            value: { stringValue: memberId }
+          }
+        }
+      }
+    })
+  });
+  revisarRespuesta(r);
+  if (!r.ok) throw new AccesoError(`Firestore respondi\xF3 HTTP ${r.status} al leer el historial`);
+  const filas = await r.json();
+  return filas.map((f) => f.document).filter((d) => !!d).map((d) => ({
+    ruta: d.name.slice(d.name.indexOf("/documents/") + "/documents/".length),
+    datos: aObjeto(d)
+  }));
 }
 var TTL_MS = 6e4;
 var cache = /* @__PURE__ */ new Map();
@@ -148,21 +193,26 @@ async function abrirSesion(llave) {
     nombre: perfil.displayName || perfil.email || "Sin nombre",
     rol,
     esAdmin,
+    expira: cred.expira,
     cargarSesiones: () => cacheado("sessions", () => coleccion("sessions", cred.idToken)),
     cargarAsistencia: () => cacheado("attendance", () => todaLaAsistencia(cred.idToken)),
     cargarPersonas: () => cacheado("members", async () => {
       const todas = await coleccion("members", cred.idToken);
       return todas.map(({ phone: _p, notes: _n, ...resto }) => resto);
     }),
-    async escribir(ruta, datos, mascara) {
-      exigirAdmin(esAdmin);
-      await escribirDoc(ruta, datos, cred.idToken, mascara);
-      olvidar(cred.uid);
+    async leer(ruta) {
+      const d = await pedir(`${DOCS}/${ruta}`, cred.idToken, true);
+      return d ? aObjeto(d) : null;
     },
-    async borrar(ruta) {
+    asistenciaDe: (sessionId) => coleccion(`sessions/${sessionId}/attendance`, cred.idToken),
+    asistenciasDePersona: (memberId) => asistenciasDePersona(memberId, cred.idToken),
+    async guardar(escrituras) {
       exigirAdmin(esAdmin);
-      await borrarDoc(ruta, cred.idToken);
-      olvidar(cred.uid);
+      try {
+        await guardarLote(escrituras, cred.idToken);
+      } finally {
+        olvidar(cred.uid);
+      }
     }
   };
 }
@@ -182,29 +232,69 @@ function aValorRest(v) {
   }
   return { stringValue: String(v) };
 }
-async function escribirDoc(ruta, datos, idToken, mascara) {
-  const fields = {};
-  for (const [k, v] of Object.entries(datos)) fields[k] = aValorRest(v);
-  const query = mascara?.length ? "?" + mascara.map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`).join("&") : "";
-  const r = await fetch(`${DOCS}/${ruta}${query}`, {
-    method: "PATCH",
-    headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ fields })
-  });
-  if (r.status === 403) throw new AccesoError("PERMISSION_DENIED");
-  if (!r.ok) {
-    throw new AccesoError(`No se pudo guardar (HTTP ${r.status}) en ${ruta}`);
+var nombreDoc = (ruta) => `${RAIZ_DOCS}/${ruta}`;
+var rutaCampo = (campo) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(campo) ? campo : "`" + campo.replace(/[`\\]/g, "\\$&") + "`";
+function aEscrituraRest(e) {
+  switch (e.tipo) {
+    case "crear":
+    case "actualizar": {
+      const fields = {};
+      for (const [k, v] of Object.entries(e.datos)) fields[k] = aValorRest(v);
+      return {
+        update: { name: nombreDoc(e.ruta), fields },
+        // Al crear se escribe el documento entero; al actualizar, SOLO esos
+        // campos (lo demás queda como estaba).
+        ...e.tipo === "actualizar" ? { updateMask: { fieldPaths: Object.keys(e.datos).map(rutaCampo) } } : {},
+        currentDocument: { exists: e.tipo === "actualizar" }
+      };
+    }
+    case "borrar":
+      return { delete: nombreDoc(e.ruta), currentDocument: { exists: true } };
+    case "sumar":
+      return {
+        transform: {
+          document: nombreDoc(e.ruta),
+          fieldTransforms: [
+            { fieldPath: rutaCampo(e.campo), increment: { integerValue: String(e.cantidad) } }
+          ]
+        },
+        currentDocument: { exists: true }
+      };
   }
 }
-async function borrarDoc(ruta, idToken) {
-  const r = await fetch(`${DOCS}/${ruta}`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${idToken}` }
-  });
-  if (r.status === 403) throw new AccesoError("PERMISSION_DENIED");
-  if (!r.ok && r.status !== 404) {
-    throw new AccesoError(`No se pudo borrar (HTTP ${r.status}) ${ruta}`);
+async function guardarLote(escrituras, idToken) {
+  if (escrituras.length === 0) return;
+  if (escrituras.length > 500) {
+    throw new AccesoError("Son demasiados cambios para hacerlos de una vez (m\xE1s de 500).");
   }
+  const r = await fetch(`${DOCS}:commit`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ writes: escrituras.map(aEscrituraRest) })
+  });
+  if (r.ok) return;
+  revisarRespuesta(r);
+  let estado = "";
+  let detalle = "";
+  try {
+    const cuerpo = await r.json();
+    estado = cuerpo.error?.status ?? "";
+    detalle = cuerpo.error?.message ?? "";
+  } catch {
+  }
+  if (r.status === 409 || estado === "ALREADY_EXISTS") {
+    throw new ConflictoError("Ya exist\xEDa. No se guard\xF3 nada.", "ya_existe");
+  }
+  if (r.status === 404 || estado === "NOT_FOUND") {
+    throw new ConflictoError("Ya no existe. No se guard\xF3 nada.", "no_existe");
+  }
+  if (estado === "FAILED_PRECONDITION" && /exist/i.test(detalle)) {
+    throw new ConflictoError(
+      "Los datos cambiaron mientras tanto. No se guard\xF3 nada.",
+      /not exist|no document/i.test(detalle) ? "no_existe" : "ya_existe"
+    );
+  }
+  throw new AccesoError(`No se pudo guardar (HTTP ${r.status}${estado ? ` ${estado}` : ""}).`);
 }
 function exigirAdmin(esAdmin) {
   if (!esAdmin) {
@@ -217,23 +307,8 @@ function olvidar(uid) {
   for (const k of [...cache.keys()]) if (k.startsWith(`${uid}:`)) cache.delete(k);
 }
 
-// src/lib/normalize.ts
-var DIACRITICS = new RegExp("[\\u0300-\\u036f]", "g");
-function normalizeText(input) {
-  return (input || "").normalize("NFD").replace(DIACRITICS, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
-}
-function buildNameParts(fullNameRaw) {
-  const fullName = (fullNameRaw || "").trim().replace(/\s+/g, " ");
-  const parts = fullName.split(" ").filter(Boolean);
-  const firstName = parts[0] ?? "";
-  const lastName = parts.length > 1 ? parts.slice(1).join(" ") : "";
-  return {
-    fullName,
-    firstName,
-    lastName,
-    searchName: normalizeText(fullName)
-  };
-}
+// mcp/src/escrituras.ts
+import { createHash } from "node:crypto";
 
 // src/lib/constants.ts
 var SESSION_TYPE_LABELS = {
@@ -244,6 +319,43 @@ var MODALITY_LABELS = {
   virtual: "Virtual",
   presencial: "Presencial"
 };
+var MODALITIES = ["presencial", "virtual"];
+var UNKNOWN_PREFIX = "Por identificar";
+
+// src/lib/normalize.ts
+var DIACRITICS = new RegExp("[\\u0300-\\u036f]", "g");
+function normalizeText(input) {
+  return (input || "").normalize("NFD").replace(DIACRITICS, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+function tokenize(input) {
+  const n = normalizeText(input);
+  return n ? n.split(" ") : [];
+}
+var CONECTORES = /* @__PURE__ */ new Set(["de", "del", "la", "las", "los", "y", "e", "da", "do", "dos", "van", "von"]);
+function tidyName(raw) {
+  const limpio = (raw || "").trim().replace(/\s+/g, " ");
+  if (limpio.startsWith(UNKNOWN_PREFIX)) return limpio;
+  const palabras = limpio.split(" ").filter(Boolean);
+  return palabras.map((w, i) => {
+    const uniforme = w === w.toLowerCase() || w === w.toUpperCase() && w.length > 1;
+    if (!uniforme) return w;
+    const lower = w.toLocaleLowerCase("es");
+    if (i > 0 && CONECTORES.has(lower)) return lower;
+    return lower.replace(new RegExp("(^|-)(\\p{L})", "gu"), (_, sep, c) => sep + c.toLocaleUpperCase("es"));
+  }).join(" ");
+}
+function buildNameParts(fullNameRaw) {
+  const fullName = tidyName(fullNameRaw);
+  const parts = fullName.split(" ").filter(Boolean);
+  const firstName = parts[0] ?? "";
+  const lastName = parts.length > 1 ? parts.slice(1).join(" ") : "";
+  return {
+    fullName,
+    firstName,
+    lastName,
+    searchName: normalizeText(fullName)
+  };
+}
 
 // node_modules/date-fns/toDate.mjs
 function toDate(argument) {
@@ -477,8 +589,8 @@ var formatDistance = (token, count, options) => {
 function buildFormatLongFn(args) {
   return (options = {}) => {
     const width = options.width ? String(options.width) : args.defaultWidth;
-    const format2 = args.formats[width] || args.formats[args.defaultWidth];
-    return format2;
+    const format3 = args.formats[width] || args.formats[args.defaultWidth];
+    return format3;
   };
 }
 
@@ -1736,14 +1848,14 @@ function isProtectedDayOfYearToken(token) {
 function isProtectedWeekYearToken(token) {
   return weekYearTokenRE.test(token);
 }
-function warnOrThrowProtectedError(token, format2, input) {
-  const _message = message(token, format2, input);
+function warnOrThrowProtectedError(token, format3, input) {
+  const _message = message(token, format3, input);
   console.warn(_message);
   if (throwTokens.includes(token)) throw new RangeError(_message);
 }
-function message(token, format2, input) {
+function message(token, format3, input) {
   const subject = token[0] === "Y" ? "years" : "days of the month";
-  return `Use \`${token.toLowerCase()}\` instead of \`${token}\` (in \`${format2}\`) for formatting ${subject} to the input \`${input}\`; see: https://github.com/date-fns/date-fns/blob/master/docs/unicodeTokens.md`;
+  return `Use \`${token.toLowerCase()}\` instead of \`${token}\` (in \`${format3}\`) for formatting ${subject} to the input \`${input}\`; see: https://github.com/date-fns/date-fns/blob/master/docs/unicodeTokens.md`;
 }
 
 // node_modules/date-fns/format.mjs
@@ -2260,7 +2372,1697 @@ function toDate2(value) {
   const d = new Date(value);
   return isNaN(d.getTime()) ? /* @__PURE__ */ new Date() : d;
 }
+var DIA_BOGOTA = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Bogota",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit"
+});
+var dayKey = (v) => DIA_BOGOTA.format(toDate2(v));
+function daysFromToday(v, now = /* @__PURE__ */ new Date()) {
+  const a = Date.parse(`${dayKey(v)}T00:00:00Z`);
+  const b = Date.parse(`${dayKey(now)}T00:00:00Z`);
+  return Math.round((a - b) / 864e5);
+}
+function endOfTodayBogota(now = /* @__PURE__ */ new Date()) {
+  return new Date(Date.parse(`${dayKey(now)}T00:00:00Z`) + 864e5 + 5 * 36e5);
+}
+function sessionDateFromKey(key) {
+  return /* @__PURE__ */ new Date(`${key}T12:00:00-05:00`);
+}
 var fmtDate = (v) => format(toDate2(v), "d MMM yyyy", { locale: es });
+function isValidDateKey(str) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return false;
+  const d = /* @__PURE__ */ new Date(`${str}T12:00:00Z`);
+  return !isNaN(d.getTime()) && d.toISOString().startsWith(str);
+}
+
+// node_modules/fuse.js/dist/fuse.mjs
+function isArray(value) {
+  return !Array.isArray ? getTag(value) === "[object Array]" : Array.isArray(value);
+}
+function baseToString(value) {
+  if (typeof value == "string") return value;
+  if (typeof value === "bigint") return value.toString();
+  const result = value + "";
+  return result == "0" && 1 / value == -Infinity ? "-0" : result;
+}
+function toString(value) {
+  return value == null ? "" : baseToString(value);
+}
+function isString(value) {
+  return typeof value === "string";
+}
+function isNumber(value) {
+  return typeof value === "number";
+}
+function isBoolean(value) {
+  return value === true || value === false || isObjectLike(value) && getTag(value) == "[object Boolean]";
+}
+function isObject(value) {
+  return typeof value === "object";
+}
+function isObjectLike(value) {
+  return isObject(value) && value !== null;
+}
+function isDefined(value) {
+  return value !== void 0 && value !== null;
+}
+function isBlank(value) {
+  return !value.trim().length;
+}
+function getTag(value) {
+  return value == null ? value === void 0 ? "[object Undefined]" : "[object Null]" : Object.prototype.toString.call(value);
+}
+var INCORRECT_INDEX_TYPE = "Incorrect 'index' type";
+var INVALID_DOC_INDEX = "Invalid doc index: must be a non-negative integer within the bounds of the docs array";
+var LOGICAL_SEARCH_INVALID_QUERY_FOR_KEY = (key) => `Invalid value for key ${key}`;
+var PATTERN_LENGTH_TOO_LARGE = (max) => `Pattern length exceeds max of ${max}.`;
+var MISSING_KEY_PROPERTY = (name) => `Missing ${name} property in key`;
+var INVALID_KEY_WEIGHT_VALUE = (key) => `Property 'weight' in key '${key}' must be a positive integer`;
+var FUSE_MATCH_TOKEN_SEARCH_UNSUPPORTED = "Fuse.match does not support useTokenSearch: token search requires corpus-level statistics (df, fieldCount) that a one-off string comparison does not have. Use new Fuse(...).search(...) instead.";
+var hasOwn = Object.prototype.hasOwnProperty;
+var KeyStore = class {
+  constructor(keys) {
+    this._keys = [];
+    this._keyMap = {};
+    let totalWeight = 0;
+    keys.forEach((key) => {
+      const obj = createKey(key);
+      this._keys.push(obj);
+      this._keyMap[obj.id] = obj;
+      totalWeight += obj.weight;
+    });
+    this._keys.forEach((key) => {
+      key.weight /= totalWeight;
+    });
+  }
+  get(keyId) {
+    return this._keyMap[keyId];
+  }
+  keys() {
+    return this._keys;
+  }
+  toJSON() {
+    return JSON.stringify(this._keys);
+  }
+};
+function createKey(key) {
+  let path = null;
+  let id = null;
+  let src = null;
+  let weight = 1;
+  let getFn = null;
+  if (isString(key) || isArray(key)) {
+    src = key;
+    path = createKeyPath(key);
+    id = createKeyId(key);
+  } else {
+    if (!hasOwn.call(key, "name")) throw new Error(MISSING_KEY_PROPERTY("name"));
+    const name = key.name;
+    src = name;
+    if (hasOwn.call(key, "weight") && key.weight !== void 0) {
+      weight = key.weight;
+      if (weight <= 0) throw new Error(INVALID_KEY_WEIGHT_VALUE(createKeyId(name)));
+    }
+    path = createKeyPath(name);
+    id = createKeyId(name);
+    getFn = key.getFn ?? null;
+  }
+  return {
+    path,
+    id,
+    weight,
+    src,
+    getFn
+  };
+}
+function createKeyPath(key) {
+  return isArray(key) ? key : key.split(".");
+}
+function createKeyId(key) {
+  return isArray(key) ? key.join(".") : key;
+}
+function get(obj, path) {
+  const list = [];
+  let arr = false;
+  const deepGet = (obj2, path2, index, arrayIndex) => {
+    if (!isDefined(obj2)) return;
+    if (!path2[index]) list.push(arrayIndex !== void 0 ? {
+      v: obj2,
+      i: arrayIndex
+    } : obj2);
+    else {
+      const value = obj2[path2[index]];
+      if (!isDefined(value)) return;
+      if (index === path2.length - 1 && (isString(value) || isNumber(value) || isBoolean(value) || typeof value === "bigint")) list.push(arrayIndex !== void 0 ? {
+        v: toString(value),
+        i: arrayIndex
+      } : toString(value));
+      else if (isArray(value)) {
+        arr = true;
+        for (let i = 0, len = value.length; i < len; i += 1) deepGet(value[i], path2, index + 1, i);
+      } else if (path2.length) deepGet(value, path2, index + 1, arrayIndex);
+    }
+  };
+  deepGet(obj, isString(path) ? path.split(".") : path, 0);
+  return arr ? list : list[0];
+}
+var MatchOptions = {
+  includeMatches: false,
+  findAllMatches: false,
+  minMatchCharLength: 1
+};
+var BasicOptions = {
+  isCaseSensitive: false,
+  ignoreDiacritics: false,
+  includeScore: false,
+  keys: [],
+  shouldSort: true,
+  sortFn: (a, b) => a.score === b.score ? a.idx < b.idx ? -1 : 1 : a.score < b.score ? -1 : 1
+};
+var FuzzyOptions = {
+  location: 0,
+  threshold: 0.6,
+  distance: 100
+};
+var AdvancedOptions = {
+  useExtendedSearch: false,
+  useTokenSearch: false,
+  tokenize: void 0,
+  tokenMatch: "any",
+  getFn: get,
+  ignoreLocation: false,
+  ignoreFieldNorm: false,
+  fieldNormWeight: 1
+};
+var Config = Object.freeze({
+  ...BasicOptions,
+  ...MatchOptions,
+  ...FuzzyOptions,
+  ...AdvancedOptions
+});
+function norm(weight = 1, mantissa = 3) {
+  const cache2 = /* @__PURE__ */ new Map();
+  const m = Math.pow(10, mantissa);
+  return {
+    get(value) {
+      let numTokens = 1;
+      let inSpace = false;
+      for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) === 32) {
+        if (!inSpace) {
+          numTokens++;
+          inSpace = true;
+        }
+      } else inSpace = false;
+      if (cache2.has(numTokens)) return cache2.get(numTokens);
+      const n = Math.round(m / Math.pow(numTokens, 0.5 * weight)) / m;
+      cache2.set(numTokens, n);
+      return n;
+    },
+    clear() {
+      cache2.clear();
+    }
+  };
+}
+var FuseIndex = class {
+  constructor({ getFn = Config.getFn, fieldNormWeight = Config.fieldNormWeight } = {}) {
+    this.norm = norm(fieldNormWeight, 3);
+    this.getFn = getFn;
+    this.isCreated = false;
+    this.docs = [];
+    this.keys = [];
+    this._keysMap = {};
+    this.setIndexRecords();
+  }
+  setSources(docs = []) {
+    this.docs = docs;
+  }
+  setIndexRecords(records = []) {
+    this.records = records;
+  }
+  setKeys(keys = []) {
+    this.keys = keys;
+    this._keysMap = {};
+    keys.forEach((key, idx) => {
+      this._keysMap[key.id] = idx;
+    });
+  }
+  create() {
+    if (this.isCreated || !this.docs.length) return;
+    this.isCreated = true;
+    const len = this.docs.length;
+    this.records = new Array(len);
+    let recordCount = 0;
+    if (isString(this.docs[0])) for (let i = 0; i < len; i++) {
+      const record = this._createStringRecord(this.docs[i], i);
+      if (record) this.records[recordCount++] = record;
+    }
+    else for (let i = 0; i < len; i++) this.records[recordCount++] = this._createObjectRecord(this.docs[i], i);
+    this.records.length = recordCount;
+    this.norm.clear();
+  }
+  add(doc, docIndex) {
+    if (!Number.isInteger(docIndex) || docIndex < 0) throw new Error(INVALID_DOC_INDEX);
+    if (isString(doc)) {
+      const record2 = this._createStringRecord(doc, docIndex);
+      if (record2) this.records.push(record2);
+      return record2;
+    }
+    const record = this._createObjectRecord(doc, docIndex);
+    this.records.push(record);
+    return record;
+  }
+  removeAt(idx) {
+    if (!Number.isInteger(idx) || idx < 0) throw new Error(INVALID_DOC_INDEX);
+    for (let i = 0, len = this.records.length; i < len; i += 1) if (this.records[i].i === idx) {
+      this.records.splice(i, 1);
+      break;
+    }
+    for (let i = 0, len = this.records.length; i < len; i += 1) if (this.records[i].i > idx) this.records[i].i -= 1;
+  }
+  removeAll(indices) {
+    const toRemove = /* @__PURE__ */ new Set();
+    for (const v of indices) if (Number.isInteger(v) && v >= 0) toRemove.add(v);
+    if (toRemove.size === 0) return;
+    this.records = this.records.filter((r) => !toRemove.has(r.i));
+    const sorted = Array.from(toRemove).sort((a, b) => a - b);
+    for (const record of this.records) {
+      let lo = 0;
+      let hi = sorted.length;
+      while (lo < hi) {
+        const mid = lo + hi >>> 1;
+        if (sorted[mid] < record.i) lo = mid + 1;
+        else hi = mid;
+      }
+      record.i -= lo;
+    }
+  }
+  getValueForItemAtKeyId(item, keyId) {
+    return item[this._keysMap[keyId]];
+  }
+  size() {
+    return this.records.length;
+  }
+  _createStringRecord(doc, docIndex) {
+    if (!isDefined(doc) || isBlank(doc)) return null;
+    return {
+      v: doc,
+      i: docIndex,
+      n: this.norm.get(doc)
+    };
+  }
+  _createObjectRecord(doc, docIndex) {
+    const record = {
+      i: docIndex,
+      $: {}
+    };
+    for (let keyIndex = 0, keyLen = this.keys.length; keyIndex < keyLen; keyIndex++) {
+      const key = this.keys[keyIndex];
+      const value = key.getFn ? key.getFn(doc) : this.getFn(doc, key.path);
+      if (!isDefined(value)) continue;
+      if (isArray(value)) {
+        const subRecords = [];
+        for (let i = 0, len = value.length; i < len; i += 1) {
+          const item = value[i];
+          if (!isDefined(item)) continue;
+          if (isString(item)) {
+            if (!isBlank(item)) {
+              const subRecord = {
+                v: item,
+                i,
+                n: this.norm.get(item)
+              };
+              subRecords.push(subRecord);
+            }
+          } else if (isDefined(item.v)) {
+            const text = isString(item.v) ? item.v : toString(item.v);
+            if (!isBlank(text)) {
+              const subRecord = {
+                v: text,
+                i: item.i,
+                n: this.norm.get(text)
+              };
+              subRecords.push(subRecord);
+            }
+          }
+        }
+        record.$[keyIndex] = subRecords;
+      } else if (isString(value) && !isBlank(value)) {
+        const subRecord = {
+          v: value,
+          n: this.norm.get(value)
+        };
+        record.$[keyIndex] = subRecord;
+      }
+    }
+    return record;
+  }
+  toJSON() {
+    return {
+      keys: this.keys.map(({ getFn, ...key }) => key),
+      records: this.records
+    };
+  }
+};
+function createIndex(keys, docs, { getFn = Config.getFn, fieldNormWeight = Config.fieldNormWeight } = {}) {
+  const myIndex = new FuseIndex({
+    getFn,
+    fieldNormWeight
+  });
+  myIndex.setKeys(keys.map(createKey));
+  myIndex.setSources(docs);
+  myIndex.create();
+  return myIndex;
+}
+function parseIndex(data, { getFn = Config.getFn, fieldNormWeight = Config.fieldNormWeight } = {}) {
+  const { keys, records } = data;
+  const myIndex = new FuseIndex({
+    getFn,
+    fieldNormWeight
+  });
+  myIndex.setKeys(keys);
+  myIndex.setIndexRecords(records);
+  return myIndex;
+}
+function convertMaskToIndices(matchmask = [], minMatchCharLength = Config.minMatchCharLength) {
+  const indices = [];
+  let start = -1;
+  let end = -1;
+  let i = 0;
+  for (let len = matchmask.length; i < len; i += 1) {
+    const match3 = matchmask[i];
+    if (match3 && start === -1) start = i;
+    else if (!match3 && start !== -1) {
+      end = i - 1;
+      if (end - start + 1 >= minMatchCharLength) indices.push([start, end]);
+      start = -1;
+    }
+  }
+  if (matchmask[i - 1] && i - start >= minMatchCharLength) indices.push([start, i - 1]);
+  return indices;
+}
+function search(text, pattern, patternAlphabet, { location = Config.location, distance = Config.distance, threshold = Config.threshold, findAllMatches = Config.findAllMatches, minMatchCharLength = Config.minMatchCharLength, includeMatches = Config.includeMatches, ignoreLocation = Config.ignoreLocation } = {}) {
+  if (pattern.length > 32) throw new Error(PATTERN_LENGTH_TOO_LARGE(32));
+  const patternLen = pattern.length;
+  const textLen = text.length;
+  const expectedLocation = Math.max(0, Math.min(location, textLen));
+  let currentThreshold = threshold;
+  let bestLocation = expectedLocation;
+  const calcScore = (errors, currentLocation) => {
+    const accuracy = errors / patternLen;
+    if (ignoreLocation) return accuracy;
+    const proximity = Math.abs(expectedLocation - currentLocation);
+    if (!distance) return proximity ? 1 : accuracy;
+    return accuracy + proximity / distance;
+  };
+  const computeMatches = minMatchCharLength > 1 || includeMatches;
+  const matchMask = computeMatches ? Array(textLen) : [];
+  let index;
+  while ((index = text.indexOf(pattern, bestLocation)) > -1) {
+    const score = calcScore(0, index);
+    currentThreshold = Math.min(score, currentThreshold);
+    bestLocation = index + patternLen;
+    if (computeMatches) {
+      let i = 0;
+      while (i < patternLen) {
+        matchMask[index + i] = 1;
+        i += 1;
+      }
+    }
+  }
+  bestLocation = -1;
+  let lastBitArr = [];
+  let finalScore = 1;
+  let bestErrors = 0;
+  let binMax = patternLen + textLen;
+  const mask = 1 << patternLen - 1;
+  for (let i = 0; i < patternLen; i += 1) {
+    let binMin = 0;
+    let binMid = binMax;
+    while (binMin < binMid) {
+      if (calcScore(i, expectedLocation + binMid) <= currentThreshold) binMin = binMid;
+      else binMax = binMid;
+      binMid = Math.floor((binMax - binMin) / 2 + binMin);
+    }
+    binMax = binMid;
+    let start = Math.max(1, expectedLocation - binMid + 1);
+    const finish = findAllMatches ? textLen : Math.min(expectedLocation + binMid, textLen) + patternLen;
+    const bitArr = Array(finish + 2);
+    bitArr[finish + 1] = (1 << i) - 1;
+    for (let j = finish; j >= start; j -= 1) {
+      const currentLocation = j - 1;
+      const charMatch = patternAlphabet[text[currentLocation]];
+      bitArr[j] = (bitArr[j + 1] << 1 | 1) & charMatch;
+      if (i) bitArr[j] |= (lastBitArr[j + 1] | lastBitArr[j]) << 1 | 1 | lastBitArr[j + 1];
+      if (bitArr[j] & mask) {
+        finalScore = calcScore(i, currentLocation);
+        if (finalScore <= currentThreshold) {
+          currentThreshold = finalScore;
+          bestLocation = currentLocation;
+          bestErrors = i;
+          if (bestLocation <= expectedLocation) break;
+          start = Math.max(1, 2 * expectedLocation - bestLocation);
+        }
+      }
+    }
+    if (calcScore(i + 1, expectedLocation) > currentThreshold) break;
+    lastBitArr = bitArr;
+  }
+  if (computeMatches && bestLocation >= 0) {
+    const matchEnd = Math.min(textLen - 1, bestLocation + patternLen - 1 + bestErrors);
+    for (let k = bestLocation; k <= matchEnd; k += 1) if (patternAlphabet[text[k]]) matchMask[k] = 1;
+  }
+  const result = {
+    isMatch: bestLocation >= 0,
+    score: Math.max(1e-3, finalScore)
+  };
+  if (computeMatches) {
+    const indices = convertMaskToIndices(matchMask, minMatchCharLength);
+    if (!indices.length) result.isMatch = false;
+    else if (includeMatches) result.indices = indices;
+  }
+  return result;
+}
+function createPatternAlphabet(pattern) {
+  const mask = {};
+  for (let i = 0, len = pattern.length; i < len; i += 1) {
+    const char = pattern.charAt(i);
+    mask[char] = (mask[char] || 0) | 1 << len - i - 1;
+  }
+  return mask;
+}
+function mergeIndices(indices) {
+  if (indices.length <= 1) return indices;
+  indices.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const merged = [indices[0]];
+  for (let i = 1, len = indices.length; i < len; i += 1) {
+    const last = merged[merged.length - 1];
+    const curr = indices[i];
+    if (curr[0] <= last[1] + 1) last[1] = Math.max(last[1], curr[1]);
+    else merged.push(curr);
+  }
+  return merged;
+}
+var NON_DECOMPOSABLE_MAP = {
+  "\u0142": "l",
+  "\u0141": "L",
+  "\u0111": "d",
+  "\u0110": "D",
+  "\xF8": "o",
+  "\xD8": "O",
+  "\u0127": "h",
+  "\u0126": "H",
+  "\u0167": "t",
+  "\u0166": "T",
+  "\u0131": "i",
+  "\xDF": "ss"
+};
+var NON_DECOMPOSABLE_RE = new RegExp("[" + Object.keys(NON_DECOMPOSABLE_MAP).join("") + "]", "g");
+var stripDiacritics = typeof String.prototype.normalize === "function" ? (str) => str.normalize("NFD").replace(/[\u0300-\u036F\u0483-\u0489\u0591-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06DC\u06DF-\u06E4\u06E7\u06E8\u06EA-\u06ED\u0711\u0730-\u074A\u07A6-\u07B0\u07EB-\u07F3\u07FD\u0816-\u0819\u081B-\u0823\u0825-\u0827\u0829-\u082D\u0859-\u085B\u08D3-\u08E1\u08E3-\u0903\u093A-\u093C\u093E-\u094F\u0951-\u0957\u0962\u0963\u0981-\u0983\u09BC\u09BE-\u09C4\u09C7\u09C8\u09CB-\u09CD\u09D7\u09E2\u09E3\u09FE\u0A01-\u0A03\u0A3C\u0A3E-\u0A42\u0A47\u0A48\u0A4B-\u0A4D\u0A51\u0A70\u0A71\u0A75\u0A81-\u0A83\u0ABC\u0ABE-\u0AC5\u0AC7-\u0AC9\u0ACB-\u0ACD\u0AE2\u0AE3\u0AFA-\u0AFF\u0B01-\u0B03\u0B3C\u0B3E-\u0B44\u0B47\u0B48\u0B4B-\u0B4D\u0B56\u0B57\u0B62\u0B63\u0B82\u0BBE-\u0BC2\u0BC6-\u0BC8\u0BCA-\u0BCD\u0BD7\u0C00-\u0C04\u0C3E-\u0C44\u0C46-\u0C48\u0C4A-\u0C4D\u0C55\u0C56\u0C62\u0C63\u0C81-\u0C83\u0CBC\u0CBE-\u0CC4\u0CC6-\u0CC8\u0CCA-\u0CCD\u0CD5\u0CD6\u0CE2\u0CE3\u0D00-\u0D03\u0D3B\u0D3C\u0D3E-\u0D44\u0D46-\u0D48\u0D4A-\u0D4D\u0D57\u0D62\u0D63\u0D82\u0D83\u0DCA\u0DCF-\u0DD4\u0DD6\u0DD8-\u0DDF\u0DF2\u0DF3\u0E31\u0E34-\u0E3A\u0E47-\u0E4E\u0EB1\u0EB4-\u0EB9\u0EBB\u0EBC\u0EC8-\u0ECD\u0F18\u0F19\u0F35\u0F37\u0F39\u0F3E\u0F3F\u0F71-\u0F84\u0F86\u0F87\u0F8D-\u0F97\u0F99-\u0FBC\u0FC6\u102B-\u103E\u1056-\u1059\u105E-\u1060\u1062-\u1064\u1067-\u106D\u1071-\u1074\u1082-\u108D\u108F\u109A-\u109D\u135D-\u135F\u1712-\u1714\u1732-\u1734\u1752\u1753\u1772\u1773\u17B4-\u17D3\u17DD\u180B-\u180D\u1885\u1886\u18A9\u1920-\u192B\u1930-\u193B\u1A17-\u1A1B\u1A55-\u1A5E\u1A60-\u1A7C\u1A7F\u1AB0-\u1ABE\u1B00-\u1B04\u1B34-\u1B44\u1B6B-\u1B73\u1B80-\u1B82\u1BA1-\u1BAD\u1BE6-\u1BF3\u1C24-\u1C37\u1CD0-\u1CD2\u1CD4-\u1CE8\u1CED\u1CF2-\u1CF4\u1CF7-\u1CF9\u1DC0-\u1DF9\u1DFB-\u1DFF\u20D0-\u20F0\u2CEF-\u2CF1\u2D7F\u2DE0-\u2DFF\u302A-\u302F\u3099\u309A\uA66F-\uA672\uA674-\uA67D\uA69E\uA69F\uA6F0\uA6F1\uA802\uA806\uA80B\uA823-\uA827\uA880\uA881\uA8B4-\uA8C5\uA8E0-\uA8F1\uA8FF\uA926-\uA92D\uA947-\uA953\uA980-\uA983\uA9B3-\uA9C0\uA9E5\uAA29-\uAA36\uAA43\uAA4C\uAA4D\uAA7B-\uAA7D\uAAB0\uAAB2-\uAAB4\uAAB7\uAAB8\uAABE\uAABF\uAAC1\uAAEB-\uAAEF\uAAF5\uAAF6\uABE3-\uABEA\uABEC\uABED\uFB1E\uFE00-\uFE0F\uFE20-\uFE2F]/g, "").replace(NON_DECOMPOSABLE_RE, (ch) => NON_DECOMPOSABLE_MAP[ch]) : (str) => str;
+var BitapSearch = class {
+  constructor(pattern, { location = Config.location, threshold = Config.threshold, distance = Config.distance, includeMatches = Config.includeMatches, findAllMatches = Config.findAllMatches, minMatchCharLength = Config.minMatchCharLength, isCaseSensitive = Config.isCaseSensitive, ignoreDiacritics = Config.ignoreDiacritics, ignoreLocation = Config.ignoreLocation } = {}) {
+    this.options = {
+      location,
+      threshold,
+      distance,
+      includeMatches,
+      findAllMatches,
+      minMatchCharLength,
+      isCaseSensitive,
+      ignoreDiacritics,
+      ignoreLocation
+    };
+    pattern = isCaseSensitive ? pattern : pattern.toLowerCase();
+    pattern = ignoreDiacritics ? stripDiacritics(pattern) : pattern;
+    this.pattern = pattern;
+    this.chunks = [];
+    if (!this.pattern.length) return;
+    const addChunk = (pattern2, startIndex) => {
+      this.chunks.push({
+        pattern: pattern2,
+        alphabet: createPatternAlphabet(pattern2),
+        startIndex
+      });
+    };
+    const len = this.pattern.length;
+    if (len > 32) {
+      let i = 0;
+      const remainder = len % 32;
+      const end = len - remainder;
+      while (i < end) {
+        addChunk(this.pattern.substr(i, 32), i);
+        i += 32;
+      }
+      if (remainder) {
+        const startIndex = len - 32;
+        addChunk(this.pattern.substr(startIndex), startIndex);
+      }
+    } else addChunk(this.pattern, 0);
+  }
+  searchIn(text) {
+    const { isCaseSensitive, ignoreDiacritics, includeMatches } = this.options;
+    text = isCaseSensitive ? text : text.toLowerCase();
+    text = ignoreDiacritics ? stripDiacritics(text) : text;
+    if (this.pattern === text) {
+      const result2 = {
+        isMatch: true,
+        score: 0
+      };
+      if (includeMatches) result2.indices = [[0, text.length - 1]];
+      return result2;
+    }
+    const { location, distance, threshold, findAllMatches, minMatchCharLength, ignoreLocation } = this.options;
+    const allIndices = [];
+    let totalScore = 0;
+    let hasMatches = false;
+    this.chunks.forEach(({ pattern, alphabet, startIndex }) => {
+      const { isMatch, score, indices } = search(text, pattern, alphabet, {
+        location: location + startIndex,
+        distance,
+        threshold,
+        findAllMatches,
+        minMatchCharLength,
+        includeMatches,
+        ignoreLocation
+      });
+      if (isMatch) hasMatches = true;
+      totalScore += score;
+      if (isMatch && indices) allIndices.push(...indices);
+    });
+    const result = {
+      isMatch: hasMatches,
+      score: hasMatches ? totalScore / this.chunks.length : 1
+    };
+    if (hasMatches && includeMatches) result.indices = mergeIndices(allIndices);
+    return result;
+  }
+};
+var MULTI_MATCH_TYPES = /* @__PURE__ */ new Set(["fuzzy", "include"]);
+function isInverse(type) {
+  return type.startsWith("inverse");
+}
+var matchers = [
+  {
+    type: "exact",
+    multiRegex: /^="(.*)"$/,
+    singleRegex: /^=(.*)$/,
+    create: (pattern) => ({
+      type: "exact",
+      search(text) {
+        const isMatch = text === pattern;
+        return {
+          isMatch,
+          score: isMatch ? 0 : 1,
+          indices: [0, pattern.length - 1]
+        };
+      }
+    })
+  },
+  {
+    type: "include",
+    multiRegex: /^'"(.*)"$/,
+    singleRegex: /^'(.*)$/,
+    create: (pattern) => ({
+      type: "include",
+      search(text) {
+        let location = 0;
+        let index;
+        const indices = [];
+        const patternLen = pattern.length;
+        while ((index = text.indexOf(pattern, location)) > -1) {
+          location = index + patternLen;
+          indices.push([index, location - 1]);
+        }
+        const isMatch = !!indices.length;
+        return {
+          isMatch,
+          score: isMatch ? 0 : 1,
+          indices
+        };
+      }
+    })
+  },
+  {
+    type: "prefix-exact",
+    multiRegex: /^\^"(.*)"$/,
+    singleRegex: /^\^(.*)$/,
+    create: (pattern) => ({
+      type: "prefix-exact",
+      search(text) {
+        const isMatch = text.startsWith(pattern);
+        return {
+          isMatch,
+          score: isMatch ? 0 : 1,
+          indices: [0, pattern.length - 1]
+        };
+      }
+    })
+  },
+  {
+    type: "inverse-prefix-exact",
+    multiRegex: /^!\^"(.*)"$/,
+    singleRegex: /^!\^(.*)$/,
+    create: (pattern) => ({
+      type: "inverse-prefix-exact",
+      search(text) {
+        const isMatch = !text.startsWith(pattern);
+        return {
+          isMatch,
+          score: isMatch ? 0 : 1,
+          indices: [0, text.length - 1]
+        };
+      }
+    })
+  },
+  {
+    type: "inverse-suffix-exact",
+    multiRegex: /^!"(.*)"\$$/,
+    singleRegex: /^!(.*)\$$/,
+    create: (pattern) => ({
+      type: "inverse-suffix-exact",
+      search(text) {
+        const isMatch = !text.endsWith(pattern);
+        return {
+          isMatch,
+          score: isMatch ? 0 : 1,
+          indices: [0, text.length - 1]
+        };
+      }
+    })
+  },
+  {
+    type: "suffix-exact",
+    multiRegex: /^"(.*)"\$$/,
+    singleRegex: /^(.*)\$$/,
+    create: (pattern) => ({
+      type: "suffix-exact",
+      search(text) {
+        const isMatch = text.endsWith(pattern);
+        return {
+          isMatch,
+          score: isMatch ? 0 : 1,
+          indices: [text.length - pattern.length, text.length - 1]
+        };
+      }
+    })
+  },
+  {
+    type: "inverse-exact",
+    multiRegex: /^!"(.*)"$/,
+    singleRegex: /^!(.*)$/,
+    create: (pattern) => ({
+      type: "inverse-exact",
+      search(text) {
+        const isMatch = text.indexOf(pattern) === -1;
+        return {
+          isMatch,
+          score: isMatch ? 0 : 1,
+          indices: [0, text.length - 1]
+        };
+      }
+    })
+  },
+  {
+    type: "fuzzy",
+    multiRegex: /^"(.*)"$/,
+    singleRegex: /^(.*)$/,
+    create: (pattern, options = {}) => {
+      const bitap = new BitapSearch(pattern, {
+        location: options.location ?? Config.location,
+        threshold: options.threshold ?? Config.threshold,
+        distance: options.distance ?? Config.distance,
+        includeMatches: options.includeMatches ?? Config.includeMatches,
+        findAllMatches: options.findAllMatches ?? Config.findAllMatches,
+        minMatchCharLength: options.minMatchCharLength ?? Config.minMatchCharLength,
+        isCaseSensitive: options.isCaseSensitive ?? Config.isCaseSensitive,
+        ignoreDiacritics: options.ignoreDiacritics ?? Config.ignoreDiacritics,
+        ignoreLocation: options.ignoreLocation ?? Config.ignoreLocation
+      });
+      return {
+        type: "fuzzy",
+        search(text) {
+          return bitap.searchIn(text);
+        }
+      };
+    }
+  }
+];
+var matchersLen = matchers.length;
+var ESCAPED_PIPE = "\0";
+var OR_TOKEN = "|";
+function tokenize2(pattern) {
+  const tokens = [];
+  const len = pattern.length;
+  let i = 0;
+  while (i < len) {
+    while (i < len && pattern[i] === " ") i++;
+    if (i >= len) break;
+    let j = i;
+    while (j < len && pattern[j] !== " " && pattern[j] !== '"') j++;
+    if (j < len && pattern[j] === '"') {
+      j++;
+      while (j < len) {
+        if (pattern[j] === '"') {
+          const next = j + 1;
+          if (next >= len || pattern[next] === " ") {
+            j++;
+            break;
+          }
+          if (pattern[next] === "$" && (next + 1 >= len || pattern[next + 1] === " ")) {
+            j += 2;
+            break;
+          }
+        }
+        j++;
+      }
+      tokens.push(pattern.substring(i, j));
+      i = j;
+    } else {
+      while (j < len && pattern[j] !== " ") j++;
+      tokens.push(pattern.substring(i, j));
+      i = j;
+    }
+  }
+  return tokens;
+}
+function getMatch(pattern, exp) {
+  const matches = pattern.match(exp);
+  return matches ? matches[1] : null;
+}
+function parseQuery(pattern, options = {}) {
+  return pattern.replace(/\\\|/g, ESCAPED_PIPE).split(OR_TOKEN).map((item) => {
+    const query = tokenize2(item.replace(/\u0000/g, "|").trim()).filter((item2) => item2 && !!item2.trim());
+    const results = [];
+    for (let i = 0, len = query.length; i < len; i += 1) {
+      const queryItem = query[i];
+      let found = false;
+      let idx = -1;
+      while (!found && ++idx < matchersLen) {
+        const def = matchers[idx];
+        const token = getMatch(queryItem, def.multiRegex);
+        if (token) {
+          results.push(def.create(token, options));
+          found = true;
+        }
+      }
+      if (found) continue;
+      idx = -1;
+      while (++idx < matchersLen) {
+        const def = matchers[idx];
+        const token = getMatch(queryItem, def.singleRegex);
+        if (token) {
+          results.push(def.create(token, options));
+          break;
+        }
+      }
+    }
+    return results;
+  });
+}
+var ExtendedSearch = class {
+  constructor(pattern, { isCaseSensitive = Config.isCaseSensitive, ignoreDiacritics = Config.ignoreDiacritics, includeMatches = Config.includeMatches, minMatchCharLength = Config.minMatchCharLength, ignoreLocation = Config.ignoreLocation, findAllMatches = Config.findAllMatches, location = Config.location, threshold = Config.threshold, distance = Config.distance } = {}) {
+    this.query = null;
+    this.options = {
+      isCaseSensitive,
+      ignoreDiacritics,
+      includeMatches,
+      minMatchCharLength,
+      findAllMatches,
+      ignoreLocation,
+      location,
+      threshold,
+      distance
+    };
+    pattern = isCaseSensitive ? pattern : pattern.toLowerCase();
+    pattern = ignoreDiacritics ? stripDiacritics(pattern) : pattern;
+    this.pattern = pattern;
+    this.query = parseQuery(this.pattern, this.options);
+  }
+  static condition(_, options) {
+    return options.useExtendedSearch;
+  }
+  searchIn(text) {
+    const query = this.query;
+    if (!query) return {
+      isMatch: false,
+      score: 1
+    };
+    const { includeMatches, isCaseSensitive, ignoreDiacritics } = this.options;
+    text = isCaseSensitive ? text : text.toLowerCase();
+    text = ignoreDiacritics ? stripDiacritics(text) : text;
+    let numMatches = 0;
+    const allIndices = [];
+    let totalScore = 0;
+    let hasInverse = false;
+    for (let i = 0, qLen = query.length; i < qLen; i += 1) {
+      const searchers = query[i];
+      allIndices.length = 0;
+      numMatches = 0;
+      hasInverse = false;
+      for (let j = 0, pLen = searchers.length; j < pLen; j += 1) {
+        const matcher = searchers[j];
+        const { isMatch, indices, score } = matcher.search(text);
+        if (isMatch) {
+          numMatches += 1;
+          totalScore += score;
+          if (isInverse(matcher.type)) hasInverse = true;
+          if (includeMatches) if (MULTI_MATCH_TYPES.has(matcher.type)) allIndices.push(...indices);
+          else allIndices.push(indices);
+        } else {
+          totalScore = 0;
+          numMatches = 0;
+          allIndices.length = 0;
+          hasInverse = false;
+          break;
+        }
+      }
+      if (numMatches) {
+        const result = {
+          isMatch: true,
+          score: totalScore / numMatches
+        };
+        if (hasInverse) result.hasInverse = true;
+        if (includeMatches) result.indices = mergeIndices(allIndices);
+        return result;
+      }
+    }
+    return {
+      isMatch: false,
+      score: 1
+    };
+  }
+};
+var registeredSearchers = [];
+function register(...args) {
+  registeredSearchers.push(...args);
+}
+function createSearcher(pattern, options) {
+  for (let i = 0, len = registeredSearchers.length; i < len; i += 1) {
+    const searcherClass = registeredSearchers[i];
+    if (searcherClass.condition(pattern, options)) return new searcherClass(pattern, options);
+  }
+  return new BitapSearch(pattern, options);
+}
+var LogicalOperator = {
+  AND: "$and",
+  OR: "$or"
+};
+var KeyType = {
+  PATH: "$path",
+  PATTERN: "$val"
+};
+var isExpression = (query) => !!(query[LogicalOperator.AND] || query[LogicalOperator.OR]);
+var isPath = (query) => !!query[KeyType.PATH];
+var isLeaf = (query) => !isArray(query) && isObject(query) && !isExpression(query);
+var convertToExplicit = (query) => ({ [LogicalOperator.AND]: Object.keys(query).map((key) => ({ [key]: query[key] })) });
+function parse(query, options, { auto = true } = {}) {
+  const next = (query2) => {
+    if (isString(query2)) {
+      const obj = {
+        keyId: null,
+        pattern: query2
+      };
+      if (auto) obj.searcher = createSearcher(query2, options);
+      return obj;
+    }
+    const keys = Object.keys(query2);
+    const isQueryPath = isPath(query2);
+    if (!isQueryPath && keys.length > 1 && !isExpression(query2)) return next(convertToExplicit(query2));
+    if (isLeaf(query2)) {
+      const key = isQueryPath ? query2[KeyType.PATH] : keys[0];
+      const pattern = isQueryPath ? query2[KeyType.PATTERN] : query2[key];
+      if (!isString(pattern)) throw new Error(LOGICAL_SEARCH_INVALID_QUERY_FOR_KEY(key));
+      const obj = {
+        keyId: createKeyId(key),
+        pattern
+      };
+      if (auto) obj.searcher = createSearcher(pattern, options);
+      return obj;
+    }
+    const node = {
+      children: [],
+      operator: keys[0]
+    };
+    keys.forEach((key) => {
+      const value = query2[key];
+      if (isArray(value)) value.forEach((item) => {
+        node.children.push(next(item));
+      });
+    });
+    return node;
+  };
+  if (!isExpression(query)) query = convertToExplicit(query);
+  return next(query);
+}
+function computeScoreSingle(matches, { ignoreFieldNorm = Config.ignoreFieldNorm }) {
+  let totalScore = 1;
+  matches.forEach(({ key, norm: norm2, score }) => {
+    const weight = key ? key.weight : null;
+    totalScore *= Math.pow(score === 0 && weight ? Number.EPSILON : score, (weight || 1) * (ignoreFieldNorm ? 1 : norm2));
+  });
+  return totalScore;
+}
+function computeScore(results, { ignoreFieldNorm = Config.ignoreFieldNorm }) {
+  results.forEach((result) => {
+    result.score = computeScoreSingle(result.matches, { ignoreFieldNorm });
+  });
+}
+var MaxHeap = class {
+  constructor(limit) {
+    this.limit = limit;
+    this.heap = [];
+  }
+  get size() {
+    return this.heap.length;
+  }
+  shouldInsert(score) {
+    return this.size < this.limit || score < this.heap[0].score;
+  }
+  insert(item) {
+    if (this.size < this.limit) {
+      this.heap.push(item);
+      this._bubbleUp(this.size - 1);
+    } else if (item.score < this.heap[0].score) {
+      this.heap[0] = item;
+      this._sinkDown(0);
+    }
+  }
+  extractSorted(sortFn) {
+    return this.heap.sort(sortFn);
+  }
+  _bubbleUp(i) {
+    const heap = this.heap;
+    while (i > 0) {
+      const parent = i - 1 >> 1;
+      if (heap[i].score <= heap[parent].score) break;
+      const tmp = heap[i];
+      heap[i] = heap[parent];
+      heap[parent] = tmp;
+      i = parent;
+    }
+  }
+  _sinkDown(i) {
+    const heap = this.heap;
+    const len = heap.length;
+    let largest = i;
+    do {
+      i = largest;
+      const left = 2 * i + 1;
+      const right = 2 * i + 2;
+      if (left < len && heap[left].score > heap[largest].score) largest = left;
+      if (right < len && heap[right].score > heap[largest].score) largest = right;
+      if (largest !== i) {
+        const tmp = heap[i];
+        heap[i] = heap[largest];
+        heap[largest] = tmp;
+      }
+    } while (largest !== i);
+  }
+};
+function formatMatches(result) {
+  const matches = [];
+  result.matches.forEach((match3) => {
+    if (!isDefined(match3.indices) || !match3.indices.length) return;
+    const obj = {
+      indices: match3.indices,
+      value: match3.value
+    };
+    if (match3.key) obj.key = match3.key.id;
+    if (match3.idx > -1) obj.refIndex = match3.idx;
+    matches.push(obj);
+  });
+  return matches;
+}
+function format2(results, docs, { includeMatches = Config.includeMatches, includeScore = Config.includeScore } = {}) {
+  return results.map((result) => {
+    const { idx } = result;
+    const data = {
+      item: docs[idx],
+      refIndex: idx
+    };
+    if (includeMatches) data.matches = formatMatches(result);
+    if (includeScore) data.score = result.score;
+    return data;
+  });
+}
+var DEFAULT_TOKEN = /[\p{L}\p{M}\p{N}_]+/gu;
+var warned = /* @__PURE__ */ new WeakSet();
+function warnNonGlobal(regex) {
+  if (!warned.has(regex)) {
+    warned.add(regex);
+    console.warn(`[Fuse] tokenize regex ${regex} lacks the global flag; only the first match per text will be returned. Add the 'g' flag.`);
+  }
+}
+function resolveTokenize(tokenize3) {
+  if (typeof tokenize3 === "function") {
+    let validated = false;
+    return (text) => {
+      const result = tokenize3(text);
+      if (!validated) {
+        validated = true;
+        if (!Array.isArray(result) || result.some((t) => typeof t !== "string")) throw new Error(`[Fuse] tokenize function must return string[]; received ${Array.isArray(result) ? "array containing non-strings" : typeof result}.`);
+      }
+      return result;
+    };
+  }
+  if (tokenize3 instanceof RegExp) {
+    if (!tokenize3.global) warnNonGlobal(tokenize3);
+    return (text) => text.match(tokenize3) || [];
+  }
+  return (text) => text.match(DEFAULT_TOKEN) || [];
+}
+function createAnalyzer({ isCaseSensitive = false, ignoreDiacritics = false, tokenize: tokenize3 } = {}) {
+  const tokenizeFn = resolveTokenize(tokenize3);
+  return { tokenize(text) {
+    if (!isCaseSensitive) text = text.toLowerCase();
+    if (ignoreDiacritics) text = stripDiacritics(text);
+    return tokenizeFn(text);
+  } };
+}
+var TokenSearch = class {
+  static condition(_, options) {
+    return options.useTokenSearch;
+  }
+  constructor(pattern, options) {
+    this.options = options;
+    this.analyzer = createAnalyzer({
+      isCaseSensitive: options.isCaseSensitive,
+      ignoreDiacritics: options.ignoreDiacritics,
+      tokenize: options.tokenize
+    });
+    const queryTerms = this.analyzer.tokenize(pattern);
+    const { df, fieldCount } = options._invertedIndex;
+    this.termSearchers = [];
+    this.idfWeights = [];
+    for (const term of queryTerms) {
+      this.termSearchers.push(new BitapSearch(term, {
+        location: options.location,
+        threshold: options.threshold,
+        distance: options.distance,
+        includeMatches: options.includeMatches,
+        findAllMatches: options.findAllMatches,
+        minMatchCharLength: options.minMatchCharLength,
+        isCaseSensitive: options.isCaseSensitive,
+        ignoreDiacritics: options.ignoreDiacritics,
+        ignoreLocation: true
+      }));
+      const docFreq = df.get(term) || 0;
+      const idf = Math.log(1 + (fieldCount - docFreq + 0.5) / (docFreq + 0.5));
+      this.idfWeights.push(idf);
+    }
+    this.combineAll = options.tokenMatch === "all";
+    this.numTerms = this.termSearchers.length;
+    this.useMask = this.numTerms <= 31;
+  }
+  searchIn(text) {
+    if (!this.termSearchers.length) return {
+      isMatch: false,
+      score: 1
+    };
+    const allIndices = [];
+    let weightedScore = 0;
+    let maxPossibleScore = 0;
+    let matchedCount = 0;
+    let matchedMask = 0;
+    const matchedTerms = this.combineAll && !this.useMask ? /* @__PURE__ */ new Set() : null;
+    for (let i = 0; i < this.termSearchers.length; i++) {
+      const result = this.termSearchers[i].searchIn(text);
+      const idf = this.idfWeights[i];
+      maxPossibleScore += idf;
+      if (result.isMatch) {
+        matchedCount++;
+        weightedScore += idf * (1 - result.score);
+        if (result.indices) allIndices.push(...result.indices);
+        if (this.combineAll) if (this.useMask) matchedMask |= 1 << i;
+        else matchedTerms.add(i);
+      }
+    }
+    if (matchedCount === 0) return {
+      isMatch: false,
+      score: 1
+    };
+    const normalized = maxPossibleScore > 0 ? 1 - weightedScore / maxPossibleScore : 0;
+    const searchResult = {
+      isMatch: true,
+      score: Math.max(1e-3, normalized)
+    };
+    if (this.options.includeMatches && allIndices.length) searchResult.indices = mergeIndices(allIndices);
+    if (this.combineAll) {
+      if (this.useMask) searchResult.matchedMask = matchedMask;
+      else searchResult.matchedTerms = matchedTerms;
+      searchResult.termCount = this.numTerms;
+    }
+    return searchResult;
+  }
+};
+function addField(index, text, docIdx, analyzer) {
+  const tokens = analyzer.tokenize(text);
+  if (!tokens.length) return;
+  index.fieldCount++;
+  index.docFieldCount.set(docIdx, (index.docFieldCount.get(docIdx) || 0) + 1);
+  const distinctTerms = new Set(tokens);
+  let perDocTerms = index.docTermFieldHits.get(docIdx);
+  if (!perDocTerms) {
+    perDocTerms = /* @__PURE__ */ new Map();
+    index.docTermFieldHits.set(docIdx, perDocTerms);
+  }
+  for (const term of distinctTerms) {
+    perDocTerms.set(term, (perDocTerms.get(term) || 0) + 1);
+    index.df.set(term, (index.df.get(term) || 0) + 1);
+  }
+}
+function ingestRecord(index, record, keyCount, analyzer) {
+  const { i: docIdx, v, $: fields } = record;
+  if (v !== void 0) {
+    addField(index, v, docIdx, analyzer);
+    return;
+  }
+  if (!fields) return;
+  for (let keyIdx = 0; keyIdx < keyCount; keyIdx++) {
+    const value = fields[keyIdx];
+    if (!value) continue;
+    if (Array.isArray(value)) for (const sub of value) addField(index, sub.v, docIdx, analyzer);
+    else addField(index, value.v, docIdx, analyzer);
+  }
+}
+function buildInvertedIndex(records, keyCount, analyzer) {
+  const index = {
+    fieldCount: 0,
+    df: /* @__PURE__ */ new Map(),
+    docFieldCount: /* @__PURE__ */ new Map(),
+    docTermFieldHits: /* @__PURE__ */ new Map()
+  };
+  for (const record of records) ingestRecord(index, record, keyCount, analyzer);
+  return index;
+}
+function addToInvertedIndex(index, record, keyCount, analyzer) {
+  ingestRecord(index, record, keyCount, analyzer);
+}
+function removeFromInvertedIndex(index, docIdx) {
+  const fieldCount = index.docFieldCount.get(docIdx);
+  if (fieldCount === void 0) return;
+  index.fieldCount -= fieldCount;
+  index.docFieldCount.delete(docIdx);
+  const perDocTerms = index.docTermFieldHits.get(docIdx);
+  if (!perDocTerms) return;
+  for (const [term, hits] of perDocTerms) {
+    const next = (index.df.get(term) || 0) - hits;
+    if (next <= 0) index.df.delete(term);
+    else index.df.set(term, next);
+  }
+  index.docTermFieldHits.delete(docIdx);
+}
+function removeAndShiftInvertedIndex(index, removedIndices) {
+  if (removedIndices.length === 0) return;
+  const sorted = Array.from(new Set(removedIndices)).sort((a, b) => a - b);
+  for (const idx of sorted) removeFromInvertedIndex(index, idx);
+  const shift = (oldIdx) => {
+    let lo = 0;
+    let hi = sorted.length;
+    while (lo < hi) {
+      const mid = lo + hi >>> 1;
+      if (sorted[mid] < oldIdx) lo = mid + 1;
+      else hi = mid;
+    }
+    return oldIdx - lo;
+  };
+  const firstRemoved = sorted[0];
+  const shiftedDocFieldCount = /* @__PURE__ */ new Map();
+  for (const [oldKey, count] of index.docFieldCount) shiftedDocFieldCount.set(oldKey > firstRemoved ? shift(oldKey) : oldKey, count);
+  index.docFieldCount = shiftedDocFieldCount;
+  const shiftedDocTermFieldHits = /* @__PURE__ */ new Map();
+  for (const [oldKey, terms] of index.docTermFieldHits) shiftedDocTermFieldHits.set(oldKey > firstRemoved ? shift(oldKey) : oldKey, terms);
+  index.docTermFieldHits = shiftedDocTermFieldHits;
+}
+var Fuse = class {
+  constructor(docs, options, index) {
+    this.options = {
+      ...Config,
+      ...options
+    };
+    if (this.options.useExtendedSearch && false) ;
+    if (this.options.useTokenSearch && false) ;
+    this._keyStore = new KeyStore(this.options.keys);
+    this._docs = docs;
+    this._myIndex = null;
+    this._invertedIndex = null;
+    this.setCollection(docs, index);
+    this._lastQuery = null;
+    this._lastSearcher = null;
+  }
+  _getSearcher(query) {
+    if (this._lastQuery === query) return this._lastSearcher;
+    const searcher = createSearcher(query, this._invertedIndex ? {
+      ...this.options,
+      _invertedIndex: this._invertedIndex
+    } : this.options);
+    this._lastQuery = query;
+    this._lastSearcher = searcher;
+    return searcher;
+  }
+  setCollection(docs, index) {
+    this._docs = docs;
+    if (index && !(index instanceof FuseIndex)) throw new Error(INCORRECT_INDEX_TYPE);
+    this._myIndex = index || createIndex(this.options.keys, this._docs, {
+      getFn: this.options.getFn,
+      fieldNormWeight: this.options.fieldNormWeight
+    });
+    if (this.options.useTokenSearch) {
+      const analyzer = createAnalyzer({
+        isCaseSensitive: this.options.isCaseSensitive,
+        ignoreDiacritics: this.options.ignoreDiacritics,
+        tokenize: this.options.tokenize
+      });
+      this._invertedIndex = buildInvertedIndex(this._myIndex.records, this._myIndex.keys.length, analyzer);
+    }
+    this._invalidateSearcherCache();
+  }
+  add(doc) {
+    if (!isDefined(doc)) return;
+    this._docs.push(doc);
+    const record = this._myIndex.add(doc, this._docs.length - 1);
+    if (this._invertedIndex && record) {
+      const analyzer = createAnalyzer({
+        isCaseSensitive: this.options.isCaseSensitive,
+        ignoreDiacritics: this.options.ignoreDiacritics,
+        tokenize: this.options.tokenize
+      });
+      addToInvertedIndex(this._invertedIndex, record, this._myIndex.keys.length, analyzer);
+    }
+    this._invalidateSearcherCache();
+  }
+  remove(predicate = () => false) {
+    const results = [];
+    const indicesToRemove = [];
+    for (let i = 0, len = this._docs.length; i < len; i += 1) if (predicate(this._docs[i], i)) {
+      results.push(this._docs[i]);
+      indicesToRemove.push(i);
+    }
+    if (indicesToRemove.length) {
+      if (this._invertedIndex) removeAndShiftInvertedIndex(this._invertedIndex, indicesToRemove);
+      const toRemove = new Set(indicesToRemove);
+      this._docs = this._docs.filter((_, i) => !toRemove.has(i));
+      this._myIndex.removeAll(indicesToRemove);
+      this._invalidateSearcherCache();
+    }
+    return results;
+  }
+  removeAt(idx) {
+    if (!Number.isInteger(idx) || idx < 0 || idx >= this._docs.length) throw new Error(INVALID_DOC_INDEX);
+    if (this._invertedIndex) removeAndShiftInvertedIndex(this._invertedIndex, [idx]);
+    const doc = this._docs.splice(idx, 1)[0];
+    this._myIndex.removeAt(idx);
+    this._invalidateSearcherCache();
+    return doc;
+  }
+  _invalidateSearcherCache() {
+    this._lastQuery = null;
+    this._lastSearcher = null;
+  }
+  getIndex() {
+    return this._myIndex;
+  }
+  search(query, options) {
+    const { limit = -1 } = options || {};
+    const { includeMatches, includeScore, shouldSort, sortFn, ignoreFieldNorm } = this.options;
+    if (isString(query) && !query.trim()) {
+      let docs = this._docs.map((item, idx) => ({
+        item,
+        refIndex: idx
+      }));
+      if (isNumber(limit) && limit > -1) docs = docs.slice(0, limit);
+      return docs;
+    }
+    const useHeap = isNumber(limit) && limit > 0 && isString(query);
+    let results;
+    if (useHeap) {
+      const heap = new MaxHeap(limit);
+      if (isString(this._docs[0])) this._searchStringList(query, {
+        heap,
+        ignoreFieldNorm
+      });
+      else this._searchObjectList(query, {
+        heap,
+        ignoreFieldNorm
+      });
+      results = heap.extractSorted(sortFn);
+    } else {
+      results = isString(query) ? isString(this._docs[0]) ? this._searchStringList(query) : this._searchObjectList(query) : this._searchLogical(query);
+      computeScore(results, { ignoreFieldNorm });
+      if (shouldSort) results.sort(sortFn);
+      if (isNumber(limit) && limit > -1) results = results.slice(0, limit);
+    }
+    return format2(results, this._docs, {
+      includeMatches,
+      includeScore
+    });
+  }
+  _searchStringList(query, { heap, ignoreFieldNorm } = {}) {
+    const searcher = this._getSearcher(query);
+    const requireAllTokens = this.options.useTokenSearch && this.options.tokenMatch === "all";
+    const { records } = this._myIndex;
+    const results = heap ? null : [];
+    records.forEach(({ v: text, i: idx, n: norm2 }) => {
+      if (!isDefined(text)) return;
+      const searchResult = searcher.searchIn(text);
+      if (searchResult.isMatch) {
+        const match3 = {
+          score: searchResult.score,
+          value: text,
+          norm: norm2,
+          indices: searchResult.indices
+        };
+        if (requireAllTokens) {
+          match3.matchedMask = searchResult.matchedMask;
+          match3.matchedTerms = searchResult.matchedTerms;
+          match3.termCount = searchResult.termCount;
+        }
+        const matches = [match3];
+        if (!requireAllTokens || this._coversAllTokens(matches)) {
+          const result = {
+            item: text,
+            idx,
+            matches
+          };
+          if (heap) {
+            result.score = computeScoreSingle(result.matches, { ignoreFieldNorm });
+            if (heap.shouldInsert(result.score)) heap.insert(result);
+          } else results.push(result);
+        }
+      }
+    });
+    return results;
+  }
+  _searchLogical(query) {
+    const expression = parse(query, this.options);
+    const evaluate = (node, item, idx) => {
+      if (!("children" in node)) {
+        const { keyId, searcher } = node;
+        let matches;
+        if (keyId === null) {
+          matches = [];
+          this._myIndex.keys.forEach((key, keyIndex) => {
+            matches.push(...this._findMatches({
+              key,
+              value: item[keyIndex],
+              searcher
+            }));
+          });
+        } else matches = this._findMatches({
+          key: this._keyStore.get(keyId),
+          value: this._myIndex.getValueForItemAtKeyId(item, keyId),
+          searcher
+        });
+        if (matches && matches.length) return [{
+          idx,
+          item,
+          matches
+        }];
+        return [];
+      }
+      const { children, operator } = node;
+      const res = [];
+      for (let i = 0, len = children.length; i < len; i += 1) {
+        const child = children[i];
+        const result = evaluate(child, item, idx);
+        if (result.length) res.push(...result);
+        else if (operator === LogicalOperator.AND) return [];
+      }
+      return res;
+    };
+    const records = this._myIndex.records;
+    const resultMap = /* @__PURE__ */ new Map();
+    const results = [];
+    records.forEach(({ $: item, i: idx }) => {
+      if (isDefined(item)) {
+        const expResults = evaluate(expression, item, idx);
+        if (expResults.length) {
+          if (!resultMap.has(idx)) {
+            resultMap.set(idx, {
+              idx,
+              item,
+              matches: []
+            });
+            results.push(resultMap.get(idx));
+          }
+          expResults.forEach(({ matches }) => {
+            resultMap.get(idx).matches.push(...matches);
+          });
+        }
+      }
+    });
+    return results;
+  }
+  _searchObjectList(query, { heap, ignoreFieldNorm } = {}) {
+    const searcher = this._getSearcher(query);
+    const requireAllTokens = this.options.useTokenSearch && this.options.tokenMatch === "all";
+    const { keys, records } = this._myIndex;
+    const results = heap ? null : [];
+    records.forEach(({ $: item, i: idx }) => {
+      if (!isDefined(item)) return;
+      const matches = [];
+      let anyKeyFailed = false;
+      let hasInverse = false;
+      keys.forEach((key, keyIndex) => {
+        const keyMatches = this._findMatches({
+          key,
+          value: item[keyIndex],
+          searcher
+        });
+        if (keyMatches.length) {
+          matches.push(...keyMatches);
+          if (keyMatches[0].hasInverse) hasInverse = true;
+        } else anyKeyFailed = true;
+      });
+      if (hasInverse && anyKeyFailed) return;
+      if (matches.length && (!requireAllTokens || this._coversAllTokens(matches))) {
+        const result = {
+          idx,
+          item,
+          matches
+        };
+        if (heap) {
+          result.score = computeScoreSingle(result.matches, { ignoreFieldNorm });
+          if (heap.shouldInsert(result.score)) heap.insert(result);
+        } else results.push(result);
+      }
+    });
+    return results;
+  }
+  _findMatches({ key, value, searcher }) {
+    if (!isDefined(value)) return [];
+    const matches = [];
+    if (isArray(value)) value.forEach(({ v: text, i: idx, n: norm2 }) => {
+      if (!isDefined(text)) return;
+      const searchResult = searcher.searchIn(text);
+      if (searchResult.isMatch) {
+        const match3 = {
+          score: searchResult.score,
+          key,
+          value: text,
+          idx,
+          norm: norm2,
+          indices: searchResult.indices,
+          hasInverse: searchResult.hasInverse
+        };
+        if (searchResult.termCount !== void 0) {
+          match3.matchedMask = searchResult.matchedMask;
+          match3.matchedTerms = searchResult.matchedTerms;
+          match3.termCount = searchResult.termCount;
+        }
+        matches.push(match3);
+      }
+    });
+    else {
+      const { v: text, n: norm2 } = value;
+      const searchResult = searcher.searchIn(text);
+      if (searchResult.isMatch) {
+        const match3 = {
+          score: searchResult.score,
+          key,
+          value: text,
+          norm: norm2,
+          indices: searchResult.indices,
+          hasInverse: searchResult.hasInverse
+        };
+        if (searchResult.termCount !== void 0) {
+          match3.matchedMask = searchResult.matchedMask;
+          match3.matchedTerms = searchResult.matchedTerms;
+          match3.termCount = searchResult.termCount;
+        }
+        matches.push(match3);
+      }
+    }
+    return matches;
+  }
+  _coversAllTokens(matches) {
+    const termCount = matches.length ? matches[0].termCount : void 0;
+    if (termCount === void 0) return true;
+    if (termCount <= 31) {
+      let coverage2 = 0;
+      for (let i = 0; i < matches.length; i++) coverage2 |= matches[i].matchedMask || 0;
+      return coverage2 === 2 ** termCount - 1;
+    }
+    const coverage = /* @__PURE__ */ new Set();
+    for (let i = 0; i < matches.length; i++) {
+      const terms = matches[i].matchedTerms;
+      if (terms) for (const t of terms) coverage.add(t);
+    }
+    return coverage.size === termCount;
+  }
+};
+Fuse.version = "7.4.2";
+Fuse.createIndex = createIndex;
+Fuse.parseIndex = parseIndex;
+Fuse.config = Config;
+Fuse.match = function(pattern, text, options) {
+  if (options && options.useTokenSearch) throw new Error(FUSE_MATCH_TOKEN_SEARCH_UNSUPPORTED);
+  return createSearcher(pattern, {
+    ...Config,
+    ...options
+  }).searchIn(text);
+};
+Fuse.parseQuery = parse;
+register(ExtendedSearch);
+register(TokenSearch);
+Fuse.use = function(...plugins) {
+  plugins.forEach((plugin) => register(plugin));
+};
+var entry_default = Fuse;
+
+// src/lib/search.ts
+function toSearchable(members) {
+  return members.map((m) => ({
+    ...m,
+    _search: m.searchName || normalizeText(m.fullName),
+    _aliasSearch: (m.aliases || []).map(normalizeText).join(" ")
+  }));
+}
+function buildFuse(members) {
+  return new entry_default(members, {
+    includeScore: true,
+    ignoreLocation: true,
+    // el término puede aparecer en cualquier parte
+    threshold: 0.4,
+    // tolerante a errores de tipeo
+    minMatchCharLength: 2,
+    keys: [
+      { name: "_search", weight: 0.7 },
+      { name: "_aliasSearch", weight: 0.3 }
+    ]
+  });
+}
+function intersect(a, b) {
+  const out = /* @__PURE__ */ new Set();
+  for (const x of a) if (b.has(x)) out.add(x);
+  return out;
+}
+function searchMembers(fuse, all, query, limit = 30) {
+  const tokens = tokenize(query);
+  if (tokens.length === 0) return [];
+  const hits = /* @__PURE__ */ new Map();
+  const scoreById = /* @__PURE__ */ new Map();
+  let candidateIds = null;
+  for (const token of tokens) {
+    let ids;
+    if (token.length < 2) {
+      ids = new Set(
+        all.filter(
+          (m) => m._search.includes(token) || m._aliasSearch.includes(token)
+        ).map((m) => m.id)
+      );
+    } else {
+      ids = /* @__PURE__ */ new Set();
+      for (const r of fuse.search(token)) {
+        ids.add(r.item.id);
+        const s = r.score ?? 1;
+        scoreById.set(r.item.id, (scoreById.get(r.item.id) ?? 0) + s);
+      }
+    }
+    for (const id of ids) hits.set(id, (hits.get(id) ?? 0) + 1);
+    candidateIds = candidateIds ? intersect(candidateIds, ids) : ids;
+  }
+  const byId = new Map(all.map((m) => [m.id, m]));
+  const ordenar = (ids) => [...ids].map((id) => byId.get(id)).filter((m) => Boolean(m)).sort(
+    (a, b) => (hits.get(b.id) ?? 0) - (hits.get(a.id) ?? 0) || (scoreById.get(a.id) ?? 1) - (scoreById.get(b.id) ?? 1) || a.fullName.localeCompare(b.fullName, "es")
+  ).slice(0, limit);
+  if (candidateIds && candidateIds.size > 0) return ordenar(candidateIds);
+  const largas = tokens.filter((t) => t.length >= 2).length;
+  if (largas < 2) return [];
+  const casi = [...hits].filter(([, n]) => n >= tokens.length - 1).map(([id]) => id);
+  const out = ordenar(casi);
+  out.partial = out.length > 0;
+  return out;
+}
+function editDistance(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      const v = Math.min(
+        prev[j] + 1,
+        cur[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+      cur.push(v);
+      if (v < rowMin) rowMin = v;
+    }
+    if (rowMin > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+function sameWord(a, b) {
+  if (a === b) return true;
+  if (a.length < 4 || b.length < 4) return false;
+  return editDistance(a, b, 1) <= 1;
+}
+function findSimilarMembers(members, name, limit = 6) {
+  const buscado = normalizeText(name);
+  const palabras = buscado.split(" ").filter((w) => w.length >= 2);
+  if (palabras.length === 0) return [];
+  const necesarias = Math.min(2, palabras.length);
+  const out = [];
+  for (const m of members) {
+    const propio = m.searchName || normalizeText(m.fullName);
+    const nombres = [propio, ...(m.aliases ?? []).map(normalizeText)];
+    let mejor = 0;
+    let exacto = false;
+    let fichaCorta = false;
+    for (const n of nombres) {
+      if (n === buscado) exacto = true;
+      const suyas = n.split(" ").filter(Boolean);
+      const matched = palabras.length === 1 ? suyas.length > 0 && sameWord(palabras[0], suyas[0]) ? 1 : 0 : palabras.filter((w) => suyas.some((s) => sameWord(w, s))).length;
+      if (matched > mejor) mejor = matched;
+      if (suyas.length === 1 && palabras.length > 1 && sameWord(palabras[0], suyas[0])) {
+        fichaCorta = true;
+      }
+    }
+    if (exacto || mejor >= necesarias || fichaCorta) {
+      out.push({ member: m, exact: exacto, matched: exacto ? palabras.length : mejor });
+    }
+  }
+  return out.sort(
+    (a, b) => Number(b.exact) - Number(a.exact) || b.matched - a.matched || a.member.fullName.localeCompare(b.member.fullName, "es")
+  ).slice(0, limit);
+}
+
+// src/lib/ids.ts
+function hashCorto(s) {
+  let a = 2166136261;
+  let b = 16777619 ^ 1540483477;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    a = Math.imul(a ^ c, 16777619) >>> 0;
+    b = Math.imul(b ^ c, 16777629) >>> 0;
+  }
+  return a.toString(36) + b.toString(36);
+}
+var walkinId = (sessionId, searchName) => `p_${hashCorto(`${sessionId}|${searchName}`)}`;
+var sessionIdDelDia = (type, dia) => `${type}-${dia}`;
 
 // src/lib/activity.ts
 var GROUP_ORDER = [
@@ -2271,25 +4073,44 @@ var GROUP_ORDER = [
   "dormidas"
 ];
 function buildActivityReport(sessions, attendance, type, ventana, hoy = /* @__PURE__ */ new Date()) {
-  const finDeHoy = new Date(
-    hoy.getFullYear(),
-    hoy.getMonth(),
-    hoy.getDate(),
-    23,
-    59,
-    59,
-    999
-  ).getTime();
-  const realizadas2 = sessions.filter((s) => s.type === type && toDate2(s.date).getTime() <= finDeHoy).sort((a, b) => toDate2(b.date).getTime() - toDate2(a.date).getTime());
+  const finDeHoy = endOfTodayBogota(hoy).getTime() - 1;
+  const presentesDe = /* @__PURE__ */ new Map();
+  for (const a of attendance) {
+    if (a.sessionType !== type) continue;
+    if (toDate2(a.sessionDate).getTime() > finDeHoy) continue;
+    let set = presentesDe.get(a.sessionId);
+    if (!set) presentesDe.set(a.sessionId, set = /* @__PURE__ */ new Set());
+    set.add(a.memberId);
+  }
+  const porDia = /* @__PURE__ */ new Map();
+  for (const s of sessions) {
+    if (s.type !== type || toDate2(s.date).getTime() > finDeHoy) continue;
+    const gente = presentesDe.get(s.id);
+    if (!gente || gente.size === 0) continue;
+    const k = dayKey(s.date);
+    const r = porDia.get(k);
+    if (!r) {
+      porDia.set(k, { session: s, ids: /* @__PURE__ */ new Set([s.id]), gente: new Set(gente) });
+    } else {
+      r.ids.add(s.id);
+      gente.forEach((m) => r.gente.add(m));
+      if (gente.size > (presentesDe.get(r.session.id)?.size ?? 0)) r.session = s;
+    }
+  }
+  const realizadas2 = [...porDia.values()].sort(
+    (a, b) => toDate2(b.session.date).getTime() - toDate2(a.session.date).getTime()
+  );
   const recientesS = realizadas2.slice(0, ventana);
   const previasS = realizadas2.slice(ventana, ventana * 2);
-  const idsRecientes = new Set(recientesS.map((s) => s.id));
-  const idsPrevias = new Set(previasS.map((s) => s.id));
+  const diaReciente = /* @__PURE__ */ new Map();
+  const diaPrevio = /* @__PURE__ */ new Map();
+  for (const r of recientesS) r.ids.forEach((id) => diaReciente.set(id, dayKey(r.session.date)));
+  for (const r of previasS) r.ids.forEach((id) => diaPrevio.set(id, dayKey(r.session.date)));
   const mapa = /* @__PURE__ */ new Map();
-  const presentesPorSesion = /* @__PURE__ */ new Map();
   for (const a of attendance) {
     if (a.sessionType !== type) continue;
     const fecha = toDate2(a.sessionDate);
+    if (fecha.getTime() > finDeHoy) continue;
     let p = mapa.get(a.memberId);
     if (!p) {
       p = {
@@ -2299,7 +4120,9 @@ function buildActivityReport(sessions, attendance, type, ventana, hoy = /* @__PU
         previas: 0,
         primera: fecha,
         ultima: fecha,
-        grupo: "dormidas"
+        grupo: "dormidas",
+        _rec: /* @__PURE__ */ new Set(),
+        _prev: /* @__PURE__ */ new Set()
       };
       mapa.set(a.memberId, p);
     }
@@ -2308,20 +4131,19 @@ function buildActivityReport(sessions, attendance, type, ventana, hoy = /* @__PU
       p.fullName = a.fullName;
     }
     if (fecha.getTime() < p.primera.getTime()) p.primera = fecha;
-    if (idsRecientes.has(a.sessionId)) {
-      p.recientes++;
-      presentesPorSesion.set(
-        a.sessionId,
-        (presentesPorSesion.get(a.sessionId) ?? 0) + 1
-      );
-    } else if (idsPrevias.has(a.sessionId)) {
-      p.previas++;
-    }
+    const dr = diaReciente.get(a.sessionId);
+    const dp = diaPrevio.get(a.sessionId);
+    if (dr) p._rec.add(dr);
+    else if (dp) p._prev.add(dp);
+  }
+  for (const p of mapa.values()) {
+    p.recientes = p._rec.size;
+    p.previas = p._prev.size;
   }
   const umbralFirmes = Math.max(1, Math.ceil(recientesS.length * 0.6));
-  const inicioVentana = recientesS.length ? toDate2(recientesS[recientesS.length - 1].date).getTime() : null;
+  const inicioVentana = recientesS.length ? toDate2(recientesS[recientesS.length - 1].session.date).getTime() : null;
   const inicioMitad = recientesS.length ? toDate2(
-    recientesS[Math.ceil(recientesS.length / 2) - 1].date
+    recientesS[Math.ceil(recientesS.length / 2) - 1].session.date
   ).getTime() : null;
   const puedeDetectarNuevas = previasS.length > 0;
   const grupos = {
@@ -2347,7 +4169,7 @@ function buildActivityReport(sessions, attendance, type, ventana, hoy = /* @__PU
     }
     grupos[p.grupo]++;
   }
-  const personas = [...mapa.values()].sort(
+  const personas = [...mapa.values()].map(({ _rec: _r, _prev: _p, ...p }) => p).sort(
     (a, b) => GROUP_ORDER.indexOf(a.grupo) - GROUP_ORDER.indexOf(b.grupo) || b.recientes - a.recientes || b.ultima.getTime() - a.ultima.getTime() || a.fullName.localeCompare(b.fullName, "es")
   );
   let totalRec = 0;
@@ -2365,15 +4187,16 @@ function buildActivityReport(sessions, attendance, type, ventana, hoy = /* @__PU
     ventana,
     // De la más antigua a la más nueva: así se lee la tendencia de izquierda
     // a derecha, como en el gráfico por mes del resumen.
-    recientes: [...recientesS].reverse().map((session) => ({
-      session,
-      presentes: presentesPorSesion.get(session.id) ?? 0
+    recientes: [...recientesS].reverse().map((r) => ({
+      session: r.session,
+      presentes: r.gente.size
     })),
     previasCount: previasS.length,
-    desde: recientesS.length ? toDate2(recientesS[recientesS.length - 1].date) : null,
-    hasta: recientesS.length ? toDate2(recientesS[0].date) : null,
+    desde: recientesS.length ? toDate2(recientesS[recientesS.length - 1].session.date) : null,
+    hasta: recientesS.length ? toDate2(recientesS[0].session.date) : null,
     activas,
     activasPrevias,
+    activasComparables: previasS.length > 0 && previasS.length === recientesS.length,
     promedio: recientesS.length ? totalRec / recientesS.length : 0,
     promedioPrevio: previasS.length ? totalPrev / previasS.length : 0,
     umbralFirmes,
@@ -2403,7 +4226,7 @@ function resumenActividad(r, conNombres = true) {
   const lineas = [
     `${SESSION_TYPE_LABELS[r.type]} \u2014 \xFAltimas ${n} reuniones (${fmtDate(r.desde)} a ${fmtDate(r.hasta)})`,
     "",
-    `PERSONAS DISTINTAS QUE VINIERON: ${r.activas}${cmp(r.activas, r.activasPrevias)}`,
+    `PERSONAS DISTINTAS QUE VINIERON: ${r.activas}${r.activasComparables || r.previasCount === 0 ? cmp(r.activas, r.activasPrevias) : ` (el per\xEDodo anterior solo tuvo ${r.previasCount} reuni\xF3n(es): no es comparable)`}`,
     `Promedio de presentes por reuni\xF3n: ${Math.round(r.promedio * 10) / 10}${cmp(
       r.promedio,
       r.promedioPrevio
@@ -2442,8 +4265,8 @@ var TIPOS = {
   ego: "reduccion_ego"
 };
 function realizadas(sessions, hoy) {
-  const t = hoy.getTime();
-  return sessions.filter((s) => toDate2(s.date).getTime() <= t);
+  const hoyKey = dayKey(hoy);
+  return sessions.filter((s) => dayKey(s.date) <= hoyKey);
 }
 function informeComoVamos(sessions, attendance, tipo, ventana, conNombres, hoy = /* @__PURE__ */ new Date()) {
   return resumenActividad(
@@ -2454,9 +4277,10 @@ function informeComoVamos(sessions, attendance, tipo, ventana, conNombres, hoy =
 function informeConteos(sessions, personas, hoy = /* @__PURE__ */ new Date()) {
   const hechas = realizadas(sessions, hoy);
   const porTipo = (t) => hechas.filter((s) => s.type === t).length;
+  const oficiales = personas.filter((p) => !p.pendingReview);
   return [
-    `Personas en la lista: ${personas.filter((p) => p.active !== false).length} activas de ${personas.length}`,
-    `Esperando revisi\xF3n (walk-ins): ${personas.filter((p) => p.pendingReview).length}`,
+    `Personas en la lista oficial: ${oficiales.filter((p) => p.active !== false).length} activas de ${oficiales.length}`,
+    `Esperando revisi\xF3n (agregadas en una reuni\xF3n): ${personas.filter((p) => p.pendingReview).length}`,
     `Sin nombre todav\xEDa ("Por identificar"): ${personas.filter((p) => p.pendingIdentify).length}`,
     `Reuniones realizadas: ${hechas.length} (Pasos: ${porTipo("entrega_pasos")}, Ego: ${porTipo("reduccion_ego")})`,
     `Reuniones agendadas a futuro: ${sessions.length - hechas.length}`,
@@ -2468,18 +4292,27 @@ function informeReuniones(sessions, attendance, tipo, limite, hoy = /* @__PURE__
   for (const a of attendance) {
     presentes.set(a.sessionId, (presentes.get(a.sessionId) ?? 0) + 1);
   }
-  const lista = sessions.filter((s) => tipo === "todas" || s.type === TIPOS[tipo]).sort((a, b) => toDate2(b.date).getTime() - toDate2(a.date).getTime()).slice(0, limite);
-  if (lista.length === 0) return "No hay reuniones registradas.";
-  return lista.map((s) => {
-    const aunNoOcurre = toDate2(s.date).getTime() > hoy.getTime();
-    return `${fmtDate(s.date)} \xB7 ${SESSION_TYPE_LABELS[s.type]} \xB7 ${MODALITY_LABELS[s.modality]} \xB7 ` + (aunNoOcurre ? "AGENDADA (todav\xEDa no ocurre)" : `${presentes.get(s.id) ?? 0} presentes`) + (s.coordinator ? ` \xB7 coordin\xF3 ${s.coordinator}` : "") + (s.status === "open" ? " \xB7 ABIERTA" : "") + `
+  const delTipo = sessions.filter((s) => tipo === "todas" || s.type === TIPOS[tipo]).sort((a, b) => toDate2(b.date).getTime() - toDate2(a.date).getTime());
+  if (delTipo.length === 0) return "No hay reuniones registradas.";
+  const hoyKey = dayKey(hoy);
+  const hechas = delTipo.filter((s) => dayKey(s.date) <= hoyKey).slice(0, limite);
+  const proximas = delTipo.filter((s) => dayKey(s.date) > hoyKey).reverse().slice(0, limite);
+  const linea = (s) => {
+    const n = presentes.get(s.id) ?? 0;
+    const futura = dayKey(s.date) > hoyKey;
+    return `${fmtDate(s.date)} \xB7 ${SESSION_TYPE_LABELS[s.type]} \xB7 ${MODALITY_LABELS[s.modality]} \xB7 ` + // Una reunión agendada saldría como "0 presentes", que se lee igual que
+    // "no fue nadie". Y si ya tiene gente marcada, algo se marcó por error.
+    (futura ? n > 0 ? `\u26A0\uFE0F AGENDADA pero ya tiene ${n} presentes (\xBFse marc\xF3 en la reuni\xF3n equivocada?)` : "AGENDADA (todav\xEDa no ocurre)" : `${n} presentes`) + (s.coordinator ? ` \xB7 coordin\xF3 ${s.coordinator}` : "") + (s.status === "open" ? daysFromToday(s.date, hoy) < -1 ? " \xB7 \u26A0\uFE0F SIGUE ABIERTA (falta cerrarla)" : " \xB7 ABIERTA" : "") + `
   id: ${s.id}`;
-  }).join("\n");
+  };
+  return [
+    ...hechas.length ? ["Recientes:", ...hechas.map(linea)] : ["Todav\xEDa no hay reuniones realizadas."],
+    ...proximas.length ? ["", "Agendadas:", ...proximas.map(linea)] : []
+  ].join("\n");
 }
-function informeAsistenciaReunion(sessions, attendance, reunionId) {
-  const s = sessions.find((x) => x.id === reunionId);
+function informeAsistenciaReunion(s, asistentes, reunionId) {
   if (!s) return `No existe ninguna reuni\xF3n con id ${reunionId}.`;
-  const gente = attendance.filter((a) => a.sessionId === reunionId).sort((a, b) => a.fullName.localeCompare(b.fullName, "es"));
+  const gente = [...asistentes].sort((a, b) => a.fullName.localeCompare(b.fullName, "es"));
   return [
     `${SESSION_TYPE_LABELS[s.type]} \u2014 ${fmtDate(s.date)} \xB7 ${MODALITY_LABELS[s.modality]}` + (s.coordinator ? ` \xB7 coordin\xF3 ${s.coordinator}` : ""),
     `${gente.length} presentes:`,
@@ -2487,27 +4320,34 @@ function informeAsistenciaReunion(sessions, attendance, reunionId) {
   ].join("\n");
 }
 function informeBuscarPersona(personas, nombre) {
-  const palabras = normalizeText(nombre).split(/\s+/).filter(Boolean);
-  const encontradas = personas.filter((p) => {
-    const objetivo = p.searchName || normalizeText(p.fullName);
-    return palabras.every((w) => objetivo.includes(w));
-  }).slice(0, 25);
-  if (encontradas.length === 0) return `Nadie coincide con "${nombre}".`;
-  return encontradas.map(
-    (p) => `${p.fullName}` + (p.active === false ? " (inactiva)" : "") + (p.pendingReview ? " (esperando revisi\xF3n)" : "") + (p.pendingIdentify ? " (sin nombre confirmado)" : "") + `
+  const todas = toSearchable(personas);
+  const encontradas = searchMembers(buildFuse(todas), todas, nombre, 25);
+  if (encontradas.length === 0) {
+    return `Nadie coincide con "${nombre}". Antes de crear una ficha nueva, prueba con solo el primer nombre o solo el apellido.`;
+  }
+  return [
+    ...encontradas.partial ? [`Nadie coincide con todo "${nombre}". Estas personas coinciden en casi todo:`, ""] : [],
+    ...encontradas.map(
+      (p) => `${p.fullName}` + (p.aliases?.length ? ` (tambi\xE9n: ${p.aliases.join(", ")})` : "") + (p.active === false ? " (inactiva)" : "") + (p.pendingReview ? " (esperando revisi\xF3n)" : "") + (p.pendingIdentify ? " (sin nombre confirmado)" : "") + `
   id: ${p.id}`
-  ).join("\n");
+    )
+  ].join("\n");
 }
 function informeHistorial(sessions, attendance, personas, personaId, hoy = /* @__PURE__ */ new Date()) {
-  const persona = personas.find((p) => p.id === personaId);
+  const persona2 = personas.find((p) => p.id === personaId);
   const suyas = attendance.filter((a) => a.memberId === personaId).sort((a, b) => toDate2(b.sessionDate).getTime() - toDate2(a.sessionDate).getTime());
-  if (!persona && suyas.length === 0) {
+  if (!persona2 && suyas.length === 0) {
     return `No existe ninguna persona con id ${personaId}.`;
   }
-  const nombre = persona?.fullName ?? suyas[0]?.fullName ?? personaId;
+  const nombre = persona2?.fullName ?? suyas[0]?.fullName ?? personaId;
   const cuenta = (t) => suyas.filter((a) => a.sessionType === t).length;
-  const hechas = (t) => realizadas(sessions, hoy).filter((s) => s.type === t).length;
-  const pct = (h, total) => total > 0 ? ` (${Math.round(h / total * 100)}% de ${total})` : "";
+  const hechas = (t) => {
+    const propias = suyas.filter((a) => a.sessionType === t);
+    if (propias.length === 0) return 0;
+    const desde = dayKey(propias[propias.length - 1].sessionDate);
+    return realizadas(sessions, hoy).filter((s) => s.type === t && dayKey(s.date) >= desde).length;
+  };
+  const pct = (h, total) => total > 0 ? ` (${Math.round(Math.min(h, total) / total * 100)}% de las ${total} desde que lleg\xF3)` : "";
   return [
     `${nombre}`,
     `Total de asistencias: ${suyas.length}`,
@@ -2523,36 +4363,56 @@ function informeHistorial(sessions, attendance, personas, personaId, hoy = /* @_
   ].filter(Boolean).join("\n");
 }
 function informePorRevisar(personas) {
-  const pendientes = personas.filter((p) => p.pendingReview || p.pendingIdentify);
-  if (pendientes.length === 0) return "No hay nadie esperando revisi\xF3n.";
-  return pendientes.map(
-    (p) => `${p.fullName}` + (p.pendingIdentify ? " (sin nombre confirmado)" : "") + (p.createdByName ? ` \xB7 la registr\xF3 ${p.createdByName}` : "") + (p.sourceSessionDate ? ` \xB7 el ${fmtDate(p.sourceSessionDate)}` : "") + `
-  id: ${p.id}`
-  ).join("\n");
+  const ficha = (p) => `${p.fullName}` + (p.pendingIdentify ? " (sin nombre confirmado)" : "") + (p.createdByName ? ` \xB7 la registr\xF3 ${p.createdByName}` : "") + (p.sourceSessionDate ? ` \xB7 el ${fmtDate(p.sourceSessionDate)}` : "") + `
+  id: ${p.id}`;
+  const porRevisar = personas.filter((p) => p.pendingReview);
+  const sinNombre = personas.filter((p) => !p.pendingReview && p.pendingIdentify);
+  if (porRevisar.length === 0 && sinNombre.length === 0) {
+    return "No hay nadie esperando revisi\xF3n.";
+  }
+  return [
+    porRevisar.length ? `Esperando revisi\xF3n (${porRevisar.length}):` : "No hay nadie esperando revisi\xF3n.",
+    ...porRevisar.map(ficha),
+    ...sinNombre.length ? [
+      "",
+      `Ya en la lista pero SIN nombre real (${sinNombre.length}) \u2014 se corrigen en la app, Personas \u2192 Editar:`,
+      ...sinNombre.map(ficha)
+    ] : []
+  ].join("\n");
 }
 
 // mcp/src/escrituras.ts
 var VIGENCIA_MS = 15 * 6e4;
+var huella = (json) => createHash("sha256").update(json).digest("base64url").slice(0, 16);
 function empaquetar(o) {
-  return Buffer.from(JSON.stringify(o), "utf8").toString("base64url");
+  const json = JSON.stringify(o);
+  return `${Buffer.from(json, "utf8").toString("base64url")}.${huella(json)}`;
 }
 function desempaquetar(id, uid) {
+  const [cuerpo, firma] = id.trim().split(".");
+  let json = "";
   let o;
   try {
-    o = JSON.parse(Buffer.from(id, "base64url").toString("utf8"));
+    json = Buffer.from(cuerpo ?? "", "base64url").toString("utf8");
+    o = JSON.parse(json);
   } catch {
-    throw new AccesoError("Ese identificador de confirmaci\xF3n no es v\xE1lido.");
+    throw new AccesoError("Ese identificador de confirmaci\xF3n no es v\xE1lido. Prepara la operaci\xF3n de nuevo.");
+  }
+  if (!firma || firma !== huella(json)) {
+    throw new AccesoError(
+      "Ese identificador de confirmaci\xF3n lleg\xF3 alterado (\xBFse copi\xF3 incompleto?). No se ejecut\xF3 nada: prepara la operaci\xF3n de nuevo."
+    );
   }
   if (o.uid !== uid) {
     throw new AccesoError("Esa operaci\xF3n la prepar\xF3 otra cuenta. Prep\xE1rala de nuevo.");
   }
-  if (Date.now() > o.exp) {
+  if (typeof o.exp !== "number" || Date.now() > o.exp) {
     throw new AccesoError("El borrador caduc\xF3 (dura 15 minutos). Prep\xE1ralo de nuevo.");
   }
   return o;
 }
 function borrador(uid, op, args, resumen) {
-  const o = { op, args, uid, exp: Date.now() + VIGENCIA_MS, resumen };
+  const o = { op, args, uid, exp: Date.now() + VIGENCIA_MS };
   return [
     "BORRADOR \u2014 todav\xEDa no se ha guardado nada.",
     "",
@@ -2570,89 +4430,177 @@ function idNuevo() {
   for (let i = 0; i < 20; i++) s += abc[Math.floor(Math.random() * abc.length)];
   return s;
 }
-async function prepararCrearReunion(c, tipo, modalidad, fecha, coordinadora) {
-  const d = /* @__PURE__ */ new Date(`${fecha}T12:00:00`);
-  if (isNaN(d.getTime())) throw new AccesoError(`La fecha "${fecha}" no se entiende. Usa AAAA-MM-DD.`);
+var ID_VALIDO = /^[A-Za-z0-9_-]{1,80}$/;
+function idDe(v, que) {
+  const s = String(v ?? "").trim();
+  if (!ID_VALIDO.test(s)) throw new AccesoError(`El id de ${que} ("${s}") no es v\xE1lido.`);
+  return s;
+}
+function tipoDe(v) {
+  if (v === "pasos" || v === "ego") return v;
+  throw new AccesoError('El tipo tiene que ser "pasos" o "ego".');
+}
+function modalidadDe(v) {
+  if (MODALITIES.includes(String(v))) return v;
+  throw new AccesoError('La modalidad tiene que ser "presencial" o "virtual".');
+}
+function fechaDe(v) {
+  const s = String(v ?? "").trim();
+  if (!isValidDateKey(s)) throw new AccesoError(`La fecha "${s}" no se entiende. Usa AAAA-MM-DD.`);
+  return s;
+}
+async function reunion(c, id) {
+  const s = await c.leer(`sessions/${id}`);
+  if (!s) {
+    throw new AccesoError(
+      `No existe ninguna reuni\xF3n con id ${id}. B\xFAscala con la herramienta "reuniones".`
+    );
+  }
+  return s;
+}
+async function persona(c, id) {
+  const p = await c.leer(`members/${id}`);
+  if (!p) {
+    throw new AccesoError(
+      `No existe ninguna persona con id ${id} (quiz\xE1 la unieron con otra ficha). B\xFAscala de nuevo con "buscar_persona".`
+    );
+  }
+  return p;
+}
+var describir = (s) => `${SESSION_TYPE_LABELS[s.type]} del ${fmtDate(s.date)} (${MODALITY_LABELS[s.modality]})`;
+function exigirQueYaOcurrio(s) {
+  if (daysFromToday(s.date) > 0) {
+    throw new AccesoError(
+      `Esa reuni\xF3n es del ${fmtDate(s.date)}: todav\xEDa no ha ocurrido, as\xED que no se puede tomar lista en ella. Revisa el id con la herramienta "reuniones".`
+    );
+  }
+}
+function avisoSiSigueAbierta(s) {
+  return s.status === "open" && daysFromToday(s.date) < 0 ? [
+    "",
+    'Esta reuni\xF3n sigue ABIERTA aunque ya pas\xF3. Cuando termines de pasar la lista, ci\xE9rrala con "preparar_cerrar_reunion".'
+  ] : [];
+}
+async function presentesEn(c, reunionId) {
+  return (await c.asistenciaDe(reunionId)).length;
+}
+function asistenciaNueva(c, s, memberId, fullName) {
+  return {
+    memberId,
+    fullName,
+    status: "present",
+    checkedInAt: /* @__PURE__ */ new Date(),
+    checkedInBy: c.uid,
+    checkedInByName: c.nombre,
+    sessionId: s.id,
+    sessionType: s.type,
+    modality: s.modality,
+    sessionDate: toDate2(s.date)
+  };
+}
+async function prepararCrearReunion(c, tipoRaw, modalidadRaw, fechaRaw, coordinadora, otraMas = false) {
+  const tipo = tipoDe(tipoRaw);
+  const modalidad = modalidadDe(modalidadRaw);
+  const fecha = fechaDe(fechaRaw);
   const type = TIPOS[tipo];
+  const d = sessionDateFromKey(fecha);
+  olvidar(c.uid);
   const yaHay = (await c.cargarSesiones()).filter(
-    (s) => s.type === type && toDate2(s.date).toDateString() === d.toDateString()
+    (s) => s.type === type && dayKey(s.date) === fecha
   );
+  if (yaHay.length && !otraMas) {
+    throw new AccesoError(
+      [
+        `Ya existe una reuni\xF3n de ${SESSION_TYPE_LABELS[type]} el ${fmtDate(d)}:`,
+        ...yaHay.map((s) => `  id: ${s.id}${s.status === "open" ? " (abierta)" : " (cerrada)"}`),
+        "Usa esa; no hace falta crear otra. Si de verdad es OTRA reuni\xF3n el mismo d\xEDa, prepara de nuevo con otra_mas=true."
+      ].join("\n")
+    );
+  }
+  const id = yaHay.length ? idNuevo() : sessionIdDelDia(type, fecha);
+  const dias = daysFromToday(d);
   return borrador(
     c.uid,
     "crear_reunion",
-    { tipo, modalidad, fecha, coordinadora: coordinadora ?? "" },
+    { id, tipo, modalidad, fecha, coordinadora: (coordinadora ?? "").trim() },
     [
       `Crear reuni\xF3n de ${SESSION_TYPE_LABELS[type]}`,
       `  Fecha: ${fmtDate(d)}`,
       `  Modalidad: ${MODALITY_LABELS[modalidad]}`,
-      `  Coordina: ${coordinadora || "sin asignar"}`,
+      `  Coordina: ${coordinadora?.trim() || "sin asignar"}`,
       `  Queda ABIERTA para tomar asistencia.`,
-      ...yaHay.length ? ["", `\u26A0\uFE0F OJO: ya existe ${yaHay.length} reuni\xF3n de ese tipo ese mismo d\xEDa.`] : []
+      ...yaHay.length ? ["", `\u26A0\uFE0F Ser\xE1 la reuni\xF3n n\xFAmero ${yaHay.length + 1} de ese tipo ese d\xEDa.`] : [],
+      ...dias < 0 ? [
+        "",
+        'Es de un d\xEDa que ya pas\xF3: despu\xE9s de pasar la lista, ci\xE9rrala con "preparar_cerrar_reunion" para que nadie la siga modificando.'
+      ] : [],
+      ...dias > 0 ? ["", "Queda AGENDADA: no se podr\xE1 tomar lista en ella hasta ese d\xEDa."] : []
     ].join("\n")
   );
 }
-async function prepararMarcar(c, reunionId, personaId, quitar) {
-  const sesion = (await c.cargarSesiones()).find((s) => s.id === reunionId);
-  if (!sesion) throw new AccesoError(`No existe ninguna reuni\xF3n con id ${reunionId}.`);
-  const persona = (await c.cargarPersonas()).find((p) => p.id === personaId);
-  if (!persona) throw new AccesoError(`No existe ninguna persona con id ${personaId}.`);
-  const yaEsta = (await c.cargarAsistencia()).some(
-    (a) => a.sessionId === reunionId && a.memberId === personaId
-  );
-  if (quitar && !yaEsta) throw new AccesoError(`${persona.fullName} no figura en esa reuni\xF3n.`);
-  if (!quitar && yaEsta) throw new AccesoError(`${persona.fullName} ya figura como presente.`);
+async function prepararMarcar(c, reunionRaw, personaRaw, quitar) {
+  const reunionId = idDe(reunionRaw, "la reuni\xF3n");
+  const personaId = idDe(personaRaw, "la persona");
+  const [sesion, ficha, registro] = await Promise.all([
+    reunion(c, reunionId),
+    persona(c, personaId),
+    c.leer(`sessions/${reunionId}/attendance/${personaId}`)
+  ]);
+  if (!quitar) exigirQueYaOcurrio(sesion);
+  if (quitar && !registro) throw new AccesoError(`${ficha.fullName} no figura en esa reuni\xF3n.`);
+  if (!quitar && registro) throw new AccesoError(`${ficha.fullName} ya figura como presente.`);
   return borrador(
     c.uid,
     quitar ? "quitar_presente" : "marcar_presente",
     { reunionId, personaId },
     [
       quitar ? "QUITAR de la lista de asistencia:" : "MARCAR como presente:",
-      `  ${persona.fullName}`,
-      `  en ${SESSION_TYPE_LABELS[sesion.type]} del ${fmtDate(sesion.date)} (${MODALITY_LABELS[sesion.modality]})`,
+      `  ${ficha.fullName}` + (ficha.pendingReview ? " (por revisar)" : "") + (ficha.active === false ? " (ficha inactiva)" : ""),
+      `  en ${describir(sesion)}`,
       ...sesion.status === "closed" ? ["", "Esa reuni\xF3n est\xE1 CERRADA; se corrige igual por ser administraci\xF3n."] : []
     ].join("\n")
   );
 }
-async function prepararAgregarParticipante(c, reunionId, nombreRaw) {
-  const sesion = (await c.cargarSesiones()).find((s) => s.id === reunionId);
-  if (!sesion) throw new AccesoError(`No existe ninguna reuni\xF3n con id ${reunionId}.`);
-  const { fullName } = buildNameParts(nombreRaw);
-  if (fullName.length < 3) throw new AccesoError("El nombre es demasiado corto.");
-  const buscado = normalizeText(fullName);
-  const [personas, asistencia] = await Promise.all([c.cargarPersonas(), c.cargarAsistencia()]);
-  const yaEnLaReunion = asistencia.find(
-    (a) => a.sessionId === reunionId && normalizeText(a.fullName) === buscado
-  );
+async function prepararAgregarParticipante(c, reunionRaw, nombreRaw) {
+  const reunionId = idDe(reunionRaw, "la reuni\xF3n");
+  const parts = buildNameParts(String(nombreRaw ?? ""));
+  if (parts.fullName.length < 3) throw new AccesoError("El nombre es demasiado corto.");
+  if (parts.fullName.startsWith(UNKNOWN_PREFIX)) {
+    throw new AccesoError("Hace falta el nombre de la persona (aunque sea solo el primer nombre).");
+  }
+  const sesion = await reunion(c, reunionId);
+  exigirQueYaOcurrio(sesion);
+  const [asistentes, personas] = await Promise.all([c.asistenciaDe(reunionId), c.cargarPersonas()]);
+  const yaEnLaReunion = asistentes.find((a) => normalizeText(a.fullName) === parts.searchName);
   if (yaEnLaReunion) throw new AccesoError(`${yaEnLaReunion.fullName} ya figura en esa reuni\xF3n.`);
-  const palabras = buscado.split(" ").filter((p) => p.length > 2);
-  const parecidas = personas.filter((p) => {
-    const suyas = new Set(normalizeText(p.fullName).split(" "));
-    const comunes = palabras.filter((w) => suyas.has(w)).length;
-    return comunes > 0 && comunes >= Math.min(2, palabras.length);
-  });
+  const id = walkinId(reunionId, parts.searchName);
+  if (await c.leer(`members/${id}`)) {
+    throw new AccesoError(`${parts.fullName} ya se hab\xEDa agregado a esa reuni\xF3n (id: ${id}).`);
+  }
+  const parecidas = findSimilarMembers(personas, parts.fullName, 8);
   return borrador(
     c.uid,
     "agregar_participante",
-    { reunionId, nombre: fullName },
+    { reunionId, nombre: parts.fullName, id },
     [
       'AGREGAR como participante (queda "por revisar", NO entra a la lista oficial):',
-      `  ${fullName}`,
-      `  y marcarla presente en ${SESSION_TYPE_LABELS[sesion.type]} del ${fmtDate(sesion.date)} (${MODALITY_LABELS[sesion.modality]})`,
+      `  ${parts.fullName}`,
+      `  y marcarla presente en ${describir(sesion)}`,
       ...parecidas.length ? [
         "",
         "\u26A0\uFE0F OJO: ya hay fichas con un nombre parecido. Si es alguna de ellas, no",
         'la agregues de nuevo: m\xE1rcala con "preparar_marcar_presente".',
-        ...parecidas.slice(0, 8).map(
-          (p) => `  \xB7 ${p.fullName}${p.pendingReview ? " (por revisar)" : ""}  id: ${p.id}`
+        ...parecidas.map(
+          ({ member: p, exact }) => `  \xB7 ${p.fullName}${exact ? " (MISMO nombre)" : ""}${p.pendingReview ? " (por revisar)" : ""}${p.active === false ? " (inactiva)" : ""}  id: ${p.id}`
         )
       ] : [],
       ...sesion.status === "closed" ? ["", "Esa reuni\xF3n est\xE1 CERRADA; se corrige igual por ser administraci\xF3n."] : []
     ].join("\n")
   );
 }
-async function prepararEstadoReunion(c, reunionId, cerrar) {
-  const sesion = (await c.cargarSesiones()).find((s) => s.id === reunionId);
-  if (!sesion) throw new AccesoError(`No existe ninguna reuni\xF3n con id ${reunionId}.`);
+async function prepararEstadoReunion(c, reunionRaw, cerrar) {
+  const reunionId = idDe(reunionRaw, "la reuni\xF3n");
+  const sesion = await reunion(c, reunionId);
   if (cerrar && sesion.status === "closed") throw new AccesoError("Esa reuni\xF3n ya est\xE1 cerrada.");
   if (!cerrar && sesion.status === "open") throw new AccesoError("Esa reuni\xF3n ya est\xE1 abierta.");
   return borrador(
@@ -2661,149 +4609,241 @@ async function prepararEstadoReunion(c, reunionId, cerrar) {
     { reunionId },
     [
       cerrar ? "CERRAR la reuni\xF3n:" : "REABRIR la reuni\xF3n:",
-      `  ${SESSION_TYPE_LABELS[sesion.type]} del ${fmtDate(sesion.date)}`,
+      `  ${describir(sesion)}`,
       cerrar ? "  Al cerrarla, las coordinadoras ya no podr\xE1n modificarla." : "  Al reabrirla, las coordinadoras vuelven a poder marcar asistencia."
     ].join("\n")
   );
 }
-async function prepararAprobarPersona(c, personaId, nombreCorregido) {
-  const persona = (await c.cargarPersonas()).find((p) => p.id === personaId);
-  if (!persona) throw new AccesoError(`No existe ninguna persona con id ${personaId}.`);
-  if (!persona.pendingReview) {
-    throw new AccesoError(`${persona.fullName} ya forma parte de la lista oficial.`);
+async function prepararAprobarPersona(c, personaRaw, nombreCorregido) {
+  const personaId = idDe(personaRaw, "la persona");
+  const ficha = await persona(c, personaId);
+  if (!ficha.pendingReview) {
+    throw new AccesoError(
+      `${ficha.fullName} ya forma parte de la lista oficial.` + (ficha.pendingIdentify ? " Sigue sin nombre real: corr\xEDgelo en la app (Personas \u2192 Editar)." : "")
+    );
   }
-  const nombre = (nombreCorregido ?? persona.fullName).trim();
-  if (nombre.length < 3) throw new AccesoError("El nombre es demasiado corto.");
+  const parts = buildNameParts((nombreCorregido ?? ficha.fullName).trim());
+  if (parts.fullName.length < 3) throw new AccesoError("El nombre es demasiado corto.");
+  if (parts.fullName.startsWith(UNKNOWN_PREFIX)) {
+    throw new AccesoError(
+      `"${parts.fullName}" no es un nombre real. Para aprobarla, p\xE1sale su nombre en "nombre".`
+    );
+  }
+  const [registros, personas] = await Promise.all([
+    c.asistenciasDePersona(personaId),
+    c.cargarPersonas()
+  ]);
+  const parecidas = findSimilarMembers(
+    personas.filter((p) => p.id !== personaId && !p.pendingReview),
+    parts.fullName,
+    6
+  );
+  const aCorregir = registros.filter((r) => r.datos.fullName !== parts.fullName).length;
   return borrador(
     c.uid,
     "aprobar_persona",
-    { personaId, nombre },
+    { personaId, nombre: parts.fullName },
     [
       "APROBAR e incorporar a la lista oficial:",
-      `  ${nombre}` + (nombre !== persona.fullName ? `   (antes: "${persona.fullName}")` : ""),
-      persona.createdByName ? `  La registr\xF3: ${persona.createdByName}` : "",
-      "",
-      "Nota: esto solo aprueba la ficha. Si el nombre cambia, la asistencia ya",
-      "registrada conserva el nombre anterior; para corregir todo el historial",
-      'usa la pantalla "Revisar" de la app.'
-    ].filter(Boolean).join("\n")
+      `  ${parts.fullName}` + (parts.fullName !== ficha.fullName ? `   (antes: "${ficha.fullName}")` : ""),
+      ...ficha.createdByName ? [`  La registr\xF3: ${ficha.createdByName}`] : [],
+      ...aCorregir ? [`  Se corrige el nombre en ${aCorregir} asistencia(s) ya registradas.`] : [],
+      ...parecidas.length ? [
+        "",
+        "\u26A0\uFE0F OJO: en la lista oficial ya hay fichas parecidas. Si es la misma",
+        'persona, NO la apruebes: \xFAnelas desde la app (Revisar \u2192 "Es la misma',
+        'persona"), as\xED su asistencia queda en una sola ficha.',
+        ...parecidas.map(({ member: p }) => `  \xB7 ${p.fullName}  id: ${p.id}`)
+      ] : []
+    ].join("\n")
   );
 }
 async function ejecutar(c, o) {
   switch (o.op) {
     case "crear_reunion": {
-      const { tipo, modalidad, fecha, coordinadora } = o.args;
-      const id = idNuevo();
-      const type = TIPOS[tipo];
-      await c.escribir(`sessions/${id}`, {
-        type,
-        modality: modalidad,
-        date: /* @__PURE__ */ new Date(`${fecha}T12:00:00`),
-        status: "open",
-        createdBy: c.uid,
-        createdByName: c.nombre,
-        createdAt: /* @__PURE__ */ new Date(),
-        presentCount: 0,
-        coordinator: coordinadora ?? ""
-      });
-      return `Listo. Reuni\xF3n de ${SESSION_TYPE_LABELS[type]} creada para el ${fmtDate(
-        /* @__PURE__ */ new Date(`${fecha}T12:00:00`)
-      )} y abierta para tomar asistencia.
-  id: ${id}`;
+      const id = idDe(o.args.id, "la reuni\xF3n");
+      const type = TIPOS[tipoDe(o.args.tipo)];
+      const modalidad = modalidadDe(o.args.modalidad);
+      const fecha = fechaDe(o.args.fecha);
+      const coordinadora = String(o.args.coordinadora ?? "").trim();
+      const d = sessionDateFromKey(fecha);
+      try {
+        await c.guardar([
+          {
+            tipo: "crear",
+            ruta: `sessions/${id}`,
+            datos: {
+              type,
+              modality: modalidad,
+              date: d,
+              status: "open",
+              createdBy: c.uid,
+              createdByName: c.nombre,
+              createdAt: /* @__PURE__ */ new Date(),
+              presentCount: 0,
+              coordinator: coordinadora
+            }
+          }
+        ]);
+      } catch (e) {
+        if (e instanceof ConflictoError && e.motivo === "ya_existe") {
+          return `Esa reuni\xF3n ya estaba creada (id: ${id}); no se cre\xF3 otra. Si confirmaste dos veces, la primera ya hab\xEDa quedado guardada.`;
+        }
+        throw e;
+      }
+      return `Listo. Reuni\xF3n de ${SESSION_TYPE_LABELS[type]} creada para el ${fmtDate(d)} y abierta para tomar asistencia.
+  id: ${id}` + (daysFromToday(d) < 0 ? '\n\nCuando termines de pasar la lista, ci\xE9rrala con "preparar_cerrar_reunion".' : "");
     }
     case "marcar_presente":
     case "quitar_presente": {
-      const { reunionId, personaId } = o.args;
-      const sesion = (await c.cargarSesiones()).find((s) => s.id === reunionId);
-      if (!sesion) throw new AccesoError("La reuni\xF3n ya no existe.");
-      const persona = (await c.cargarPersonas()).find((p) => p.id === personaId);
-      if (!persona) throw new AccesoError("La persona ya no existe.");
-      if (o.op === "marcar_presente") {
-        await c.escribir(`sessions/${reunionId}/attendance/${personaId}`, {
-          memberId: personaId,
-          fullName: persona.fullName,
-          status: "present",
-          checkedInAt: /* @__PURE__ */ new Date(),
-          checkedInBy: c.uid,
-          checkedInByName: c.nombre,
-          sessionId: reunionId,
-          sessionType: sesion.type,
-          modality: sesion.modality,
-          sessionDate: toDate2(sesion.date)
-        });
-      } else {
-        await c.borrar(`sessions/${reunionId}/attendance/${personaId}`);
-      }
-      const presentes = (await c.cargarAsistencia()).filter(
-        (a) => a.sessionId === reunionId
-      ).length;
-      await c.escribir(`sessions/${reunionId}`, { presentCount: presentes }, ["presentCount"]);
-      return `Listo. ${persona.fullName} ${o.op === "marcar_presente" ? "qued\xF3 presente en" : "sali\xF3 de"} ${SESSION_TYPE_LABELS[sesion.type]} del ${fmtDate(sesion.date)}. Ahora hay ${presentes} presentes.`;
-    }
-    case "agregar_participante": {
-      const { reunionId, nombre } = o.args;
-      const sesion = (await c.cargarSesiones()).find((s) => s.id === reunionId);
-      if (!sesion) throw new AccesoError("La reuni\xF3n ya no existe.");
-      const parts = buildNameParts(nombre);
-      const id = idNuevo();
-      const fechaReunion = toDate2(sesion.date);
-      await c.escribir(`members/${id}`, {
-        fullName: parts.fullName,
-        firstName: parts.firstName,
-        lastName: parts.lastName,
-        searchName: parts.searchName,
-        aliases: [],
-        phone: "",
-        notes: "",
-        active: true,
-        createdAt: /* @__PURE__ */ new Date(),
-        createdBy: c.uid,
-        createdByName: c.nombre,
-        pendingIdentify: false,
-        pendingReview: true,
-        sourceSessionId: reunionId,
-        sourceSessionDate: fechaReunion
+      const reunionId = idDe(o.args.reunionId, "la reuni\xF3n");
+      const personaId = idDe(o.args.personaId, "la persona");
+      const marcar = o.op === "marcar_presente";
+      const [sesion, ficha] = await Promise.all([reunion(c, reunionId), persona(c, personaId)]);
+      if (marcar) exigirQueYaOcurrio(sesion);
+      const ruta = `sessions/${reunionId}/attendance/${personaId}`;
+      const lote = marcar ? [{ tipo: "crear", ruta, datos: asistenciaNueva(c, sesion, personaId, ficha.fullName) }] : [{ tipo: "borrar", ruta }];
+      lote.push({
+        tipo: "sumar",
+        ruta: `sessions/${reunionId}`,
+        campo: "presentCount",
+        cantidad: marcar ? 1 : -1
       });
+      const yaHecho = async () => {
+        const presentes2 = await presentesEn(c, reunionId);
+        return marcar ? `${ficha.fullName} ya figuraba como presente: no se cont\xF3 dos veces. Hay ${presentes2} presentes.` : `${ficha.fullName} ya no figuraba en esa reuni\xF3n: no se rest\xF3 nada. Hay ${presentes2} presentes.`;
+      };
       try {
-        await c.escribir(`sessions/${reunionId}/attendance/${id}`, {
-          memberId: id,
-          fullName: parts.fullName,
-          status: "present",
-          checkedInAt: /* @__PURE__ */ new Date(),
-          checkedInBy: c.uid,
-          checkedInByName: c.nombre,
-          sessionId: reunionId,
-          sessionType: sesion.type,
-          modality: sesion.modality,
-          sessionDate: fechaReunion
-        });
+        await c.guardar(lote);
       } catch (e) {
-        await c.borrar(`members/${id}`).catch(() => {
-        });
+        const choque = e instanceof ConflictoError || e instanceof AccesoError && e.message === "PERMISSION_DENIED";
+        if (choque) {
+          const esta = await c.leer(ruta) !== null;
+          if (esta === marcar) return yaHecho();
+        }
         throw e;
       }
-      const presentes = (await c.cargarAsistencia()).filter(
-        (a) => a.sessionId === reunionId
-      ).length;
-      await c.escribir(`sessions/${reunionId}`, { presentCount: presentes }, ["presentCount"]);
-      return `Listo. ${parts.fullName} qued\xF3 presente en ${SESSION_TYPE_LABELS[sesion.type]} del ${fmtDate(sesion.date)} y espera revisi\xF3n (no est\xE1 en la lista oficial). Ahora hay ${presentes} presentes.
-  id: ${id}`;
+      const presentes = await presentesEn(c, reunionId);
+      return [
+        `Listo. ${ficha.fullName} ${marcar ? "qued\xF3 presente en" : "sali\xF3 de"} ${describir(sesion)}. Ahora hay ${presentes} presentes.`,
+        ...avisoSiSigueAbierta(sesion)
+      ].join("\n");
+    }
+    case "agregar_participante": {
+      const reunionId = idDe(o.args.reunionId, "la reuni\xF3n");
+      const id = idDe(o.args.id, "la ficha");
+      const parts = buildNameParts(String(o.args.nombre ?? ""));
+      const sesion = await reunion(c, reunionId);
+      exigirQueYaOcurrio(sesion);
+      const fechaReunion = toDate2(sesion.date);
+      try {
+        await c.guardar([
+          {
+            tipo: "crear",
+            ruta: `members/${id}`,
+            datos: {
+              fullName: parts.fullName,
+              firstName: parts.firstName,
+              lastName: parts.lastName,
+              searchName: parts.searchName,
+              aliases: [],
+              phone: "",
+              notes: "",
+              active: true,
+              createdAt: /* @__PURE__ */ new Date(),
+              createdBy: c.uid,
+              createdByName: c.nombre,
+              pendingIdentify: false,
+              pendingReview: true,
+              sourceSessionId: reunionId,
+              sourceSessionDate: fechaReunion
+            }
+          },
+          {
+            tipo: "crear",
+            ruta: `sessions/${reunionId}/attendance/${id}`,
+            datos: asistenciaNueva(c, sesion, id, parts.fullName)
+          },
+          { tipo: "sumar", ruta: `sessions/${reunionId}`, campo: "presentCount", cantidad: 1 }
+        ]);
+      } catch (e) {
+        if (e instanceof ConflictoError && e.motivo === "ya_existe") {
+          return `${parts.fullName} ya se hab\xEDa agregado a esa reuni\xF3n (id: ${id}); no se cre\xF3 otra ficha. Si confirmaste dos veces, la primera ya hab\xEDa quedado guardada.`;
+        }
+        throw e;
+      }
+      const presentes = await presentesEn(c, reunionId);
+      return [
+        `Listo. ${parts.fullName} qued\xF3 presente en ${describir(sesion)} y espera revisi\xF3n (no est\xE1 en la lista oficial). Ahora hay ${presentes} presentes.
+  id: ${id}`,
+        ...avisoSiSigueAbierta(sesion)
+      ].join("\n");
     }
     case "cerrar_reunion":
     case "reabrir_reunion": {
-      const { reunionId } = o.args;
+      const reunionId = idDe(o.args.reunionId, "la reuni\xF3n");
       const estado = o.op === "cerrar_reunion" ? "closed" : "open";
-      await c.escribir(`sessions/${reunionId}`, { status: estado }, ["status"]);
+      try {
+        await c.guardar([{ tipo: "actualizar", ruta: `sessions/${reunionId}`, datos: { status: estado } }]);
+      } catch (e) {
+        if ((e instanceof ConflictoError || e instanceof AccesoError && e.message === "PERMISSION_DENIED") && !await c.leer(`sessions/${reunionId}`)) {
+          throw new AccesoError("Esa reuni\xF3n ya no existe (la borraron). No se cambi\xF3 nada.");
+        }
+        throw e;
+      }
       return `Listo. La reuni\xF3n qued\xF3 ${estado === "closed" ? "cerrada" : "abierta"}.`;
     }
     case "aprobar_persona": {
-      const { personaId, nombre } = o.args;
-      await c.escribir(
-        `members/${personaId}`,
-        { fullName: nombre, searchName: normalizeText(nombre), pendingReview: false },
-        ["fullName", "searchName", "pendingReview"]
+      const personaId = idDe(o.args.personaId, "la persona");
+      const parts = buildNameParts(String(o.args.nombre ?? ""));
+      if (parts.fullName.length < 3 || parts.fullName.startsWith(UNKNOWN_PREFIX)) {
+        throw new AccesoError("El nombre no es v\xE1lido. Prepara la aprobaci\xF3n de nuevo.");
+      }
+      const ficha = await c.leer(`members/${personaId}`);
+      if (!ficha) {
+        throw new AccesoError(
+          "Esa ficha ya no existe (la unieron con otra o la descartaron). No se cambi\xF3 nada."
+        );
+      }
+      if (!ficha.pendingReview) return `${ficha.fullName} ya estaba aprobada.`;
+      const registros = (await c.asistenciasDePersona(personaId)).filter(
+        (r) => r.datos.fullName !== parts.fullName
       );
-      return `Listo. ${nombre} ya forma parte de la lista oficial.`;
+      const correcciones = registros.map((r) => ({
+        tipo: "actualizar",
+        ruta: r.ruta,
+        datos: { fullName: parts.fullName }
+      }));
+      const aprobacion = {
+        tipo: "actualizar",
+        ruta: `members/${personaId}`,
+        datos: {
+          fullName: parts.fullName,
+          firstName: parts.firstName,
+          lastName: parts.lastName,
+          searchName: parts.searchName,
+          pendingReview: false,
+          pendingIdentify: false
+        }
+      };
+      try {
+        if (correcciones.length < 500) {
+          await c.guardar([...correcciones, aprobacion]);
+        } else {
+          for (let i = 0; i < correcciones.length; i += 450) {
+            await c.guardar(correcciones.slice(i, i + 450));
+          }
+          await c.guardar([aprobacion]);
+        }
+      } catch (e) {
+        if (e instanceof ConflictoError || e instanceof AccesoError && e.message === "PERMISSION_DENIED") {
+          throw new AccesoError(
+            "La ficha o alguna de sus asistencias cambi\xF3 mientras tanto. No se guard\xF3 nada: prepara la aprobaci\xF3n de nuevo."
+          );
+        }
+        throw e;
+      }
+      return `Listo. ${parts.fullName} ya forma parte de la lista oficial.` + (registros.length ? ` Se corrigi\xF3 el nombre en ${registros.length} asistencia(s).` : "");
     }
     default:
       throw new AccesoError(`Operaci\xF3n desconocida: ${o.op}`);
@@ -2881,7 +4921,7 @@ var HERRAMIENTAS = [
   {
     name: "reuniones",
     title: "Listar reuniones",
-    description: "Las reuniones m\xE1s recientes, con fecha, tipo, modalidad, qui\xE9n coordin\xF3, cu\xE1ntas personas asistieron y si la sesi\xF3n sigue abierta. Devuelve el id de cada una para consultar su lista.",
+    description: 'Las reuniones m\xE1s recientes que ya ocurrieron (y aparte las agendadas), con fecha, tipo, modalidad, qui\xE9n coordin\xF3, cu\xE1ntas personas asistieron y si la sesi\xF3n sigue abierta. Devuelve el id de cada una para consultar su lista. Para pasar la lista de una reuni\xF3n, toma el id de "Recientes", no de "Agendadas".',
     alcance: "todos",
     inputSchema: objeto({
       tipo: { type: "string", enum: ["pasos", "ego", "todas"], default: "todas" },
@@ -2907,17 +4947,19 @@ var HERRAMIENTAS = [
     alcance: "todos",
     inputSchema: objeto({ reunion_id: txt("id de la reuni\xF3n") }, ["reunion_id"]),
     async ejecutar(c, a) {
-      const [sessions, attendance] = await Promise.all([
-        c.cargarSesiones(),
-        c.cargarAsistencia()
+      const id = String(a.reunion_id ?? "").trim();
+      if (!/^[A-Za-z0-9_-]{1,80}$/.test(id)) return `El id de reuni\xF3n "${id}" no es v\xE1lido.`;
+      const [sesion, asistentes] = await Promise.all([
+        c.leer(`sessions/${id}`),
+        c.asistenciaDe(id)
       ]);
-      return informeAsistenciaReunion(sessions, attendance, String(a.reunion_id));
+      return informeAsistenciaReunion(sesion, asistentes, id);
     }
   },
   {
     name: "conteos",
     title: "Conteos generales",
-    description: "Totales r\xE1pidos: personas en la lista (activas y totales), reuniones registradas por tipo, y cu\xE1ntas personas nuevas esperan revisi\xF3n.",
+    description: "Totales r\xE1pidos: personas en la lista oficial (activas y totales), reuniones registradas por tipo, y cu\xE1ntas personas nuevas esperan revisi\xF3n.",
     alcance: "admin",
     inputSchema: objeto(),
     async ejecutar(c) {
@@ -2928,7 +4970,7 @@ var HERRAMIENTAS = [
   {
     name: "buscar_persona",
     title: "Buscar una persona",
-    description: "Busca personas por nombre (tolera acentos, may\xFAsculas y orden de las palabras) y devuelve su id para consultar el historial. No devuelve tel\xE9fonos ni notas.",
+    description: "Busca personas por nombre o alias, igual que el buscador de la app (tolera acentos, may\xFAsculas, orden de las palabras y errores de tipeo). Devuelve su id para consultar el historial o marcarla presente. No devuelve tel\xE9fonos ni notas. Si no aparece con el nombre completo, prueba con solo el primer nombre antes de agregarla como nueva.",
     alcance: "admin",
     inputSchema: objeto({ nombre: txt("Nombre o parte del nombre") }, ["nombre"]),
     async ejecutar(c, a) {
@@ -2938,16 +4980,23 @@ var HERRAMIENTAS = [
   {
     name: "historial_persona",
     title: "Historial de una persona",
-    description: 'Todas las veces que una persona ha asistido, separadas por tipo de reuni\xF3n, con su porcentaje de asistencia. El id se obtiene con "buscar_persona".',
+    description: 'Todas las veces que una persona ha asistido, separadas por tipo de reuni\xF3n, con su porcentaje de asistencia desde que lleg\xF3. El id se obtiene con "buscar_persona".',
     alcance: "admin",
     inputSchema: objeto({ persona_id: txt("id de la persona") }, ["persona_id"]),
     async ejecutar(c, a) {
-      const [sessions, attendance, personas] = await Promise.all([
+      const id = String(a.persona_id ?? "").trim();
+      if (!/^[A-Za-z0-9_-]{1,80}$/.test(id)) return `El id de persona "${id}" no es v\xE1lido.`;
+      const [sessions, registros, personas] = await Promise.all([
         c.cargarSesiones(),
-        c.cargarAsistencia(),
+        c.asistenciasDePersona(id),
         c.cargarPersonas()
       ]);
-      return informeHistorial(sessions, attendance, personas, String(a.persona_id));
+      return informeHistorial(
+        sessions,
+        registros.map((r) => r.datos),
+        personas,
+        id
+      );
     }
   },
   {
@@ -2966,14 +5015,19 @@ var HERRAMIENTAS = [
   {
     name: "preparar_crear_reunion",
     title: "Preparar: crear una reuni\xF3n",
-    description: 'Prepara la creaci\xF3n de una reuni\xF3n (no la crea todav\xEDa: devuelve un borrador para revisar). Mu\xE9strale el borrador a la persona y solo llama a "confirmar_operacion" cuando lo apruebe expl\xEDcitamente.',
+    description: 'Prepara la creaci\xF3n de una reuni\xF3n (no la crea todav\xEDa: devuelve un borrador para revisar). Si ya existe una de ese tipo ese d\xEDa, lo dice y da su id: usa esa. Mu\xE9strale el borrador a la persona y solo llama a "confirmar_operacion" cuando lo apruebe expl\xEDcitamente.',
     alcance: "escribir",
     inputSchema: objeto(
       {
         tipo: { type: "string", enum: ["pasos", "ego"] },
         modalidad: { type: "string", enum: ["presencial", "virtual"] },
-        fecha: txt("Fecha en formato AAAA-MM-DD"),
-        coordinadora: txt("Qui\xE9n coordina (opcional)")
+        fecha: txt("Fecha en formato AAAA-MM-DD (d\xEDa en Colombia)"),
+        coordinadora: txt("Qui\xE9n coordina (opcional)"),
+        otra_mas: {
+          type: "boolean",
+          default: false,
+          description: "true SOLO si de verdad hay dos reuniones del mismo tipo el mismo d\xEDa."
+        }
       },
       ["tipo", "modalidad", "fecha"]
     ),
@@ -2981,8 +5035,9 @@ var HERRAMIENTAS = [
       c,
       a.tipo,
       a.modalidad,
-      String(a.fecha),
-      a.coordinadora ? String(a.coordinadora) : void 0
+      a.fecha,
+      a.coordinadora ? String(a.coordinadora) : void 0,
+      a.otra_mas === true
     )
   },
   {
@@ -2994,7 +5049,7 @@ var HERRAMIENTAS = [
       { reunion_id: txt("id de la reuni\xF3n"), persona_id: txt("id de la persona") },
       ["reunion_id", "persona_id"]
     ),
-    ejecutar: (c, a) => prepararMarcar(c, String(a.reunion_id), String(a.persona_id), false)
+    ejecutar: (c, a) => prepararMarcar(c, a.reunion_id, a.persona_id, false)
   },
   {
     name: "preparar_agregar_participante",
@@ -3008,7 +5063,7 @@ var HERRAMIENTAS = [
       },
       ["reunion_id", "nombre"]
     ),
-    ejecutar: (c, a) => prepararAgregarParticipante(c, String(a.reunion_id), String(a.nombre))
+    ejecutar: (c, a) => prepararAgregarParticipante(c, a.reunion_id, a.nombre)
   },
   {
     name: "preparar_quitar_presente",
@@ -3019,7 +5074,7 @@ var HERRAMIENTAS = [
       { reunion_id: txt("id de la reuni\xF3n"), persona_id: txt("id de la persona") },
       ["reunion_id", "persona_id"]
     ),
-    ejecutar: (c, a) => prepararMarcar(c, String(a.reunion_id), String(a.persona_id), true)
+    ejecutar: (c, a) => prepararMarcar(c, a.reunion_id, a.persona_id, true)
   },
   {
     name: "preparar_cerrar_reunion",
@@ -3033,23 +5088,23 @@ var HERRAMIENTAS = [
       },
       ["reunion_id"]
     ),
-    ejecutar: (c, a) => prepararEstadoReunion(c, String(a.reunion_id), a.abrir !== true)
+    ejecutar: (c, a) => prepararEstadoReunion(c, a.reunion_id, a.abrir !== true)
   },
   {
     name: "preparar_aprobar_persona",
     title: "Preparar: aprobar a una persona nueva",
-    description: "Prepara aprobar a una persona que est\xE1 esperando revisi\xF3n, opcionalmente corrigiendo su nombre. Devuelve un borrador.",
+    description: "Prepara aprobar a una persona que est\xE1 esperando revisi\xF3n, opcionalmente corrigiendo su nombre (se corrige tambi\xE9n en sus asistencias, como en la app). Si ya hay una ficha parecida en la lista oficial, el borrador lo avisa: en ese caso hay que unirlas desde la app, no aprobar. Devuelve un borrador.",
     alcance: "escribir",
     inputSchema: objeto(
       { persona_id: txt("id de la persona"), nombre: txt("Nombre completo corregido (opcional)") },
       ["persona_id"]
     ),
-    ejecutar: (c, a) => prepararAprobarPersona(c, String(a.persona_id), a.nombre ? String(a.nombre) : void 0)
+    ejecutar: (c, a) => prepararAprobarPersona(c, a.persona_id, a.nombre ? String(a.nombre) : void 0)
   },
   {
     name: "confirmar_operacion",
     title: "Confirmar y ejecutar",
-    description: "EJECUTA de verdad una operaci\xF3n preparada antes. \xDAsalo SOLO despu\xE9s de haberle mostrado el borrador a la persona y de que lo haya aprobado de forma expl\xEDcita en ese mismo momento. Si duda o corrige algo, prepara uno nuevo en vez de confirmar el anterior.",
+    description: "EJECUTA de verdad una operaci\xF3n preparada antes. \xDAsalo SOLO despu\xE9s de haberle mostrado el borrador a la persona y de que lo haya aprobado de forma expl\xEDcita en ese mismo momento. Si duda o corrige algo, prepara uno nuevo en vez de confirmar el anterior. Copia el confirmacion_id completo, tal cual. Confirmar dos veces el mismo borrador no repite nada.",
     alcance: "escribir",
     inputSchema: objeto(
       { confirmacion_id: txt("El identificador que devolvi\xF3 el borrador") },
@@ -3091,6 +5146,7 @@ function permitida(h, c) {
 }
 
 // mcp/src/http.ts
+process.env.TZ = "America/Bogota";
 var VERSIONES = ["2025-06-18", "2025-03-26", "2024-11-05"];
 var VERSION_PROTOCOLO = VERSIONES[0];
 function versionAcordada(params) {
@@ -3181,15 +5237,17 @@ async function atender(p, obtener) {
 }
 function llaveDe(req) {
   const cabecera = req.headers.authorization;
-  const enCabecera = (Array.isArray(cabecera) ? cabecera[0] : cabecera ?? "").replace(/^Bearer\s+/i, "").trim();
-  if (enCabecera) return enCabecera;
+  return (Array.isArray(cabecera) ? cabecera[0] : cabecera ?? "").replace(/^Bearer\s+/i, "").trim();
+}
+function llaveEnUrl(req) {
   try {
     const u = new URL(req.url ?? "", "http://x");
-    return (u.searchParams.get("k") ?? u.searchParams.get("llave") ?? "").trim();
+    return u.searchParams.has("k") || u.searchParams.has("llave");
   } catch {
-    return "";
+    return false;
   }
 }
+var DONDE_ENTRAR = 'Bearer realm="coordinacion-gemb", resource_metadata="https://coordinacion-gemb.vercel.app/.well-known/oauth-protected-resource"';
 async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -3227,26 +5285,40 @@ async function handler(req, res) {
     res.status(405).json(fallo(null, -32600, "Usa POST."));
     return;
   }
+  if (llaveEnUrl(req)) {
+    res.status(400).json(
+      fallo(
+        null,
+        -32600,
+        'La llave ya no se acepta en la direcci\xF3n (?k=\u2026): quedaba guardada en los registros. Quita ese pedazo de la direcci\xF3n del conector y entra con Google desde Claude ("Conectar").'
+      )
+    );
+    return;
+  }
   const llave = llaveDe(req);
-  if (!llave) {
-    const cuerpoPrevio = req.body;
-    const lista = Array.isArray(cuerpoPrevio) ? cuerpoPrevio : [cuerpoPrevio ?? {}];
-    const soloSaludo = lista.every((p) => saludo(p) !== void 0);
-    if (!soloSaludo) {
-      res.setHeader(
-        "WWW-Authenticate",
-        'Bearer realm="coordinacion-gemb", resource_metadata="https://coordinacion-gemb.vercel.app/.well-known/oauth-protected-resource"'
-      );
-      res.status(401).json(
-        fallo(null, -32001, "Hay que entrar con Google. Conecta el conector desde Claude.")
-      );
-      return;
-    }
+  const cuerpo = req.body;
+  const peticiones = Array.isArray(cuerpo) ? cuerpo : [cuerpo ?? {}];
+  const soloSaludo = peticiones.every((p) => saludo(p) !== void 0);
+  if (!llave && !soloSaludo) {
+    res.setHeader("WWW-Authenticate", DONDE_ENTRAR);
+    res.status(401).json(
+      fallo(null, -32001, "Hay que entrar con Google. Conecta el conector desde Claude.")
+    );
+    return;
   }
   let abierta = null;
   const obtener = () => abierta ??= abrirSesion(llave);
-  const cuerpo = req.body;
-  const peticiones = Array.isArray(cuerpo) ? cuerpo : [cuerpo ?? {}];
+  if (!soloSaludo) {
+    try {
+      await obtener();
+    } catch (e) {
+      if (e instanceof LlaveInvalidaError) {
+        res.setHeader("WWW-Authenticate", `${DONDE_ENTRAR}, error="invalid_token"`);
+        res.status(401).json(fallo(null, -32001, e.message));
+        return;
+      }
+    }
+  }
   const respuestas = [];
   for (const p of peticiones) {
     const r = await atender(p, obtener);

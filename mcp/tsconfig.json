@@ -24,6 +24,8 @@
     "../src/lib/normalize.ts",
     "../src/lib/constants.ts",
     "../src/lib/oauthRedirect.ts",
+    "../src/lib/search.ts",
+    "../src/lib/ids.ts",
     "../src/types/index.ts"
   ]
 }

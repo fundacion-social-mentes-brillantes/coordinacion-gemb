@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Logo } from '../components/Logo';
 import { Spinner } from '../components/Spinner';
+import { AuthStuck } from '../components/AuthStuck';
 import { ROLE_LABELS } from '../lib/constants';
 import { redirectPermitido } from '../lib/oauthRedirect';
 
@@ -17,7 +18,7 @@ export function AuthorizePage() {
   // `authError` es donde `signIn` deja sus avisos (ventana cerrada, iPhone con
   // la app instalada…): `signIn` no lanza errores, así que sin leerlo aquí el
   // botón fallaba en silencio.
-  const { user, profile, loading, signIn, authError } = useAuth();
+  const { user, profile, loading, signIn, authError, stuck } = useAuth();
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState('');
 
@@ -62,6 +63,20 @@ export function AuthorizePage() {
 
     const destino = new URL(redirectUri);
     destino.searchParams.set('code', codigo);
+    if (state) destino.searchParams.set('state', state);
+    window.location.replace(destino.toString());
+  };
+
+  // "Cancelar" le responde a Claude que no se dio permiso, como pide OAuth.
+  // Antes era "volver atrás", y como esta pantalla suele abrirse en una
+  // pestaña nueva, el botón no hacía nada y Claude se quedaba esperando.
+  const cancelar = () => {
+    if (!redirectUri || !redirectPermitido(redirectUri)) {
+      window.location.replace('/');
+      return;
+    }
+    const destino = new URL(redirectUri);
+    destino.searchParams.set('error', 'access_denied');
     if (state) destino.searchParams.set('state', state);
     window.location.replace(destino.toString());
   };
@@ -127,7 +142,24 @@ export function AuthorizePage() {
     );
   }
 
-  if (!profile || profile.role === 'pending' || !profile.active) {
+  // Hay sesión pero el perfil no llega (sin señal, permisos…): la misma
+  // pantalla de rescate que en el resto de la app.
+  if (stuck && !profile) return <AuthStuck />;
+
+  // El perfil todavía se está leyendo (o creando en el primer ingreso). Antes
+  // aquí salía "tu cuenta no está aprobada" durante ese instante.
+  if (!profile) {
+    return (
+      <Marco>
+        <div className="flex flex-col items-center gap-3 py-6">
+          <Spinner className="h-8 w-8" />
+          <p className="text-sm text-slate-500">Preparando tu cuenta…</p>
+        </div>
+      </Marco>
+    );
+  }
+
+  if (profile.role === 'pending' || !profile.active) {
     return (
       <Marco>
         <p className="text-sm text-slate-600">
@@ -135,6 +167,13 @@ export function AuthorizePage() {
           app, así que no se puede conectar. Pídele a la administración que te
           apruebe y vuelve a intentarlo.
         </p>
+        <button
+          type="button"
+          onClick={cancelar}
+          className="btn-secondary mt-4 min-h-[48px] w-full"
+        >
+          Volver a Claude
+        </button>
       </Marco>
     );
   }
@@ -181,7 +220,8 @@ export function AuthorizePage() {
       </button>
       <button
         type="button"
-        onClick={() => window.history.back()}
+        onClick={cancelar}
+        disabled={enviando}
         className="mt-2 min-h-[44px] w-full text-sm font-medium text-slate-500"
       >
         Cancelar
@@ -190,8 +230,10 @@ export function AuthorizePage() {
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
       <p className="mt-4 text-[11px] leading-snug text-slate-400">
-        Puedes retirar el permiso cuando quieras: sal de la app con el botón de
-        salir, o pide que desactiven tu cuenta en Usuarios.
+        Puedes retirarle el permiso cuando quieras quitando el conector en
+        Claude (Ajustes → Conectores). Salir de esta app no lo desconecta. Si
+        desactivan tu cuenta en Usuarios, Claude deja de poder usarla al
+        instante.
       </p>
     </Marco>
   );

@@ -5,11 +5,13 @@ import {
   GoogleAuthProvider,
   setPersistence,
   browserLocalPersistence,
+  connectAuthEmulator,
 } from 'firebase/auth';
 import {
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
+  connectFirestoreEmulator,
 } from 'firebase/firestore';
 import authHosts from './authHosts.json';
 
@@ -84,13 +86,23 @@ const AUTH_DOMAIN = resolveAuthDomain();
 export const authIsFirstParty =
   typeof window !== 'undefined' && AUTH_DOMAIN === window.location.hostname;
 
+/**
+ * PRUEBAS: con `npm run dev:emulador` (Vite en modo "emulador", solo en
+ * desarrollo) la app habla con los emuladores locales de Firebase en vez de la
+ * base real, y con un proyecto de prueba ("demo-…": Firebase garantiza que
+ * ese nombre nunca toca nada real). El ingreso con Google muestra entonces una
+ * cuenta de prueba inventada. En el build de producción esta rama ni siquiera
+ * existe.
+ */
+export const usandoEmulador = import.meta.env.DEV && import.meta.env.MODE === 'emulador';
+
 // Estas llaves NO son secretas: viajan en el bundle del navegador.
 // La seguridad real la dan las reglas de Firestore y el login de Google.
 // (scripts/check-auth-hosts.mjs repite la apiKey: si cambia, cambiarla allí.)
 const firebaseConfig = {
   apiKey: 'AIzaSyB-KQMYvpKun5oxQhqTSyF-ElhJxAp-eGQ',
   authDomain: AUTH_DOMAIN,
-  projectId: 'coordinacion-gemb',
+  projectId: usandoEmulador ? 'demo-gemb' : 'coordinacion-gemb',
   storageBucket: 'coordinacion-gemb.firebasestorage.app',
   messagingSenderId: '1019293780998',
   appId: '1:1019293780998:web:5f6c2d4adb72291cc4c787',
@@ -126,6 +138,11 @@ export const db = initializeFirestore(app, {
     tabManager: persistentMultipleTabManager(),
   }),
 });
+
+if (usandoEmulador) {
+  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+}
 
 // Correo del super-administrador (admin de admins).
 export const SUPER_ADMIN_EMAIL = 'fundacionsocial@gimnasioemocionalmb.com';

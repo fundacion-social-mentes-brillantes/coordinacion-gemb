@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, useNavigate, Link } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
+import { ErrorBoundary } from './ErrorBoundary';
 import { isUpdateReady } from '../lib/swUpdate';
 import { listenPendingReviewCount } from '../services/members';
 import {
@@ -41,6 +42,7 @@ export function Layout() {
   const { profile, logout } = useAuth();
   const online = useOnlineStatus();
   const navigate = useNavigate();
+  const location = useLocation();
   const headerRef = useRef<HTMLElement>(null);
   // Aviso de versión nueva (el service worker ya no recarga solo). El estado
   // inicial se lee de la marca porque el aviso del SW llega antes de que esta
@@ -91,7 +93,7 @@ export function Layout() {
 
   const handleLogout = async () => {
     if (!window.confirm('¿Cerrar tu sesión en la app?')) return;
-    await logout();
+    if (!(await logout())) return;
     navigate('/login', { replace: true });
   };
 
@@ -102,7 +104,15 @@ export function Layout() {
         ref={headerRef}
         className="safe-top sticky top-0 z-40 border-b border-primary-100 bg-white/90 backdrop-blur"
       >
-        <div className="flex items-center gap-2 px-3 py-2">
+        {/* Con el iPhone en horizontal, el logo y "Salir" no pueden quedar
+            bajo la muesca: el margen lateral respeta el área segura. */}
+        <div
+          className="flex items-center gap-2 py-2"
+          style={{
+            paddingLeft: 'max(0.75rem, env(safe-area-inset-left))',
+            paddingRight: 'max(0.75rem, env(safe-area-inset-right))',
+          }}
+        >
           <Logo className="h-9 w-9 shrink-0" />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-bold leading-tight text-primary-800">
@@ -113,11 +123,20 @@ export function Layout() {
             </p>
           </div>
           {!online && (
-            <span className="chip shrink-0 bg-amber-100 text-amber-700">
-              <WifiOffIcon className="text-sm" /> Sin conexión
+            // En celulares de 360-390 px el texto no cabía junto a los demás
+            // botones y empujaba "Salir" fuera de la pantalla: ahí va solo el
+            // ícono (la hoja de asistencia ya tiene su propio aviso).
+            <span
+              className="chip shrink-0 bg-amber-100 text-amber-700"
+              role="status"
+              aria-label="Sin conexión"
+              title="Sin conexión"
+            >
+              <WifiOffIcon className="text-sm" />
+              <span className="hidden sm:inline">Sin conexión</span>
             </span>
           )}
-          <ThemeToggle />
+          <ThemeToggle className="shrink-0" />
           {/* Ajustes: aquí dentro vive "Conectar con Claude", que antes
               estorbaba en Sesiones. Discreto, pero siempre a mano. */}
           <Link
@@ -154,9 +173,13 @@ export function Layout() {
         </div>
       )}
 
-      {/* Contenido */}
+      {/* Contenido. Si una pantalla falla al pintarse, se muestra un aviso
+          con "Recargar" en vez de dejar la app en blanco (en la app instalada
+          no había forma de salir). */}
       <main className="safe-x flex-1 pb-6 pt-4">
-        <Outlet />
+        <ErrorBoundary resetKey={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
 
       {/* Navegación inferior. Es `sticky` (no `fixed`) para que en el iPhone
@@ -164,7 +187,13 @@ export function Layout() {
           Con un solo apartado (coordinadoras) no se muestra: no aporta. */}
       {items.length > 1 && (
       <nav className="safe-bottom sticky bottom-0 z-40 border-t border-primary-100 bg-white/95 backdrop-blur">
-        <div className="flex items-stretch justify-around">
+        <div
+          className="flex items-stretch justify-around"
+          style={{
+            paddingLeft: 'env(safe-area-inset-left)',
+            paddingRight: 'env(safe-area-inset-right)',
+          }}
+        >
           {items.map((item) => {
             const Icon = item.icon;
             return (

@@ -1,4 +1,4 @@
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth, iosInstaladaSinIngreso } from '../context/AuthContext';
 import { Logo } from '../components/Logo';
 import { Spinner, FullScreenSpinner } from '../components/Spinner';
@@ -21,6 +21,14 @@ function isInAppBrowser(): boolean {
 export function LoginPage() {
   const { user, profile, loading, signIn, authError, stuck } = useAuth();
   const [busy, setBusy] = useState(false);
+  // A dónde iba antes de que le pidieran entrar (p. ej. el enlace directo a
+  // la reunión de hoy). Solo rutas internas de la app.
+  const location = useLocation();
+  const pedida = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
+  const destino =
+    pedida && pedida.startsWith('/') && !pedida.startsWith('//') && pedida !== '/login'
+      ? pedida
+      : '/sesiones';
 
   // OJO: los hooks van ANTES de cualquier `return`. Si se ponen después,
   // React se rompe ("Rendered more hooks than during the previous render").
@@ -75,7 +83,7 @@ export function LoginPage() {
   if (user && profile) {
     if (profile.role === 'pending' || !profile.active)
       return <Navigate to="/pendiente" replace />;
-    return <Navigate to="/sesiones" replace />;
+    return <Navigate to={destino} replace />;
   }
 
   const handleSignIn = async () => {

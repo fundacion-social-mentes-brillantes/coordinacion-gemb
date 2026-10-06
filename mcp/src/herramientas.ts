@@ -8,7 +8,7 @@ import {
   prepararEstadoReunion,
   prepararMarcar,
 } from './escrituras';
-import type { Modality } from '../../src/types';
+import type { Session } from '../../src/types';
 import {
   informeAsistenciaReunion,
   informeBuscarPersona,
@@ -139,9 +139,10 @@ export const HERRAMIENTAS: Herramienta[] = [
     name: 'reuniones',
     title: 'Listar reuniones',
     description:
-      'Las reuniones más recientes, con fecha, tipo, modalidad, quién coordinó, ' +
-      'cuántas personas asistieron y si la sesión sigue abierta. Devuelve el id ' +
-      'de cada una para consultar su lista.',
+      'Las reuniones más recientes que ya ocurrieron (y aparte las agendadas), con ' +
+      'fecha, tipo, modalidad, quién coordinó, cuántas personas asistieron y si la ' +
+      'sesión sigue abierta. Devuelve el id de cada una para consultar su lista. ' +
+      'Para pasar la lista de una reunión, toma el id de "Recientes", no de "Agendadas".',
     alcance: 'todos',
     inputSchema: objeto({
       tipo: { type: 'string', enum: ['pasos', 'ego', 'todas'], default: 'todas' },
@@ -169,18 +170,21 @@ export const HERRAMIENTAS: Herramienta[] = [
     alcance: 'todos',
     inputSchema: objeto({ reunion_id: txt('id de la reunión') }, ['reunion_id']),
     async ejecutar(c, a) {
-      const [sessions, attendance] = await Promise.all([
-        c.cargarSesiones(),
-        c.cargarAsistencia(),
+      // Solo esa reunión: antes se descargaba toda la asistencia de la historia.
+      const id = String(a.reunion_id ?? '').trim();
+      if (!/^[A-Za-z0-9_-]{1,80}$/.test(id)) return `El id de reunión "${id}" no es válido.`;
+      const [sesion, asistentes] = await Promise.all([
+        c.leer<Session>(`sessions/${id}`),
+        c.asistenciaDe(id),
       ]);
-      return informeAsistenciaReunion(sessions, attendance, String(a.reunion_id));
+      return informeAsistenciaReunion(sesion, asistentes, id);
     },
   },
   {
     name: 'conteos',
     title: 'Conteos generales',
     description:
-      'Totales rápidos: personas en la lista (activas y totales), reuniones ' +
+      'Totales rápidos: personas en la lista oficial (activas y totales), reuniones ' +
       'registradas por tipo, y cuántas personas nuevas esperan revisión.',
     alcance: 'admin',
     inputSchema: objeto(),
@@ -193,9 +197,11 @@ export const HERRAMIENTAS: Herramienta[] = [
     name: 'buscar_persona',
     title: 'Buscar una persona',
     description:
-      'Busca personas por nombre (tolera acentos, mayúsculas y orden de las ' +
-      'palabras) y devuelve su id para consultar el historial. No devuelve ' +
-      'teléfonos ni notas.',
+      'Busca personas por nombre o alias, igual que el buscador de la app (tolera ' +
+      'acentos, mayúsculas, orden de las palabras y errores de tipeo). Devuelve su ' +
+      'id para consultar el historial o marcarla presente. No devuelve teléfonos ' +
+      'ni notas. Si no aparece con el nombre completo, prueba con solo el primer ' +
+      'nombre antes de agregarla como nueva.',
     alcance: 'admin',
     inputSchema: objeto({ nombre: txt('Nombre o parte del nombre') }, ['nombre']),
     async ejecutar(c, a) {
@@ -207,16 +213,25 @@ export const HERRAMIENTAS: Herramienta[] = [
     title: 'Historial de una persona',
     description:
       'Todas las veces que una persona ha asistido, separadas por tipo de reunión, ' +
-      'con su porcentaje de asistencia. El id se obtiene con "buscar_persona".',
+      'con su porcentaje de asistencia desde que llegó. El id se obtiene con ' +
+      '"buscar_persona".',
     alcance: 'admin',
     inputSchema: objeto({ persona_id: txt('id de la persona') }, ['persona_id']),
     async ejecutar(c, a) {
-      const [sessions, attendance, personas] = await Promise.all([
+      const id = String(a.persona_id ?? '').trim();
+      if (!/^[A-Za-z0-9_-]{1,80}$/.test(id)) return `El id de persona "${id}" no es válido.`;
+      // Solo sus asistencias, filtradas en el servidor.
+      const [sessions, registros, personas] = await Promise.all([
         c.cargarSesiones(),
-        c.cargarAsistencia(),
+        c.asistenciasDePersona(id),
         c.cargarPersonas(),
       ]);
-      return informeHistorial(sessions, attendance, personas, String(a.persona_id));
+      return informeHistorial(
+        sessions,
+        registros.map((r) => r.datos),
+        personas,
+        id,
+      );
     },
   },
   {
@@ -240,25 +255,33 @@ export const HERRAMIENTAS: Herramienta[] = [
     title: 'Preparar: crear una reunión',
     description:
       'Prepara la creación de una reunión (no la crea todavía: devuelve un ' +
-      'borrador para revisar). Muéstrale el borrador a la persona y solo llama a ' +
+      'borrador para revisar). Si ya existe una de ese tipo ese día, lo dice y da ' +
+      'su id: usa esa. Muéstrale el borrador a la persona y solo llama a ' +
       '"confirmar_operacion" cuando lo apruebe explícitamente.',
     alcance: 'escribir',
     inputSchema: objeto(
       {
         tipo: { type: 'string', enum: ['pasos', 'ego'] },
         modalidad: { type: 'string', enum: ['presencial', 'virtual'] },
-        fecha: txt('Fecha en formato AAAA-MM-DD'),
+        fecha: txt('Fecha en formato AAAA-MM-DD (día en Colombia)'),
         coordinadora: txt('Quién coordina (opcional)'),
+        otra_mas: {
+          type: 'boolean',
+          default: false,
+          description:
+            'true SOLO si de verdad hay dos reuniones del mismo tipo el mismo día.',
+        },
       },
       ['tipo', 'modalidad', 'fecha'],
     ),
     ejecutar: (c, a) =>
       prepararCrearReunion(
         c,
-        a.tipo as TipoCorto,
-        a.modalidad as Modality,
-        String(a.fecha),
+        a.tipo,
+        a.modalidad,
+        a.fecha,
         a.coordinadora ? String(a.coordinadora) : undefined,
+        a.otra_mas === true,
       ),
   },
   {
@@ -270,7 +293,7 @@ export const HERRAMIENTAS: Herramienta[] = [
     alcance: 'escribir',
     inputSchema: objeto({ reunion_id: txt('id de la reunión'), persona_id: txt('id de la persona') },
       ['reunion_id', 'persona_id']),
-    ejecutar: (c, a) => prepararMarcar(c, String(a.reunion_id), String(a.persona_id), false),
+    ejecutar: (c, a) => prepararMarcar(c, a.reunion_id, a.persona_id, false),
   },
   {
     name: 'preparar_agregar_participante',
@@ -290,7 +313,7 @@ export const HERRAMIENTAS: Herramienta[] = [
       },
       ['reunion_id', 'nombre'],
     ),
-    ejecutar: (c, a) => prepararAgregarParticipante(c, String(a.reunion_id), String(a.nombre)),
+    ejecutar: (c, a) => prepararAgregarParticipante(c, a.reunion_id, a.nombre),
   },
   {
     name: 'preparar_quitar_presente',
@@ -301,7 +324,7 @@ export const HERRAMIENTAS: Herramienta[] = [
     alcance: 'escribir',
     inputSchema: objeto({ reunion_id: txt('id de la reunión'), persona_id: txt('id de la persona') },
       ['reunion_id', 'persona_id']),
-    ejecutar: (c, a) => prepararMarcar(c, String(a.reunion_id), String(a.persona_id), true),
+    ejecutar: (c, a) => prepararMarcar(c, a.reunion_id, a.persona_id, true),
   },
   {
     name: 'preparar_cerrar_reunion',
@@ -317,21 +340,24 @@ export const HERRAMIENTAS: Herramienta[] = [
       },
       ['reunion_id'],
     ),
-    ejecutar: (c, a) => prepararEstadoReunion(c, String(a.reunion_id), a.abrir !== true),
+    ejecutar: (c, a) => prepararEstadoReunion(c, a.reunion_id, a.abrir !== true),
   },
   {
     name: 'preparar_aprobar_persona',
     title: 'Preparar: aprobar a una persona nueva',
     description:
       'Prepara aprobar a una persona que está esperando revisión, opcionalmente ' +
-      'corrigiendo su nombre. Devuelve un borrador.',
+      'corrigiendo su nombre (se corrige también en sus asistencias, como en la ' +
+      'app). Si ya hay una ficha parecida en la lista oficial, el borrador lo ' +
+      'avisa: en ese caso hay que unirlas desde la app, no aprobar. Devuelve un ' +
+      'borrador.',
     alcance: 'escribir',
     inputSchema: objeto(
       { persona_id: txt('id de la persona'), nombre: txt('Nombre completo corregido (opcional)') },
       ['persona_id'],
     ),
     ejecutar: (c, a) =>
-      prepararAprobarPersona(c, String(a.persona_id), a.nombre ? String(a.nombre) : undefined),
+      prepararAprobarPersona(c, a.persona_id, a.nombre ? String(a.nombre) : undefined),
   },
   {
     name: 'confirmar_operacion',
@@ -340,7 +366,8 @@ export const HERRAMIENTAS: Herramienta[] = [
       'EJECUTA de verdad una operación preparada antes. Úsalo SOLO después de ' +
       'haberle mostrado el borrador a la persona y de que lo haya aprobado de ' +
       'forma explícita en ese mismo momento. Si duda o corrige algo, prepara uno ' +
-      'nuevo en vez de confirmar el anterior.',
+      'nuevo en vez de confirmar el anterior. Copia el confirmacion_id completo, ' +
+      'tal cual. Confirmar dos veces el mismo borrador no repite nada.',
     alcance: 'escribir',
     inputSchema: objeto({ confirmacion_id: txt('El identificador que devolvió el borrador') },
       ['confirmacion_id']),

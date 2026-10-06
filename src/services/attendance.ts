@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { buildNameParts } from '../lib/normalize';
+import { walkinId } from '../lib/ids';
 import type { Attendance, Session, Member, SessionType, Modality } from '../types';
 import type { UserProfile } from '../types';
 
@@ -52,12 +53,20 @@ export function listenAttendance(
  * - funciona offline (se sincroniza al reconectar),
  * - `checkedInAt` usa Timestamp.now() (hora real del marcaje) en vez de
  *   serverTimestamp(), que quedaría null en la caché offline.
+ *
+ * Si otra coordinadora ya la había marcado, las reglas rechazan el lote ENTERO
+ * (asistencia y +1 juntos): el contador no se infla y se conserva su hora de
+ * llegada original.
+ *
+ * Devuelve la promesa del envío al servidor, pero la pantalla NO debe
+ * esperarla para seguir: la marca ya quedó en el teléfono al llamar, y sin
+ * señal esa promesa no se resuelve hasta reconectar.
  */
-export async function markPresent(
+export function markPresent(
   session: Session,
   member: Pick<Member, 'id' | 'fullName'>,
   user: UserProfile,
-) {
+): Promise<void> {
   const batch = writeBatch(db);
   const ref = doc(db, 'sessions', session.id, 'attendance', member.id);
   batch.set(ref, {
@@ -76,7 +85,7 @@ export async function markPresent(
   batch.update(doc(db, 'sessions', session.id), {
     presentCount: increment(1),
   });
-  await batch.commit();
+  return batch.commit();
 }
 
 /**
@@ -90,15 +99,25 @@ export async function markPresent(
  * Se hace en un único lote: si la sesión se hubiera finalizado entre medias
  * (otra coordinadora, otro celular), se rechaza todo junto y no queda una
  * ficha huérfana en la base.
+ *
+ * El id de la ficha sale de la sesión y del nombre: si dos coordinadoras
+ * agregan a la misma persona nueva en la misma reunión (o una pulsa dos
+ * veces), las dos apuntan a la MISMA ficha y la segunda asistencia la
+ * rechazan las reglas. Antes quedaban dos "Rous" idénticas.
+ *
+ * Como `markPresent`, no hay que esperar `done` para seguir: sin señal no se
+ * resuelve hasta reconectar.
  */
-export async function addWalkinAndMarkPresent(
+export function addWalkinAndMarkPresent(
   session: Session,
   input: { fullName: string; notes?: string; pendingIdentify?: boolean },
   user: UserProfile,
-): Promise<string> {
+): { id: string; done: Promise<void> } {
   const parts = buildNameParts(input.fullName);
-  // ID generado en el cliente: permite referenciarlo antes de escribirlo.
-  const memberRef = doc(collection(db, 'members'));
+  const memberRef = input.pendingIdentify
+    ? // "Por identificar (seña)": cada una es alguien distinto.
+      doc(collection(db, 'members'))
+    : doc(db, 'members', walkinId(session.id, parts.searchName));
   const batch = writeBatch(db);
 
   batch.set(memberRef, {
@@ -135,18 +154,21 @@ export async function addWalkinAndMarkPresent(
     presentCount: increment(1),
   });
 
-  await batch.commit();
-  return memberRef.id;
+  return { id: memberRef.id, done: batch.commit() };
 }
 
-/** Desmarca (borra el documento de asistencia y ajusta el contador). */
-export async function unmarkPresent(sessionId: string, memberId: string) {
+/**
+ * Desmarca (borra el documento de asistencia y ajusta el contador). Si otra
+ * coordinadora ya la había quitado, las reglas rechazan el lote y el contador
+ * no baja dos veces. Igual que al marcar, no hay que esperar la promesa.
+ */
+export function unmarkPresent(sessionId: string, memberId: string): Promise<void> {
   const batch = writeBatch(db);
   batch.delete(doc(db, 'sessions', sessionId, 'attendance', memberId));
   batch.update(doc(db, 'sessions', sessionId), {
     presentCount: increment(-1),
   });
-  await batch.commit();
+  return batch.commit();
 }
 
 /**

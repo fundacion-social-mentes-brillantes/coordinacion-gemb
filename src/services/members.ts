@@ -3,7 +3,7 @@ import {
   query,
   where,
   onSnapshot,
-  addDoc,
+  setDoc,
   doc,
   updateDoc,
   serverTimestamp,
@@ -29,6 +29,10 @@ export function listenMembers(
     : query(membersCol);
   return onSnapshot(
     q,
+    // Con los cambios de metadatos llega también el aviso "esto ya es del
+    // servidor" aunque los datos no cambien; sin él, quien muestre "la lista
+    // puede estar desactualizada" lo dejaría puesto para siempre.
+    { includeMetadataChanges: true },
     (snap) => {
       const list = snap.docs.map(
         (d) => ({ id: d.id, ...(d.data() as Omit<Member, 'id'>) }),
@@ -64,10 +68,15 @@ export interface NewMemberInput {
   pendingIdentify?: boolean;
 }
 
-/** Crea una persona (usado por walk-in y por el alta manual). */
+/**
+ * Crea una persona (alta manual e importación). El id se arma en el teléfono,
+ * así que se conoce aunque no haya señal; la promesa se resuelve cuando el
+ * servidor confirma.
+ */
 export async function createMember(input: NewMemberInput, uid: string) {
   const parts = buildNameParts(input.fullName);
-  const ref = await addDoc(membersCol, {
+  const ref = doc(membersCol);
+  await setDoc(ref, {
     fullName: parts.fullName,
     firstName: parts.firstName,
     lastName: parts.lastName,
