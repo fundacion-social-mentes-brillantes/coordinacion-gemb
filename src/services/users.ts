@@ -45,6 +45,11 @@ export async function setUserActive(uid: string, active: boolean) {
   await updateDoc(doc(db, 'users', uid), { active });
 }
 
+/** Permiso para cambiar el Calendario (quién coordina, modalidad, días). */
+export async function setPuedeProgramar(uid: string, puede: boolean) {
+  await updateDoc(doc(db, 'users', uid), { puedeProgramar: puede });
+}
+
 // --- Invitaciones (pre-autorizar por correo antes del primer ingreso) ---
 
 export interface Invite {

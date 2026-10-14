@@ -9,6 +9,7 @@ import { isUpdateReady } from '../lib/swUpdate';
 import { listenPendingReviewCount } from '../services/members';
 import {
   CalendarIcon,
+  ListCheckIcon,
   ChartIcon,
   UsersIcon,
   ShieldIcon,
@@ -30,9 +31,10 @@ const ALL: Role[] = ['coordinador', 'admin', 'super_admin'];
 const ADMIN: Role[] = ['admin', 'super_admin'];
 
 const NAV: NavItem[] = [
-  { to: '/sesiones', label: 'Sesiones', icon: CalendarIcon, roles: ALL },
+  { to: '/sesiones', label: 'Sesiones', icon: ListCheckIcon, roles: ALL },
+  // El calendario (antes era otra app): quién coordina cada reunión.
+  { to: '/programacion', label: 'Calendario', icon: CalendarIcon, roles: ALL },
   // El panel y la administración son solo para admin/super_admin.
-  // Las coordinadoras solo ven "Sesiones".
   { to: '/panel', label: 'Panel', icon: ChartIcon, roles: ADMIN },
   { to: '/personas', label: 'Personas', icon: UsersIcon, roles: ADMIN },
   { to: '/usuarios', label: 'Usuarios', icon: ShieldIcon, roles: ADMIN },

@@ -50,6 +50,8 @@ interface AuthContextValue {
   isSuperAdmin: boolean;
   isAdmin: boolean; // admin o super_admin
   isCoordinador: boolean; // coordinador, admin o super_admin (puede marcar)
+  /** Puede cambiar el calendario: la administración o quien tenga el permiso. */
+  puedeProgramar: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -461,6 +463,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAdmin = role === 'super_admin' || role === 'admin';
   const isCoordinador =
     role === 'coordinador' || role === 'admin' || role === 'super_admin';
+  const puedeProgramar =
+    !!profile?.active && (isAdmin || (isCoordinador && profile?.puedeProgramar === true));
 
   return (
     <AuthContext.Provider
@@ -475,6 +479,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isSuperAdmin,
         isAdmin,
         isCoordinador,
+        puedeProgramar,
       }}
     >
       {children}

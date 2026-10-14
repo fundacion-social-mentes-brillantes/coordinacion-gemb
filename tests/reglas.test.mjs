@@ -25,6 +25,7 @@ import {
   getDoc,
   getDocs,
   increment,
+  serverTimestamp,
   setDoc,
   updateDoc,
   writeBatch,
@@ -62,6 +63,9 @@ const como = {
   coord2: () => env.authenticatedContext('coord2', google('coord2@x.com')).firestore(),
   inactiva: () => env.authenticatedContext('inactiva', google('inactiva@x.com')).firestore(),
   pendiente: () => env.authenticatedContext('pendiente', google('pendiente@x.com')).firestore(),
+  progra: () => env.authenticatedContext('progra', google('progra@x.com')).firestore(),
+  colado: () => env.authenticatedContext('colado', google('colado@x.com')).firestore(),
+  anonimo: () => env.unauthenticatedContext().firestore(),
 };
 
 const asistencia = (sessionId, memberId, extra = {}) => ({
@@ -133,6 +137,25 @@ beforeEach(async () => {
     await setDoc(doc(db, 'users/coord2'), usuario('coord2@x.com', 'coordinador'));
     await setDoc(doc(db, 'users/inactiva'), usuario('inactiva@x.com', 'admin', false));
     await setDoc(doc(db, 'users/pendiente'), usuario('pendiente@x.com', 'pending'));
+    // Coordinadora con permiso de programar el calendario.
+    await setDoc(doc(db, 'users/progra'), {
+      ...usuario('progra@x.com', 'coordinador'),
+      puedeProgramar: true,
+    });
+    // Alguien pendiente que logró guardarse el permiso (no debe servirle).
+    await setDoc(doc(db, 'users/colado'), {
+      ...usuario('colado@x.com', 'pending'),
+      puedeProgramar: true,
+    });
+    await setDoc(doc(db, 'programacion/config'), {
+      dias: {},
+      coordinadoras: ['Tatiana López', 'Marcela Sánchez'],
+      desde: '2026-02-03',
+      hasta: '2026-12-10',
+      semanasVirtuales: 'par',
+      grupoWhatsapp: '',
+    });
+    await setDoc(doc(db, 'programacion_dias/2026-10-13'), { coordinadora: 'Tatiana López' });
 
     await setDoc(doc(db, 'sessions/hoy'), sesion());
     await setDoc(doc(db, 'sessions/agendada'), sesion({ date: mediodiaBogota(7) }));
@@ -359,5 +382,108 @@ describe('Ingreso, usuarios e invitaciones', () => {
   test('una administradora no puede ascender a nadie a administradora', async () => {
     await assertFails(updateDoc(doc(como.admin(), 'users/coord'), { role: 'admin' }));
     await assertSucceeds(updateDoc(doc(como.super(), 'users/coord'), { role: 'admin' }));
+  });
+});
+
+describe('Programación (el antiguo Calendario)', () => {
+  const cambio = (uid, extra = {}) => ({
+    coordinadora: 'Marcela Sánchez',
+    updatedAt: Timestamp.now(),
+    updatedBy: uid,
+    updatedByName: 'Alguien',
+    ...extra,
+  });
+
+  test('cualquiera la lee sin iniciar sesión', async () => {
+    await assertSucceeds(getDoc(doc(como.anonimo(), 'programacion/config')));
+    await assertSucceeds(getDocs(collection(como.anonimo(), 'programacion_dias')));
+    await assertSucceeds(getDocs(collection(como.anonimo(), 'programacion_solicitudes')));
+  });
+
+  test('sin sesión, o siendo coordinadora sin permiso, no se cambia', async () => {
+    await assertFails(setDoc(doc(como.anonimo(), 'programacion_dias/2026-10-15'), cambio('x')));
+    await assertFails(setDoc(doc(como.coord(), 'programacion_dias/2026-10-15'), cambio('coord')));
+    await assertFails(deleteDoc(doc(como.coord(), 'programacion_dias/2026-10-13')));
+  });
+
+  test('la administración y quien tiene el permiso sí la cambian', async () => {
+    await assertSucceeds(setDoc(doc(como.admin(), 'programacion_dias/2026-10-15'), cambio('admin')));
+    await assertSucceeds(
+      setDoc(doc(como.progra(), 'programacion_dias/2026-10-20'), cambio('progra', { modalidad: 'virtual' })),
+    );
+    await assertSucceeds(deleteDoc(doc(como.progra(), 'programacion_dias/2026-10-13')));
+  });
+
+  test('un pendiente que se guardó el permiso no puede programar', async () => {
+    await assertFails(setDoc(doc(como.colado(), 'programacion_dias/2026-10-15'), cambio('colado')));
+  });
+
+  test('nadie se da el permiso de programar al crear su cuenta', async () => {
+    const nuevo = env.authenticatedContext('u-prog', google('nuevo@x.com')).firestore();
+    await assertFails(
+      setDoc(doc(nuevo, 'users/u-prog'), {
+        email: 'nuevo@x.com',
+        displayName: 'Nuevo',
+        photoURL: '',
+        role: 'pending',
+        active: true,
+        puedeProgramar: true,
+      }),
+    );
+    await assertSucceeds(
+      setDoc(doc(nuevo, 'users/u-prog'), {
+        email: 'nuevo@x.com',
+        displayName: 'Nuevo',
+        photoURL: '',
+        role: 'pending',
+        active: true,
+      }),
+    );
+  });
+
+  test('se rechazan campos desconocidos, modalidades raras y firmas ajenas', async () => {
+    const db = como.admin();
+    await assertFails(setDoc(doc(db, 'programacion_dias/2026-10-15'), cambio('admin', { colado: 1 })));
+    await assertFails(
+      setDoc(doc(db, 'programacion_dias/2026-10-15'), cambio('admin', { modalidad: 'hibrida' })),
+    );
+    await assertFails(setDoc(doc(db, 'programacion_dias/2026-10-15'), cambio('otra-persona')));
+    await assertFails(setDoc(doc(db, 'programacion_dias/no-es-fecha'), cambio('admin')));
+  });
+
+  test('Apartar sin sesión: solo alguien del equipo, en una fecha libre, una vez', async () => {
+    const anon = como.anonimo();
+    const pedir = (dia, nombre) =>
+      setDoc(doc(anon, `programacion_solicitudes/${dia}`), {
+        nombre,
+        estado: 'pendiente',
+        createdAt: serverTimestamp(),
+      });
+    await assertSucceeds(pedir('2026-10-15', 'Marcela Sánchez'));
+    await assertFails(pedir('2026-10-15', 'Tatiana López'), 'la misma fecha dos veces');
+    await assertFails(pedir('2026-10-20', 'Alguien de afuera'), 'nombre fuera del equipo');
+    await assertFails(pedir('2026-10-13', 'Marcela Sánchez'), 'fecha ya asignada');
+    await assertFails(pedir('martes', 'Marcela Sánchez'), 'id que no es fecha');
+    // Atenderla o rechazarla es de quien programa.
+    await assertFails(deleteDoc(doc(como.coord(), 'programacion_solicitudes/2026-10-15')));
+    await assertSucceeds(deleteDoc(doc(como.progra(), 'programacion_solicitudes/2026-10-15')));
+  });
+
+  test('la configuración solo la cambia quien programa, y con forma válida', async () => {
+    const base = {
+      dias: {},
+      coordinadoras: ['Tatiana López'],
+      desde: '2027-02-02',
+      hasta: '2027-12-09',
+      semanasVirtuales: 'impar',
+      grupoWhatsapp: '',
+      updatedAt: Timestamp.now(),
+    };
+    await assertFails(setDoc(doc(como.coord(), 'programacion/config'), { ...base, updatedBy: 'coord' }));
+    await assertSucceeds(setDoc(doc(como.progra(), 'programacion/config'), { ...base, updatedBy: 'progra' }));
+    await assertFails(
+      setDoc(doc(como.admin(), 'programacion/config'), { ...base, desde: 'febrero', updatedBy: 'admin' }),
+    );
+    await assertFails(setDoc(doc(como.admin(), 'programacion/otra'), { ...base, updatedBy: 'admin' }));
   });
 });

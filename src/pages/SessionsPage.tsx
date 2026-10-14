@@ -26,6 +26,8 @@ import {
   toInputDate,
 } from '../lib/dates';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { useProgramacion } from '../hooks/useProgramacion';
+import { hayReunion, planDeFecha } from '../lib/programacion';
 import { Modal } from '../components/Modal';
 import { CoordinatorPicker } from '../components/CoordinatorPicker';
 import { InstallButton, IosInstallHelp } from '../components/InstallPrompt';
@@ -39,8 +41,8 @@ import {
   TrashIcon,
 } from '../components/Icons';
 
-/** El tipo de reunión que toca ese día: martes Ego, jueves Pasos. */
-function tipoDelDia(key: string): SessionType | null {
+/** El tipo de reunión que toca ese día si el calendario no dice nada. */
+function tipoPorDefecto(key: string): SessionType | null {
   const dia = new Date(`${key}T12:00:00Z`).getUTCDay();
   if (dia === 2) return 'reduccion_ego';
   if (dia === 4) return 'entrega_pasos';
@@ -55,6 +57,20 @@ export function SessionsPage() {
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  // El calendario: qué toca cada día, en qué modalidad y quién coordina.
+  const prog = useProgramacion({ conSolicitudes: false });
+  const planDe = (key: string) => planDeFecha(key, prog.config, prog.dias);
+  const tipoDelDia = (key: string): SessionType | null => {
+    const p = planDe(key);
+    return p && hayReunion(p) ? p.actividades[0] : tipoPorDefecto(key);
+  };
+  /** Rellena modalidad y coordinadora con lo que dice el calendario. */
+  const segunCalendario = (key: string, type: SessionType | null) => {
+    const p = isValidDateKey(key) ? planDe(key) : null;
+    if (!p || !type || !hayReunion(p) || !p.actividades.includes(type)) return;
+    setNewModality(p.modalidad);
+    setNewCoordinator(p.coordinadora);
+  };
 
   // Filtros
   const [fType, setFType] = useState<SessionType | 'all'>('all');
@@ -129,12 +145,45 @@ export function SessionsPage() {
 
   const openCreate = () => {
     const hoy = toInputDate(new Date());
-    setNewType(tipoDelDia(hoy));
+    const tipo = tipoDelDia(hoy);
+    setNewType(tipo);
     setNewModality('presencial');
     setNewDate(hoy);
     setNewCoordinator('');
+    segunCalendario(hoy, tipo);
     setYaExiste(null);
     setCreating(true);
+  };
+
+  // Lo que el calendario dice que toca hoy y todavía no tiene sesión.
+  const hoyKey = toInputDate(new Date());
+  const planHoy = planDe(hoyKey);
+  const pendientesHoy =
+    !loading && planHoy && hayReunion(planHoy)
+      ? planHoy.actividades.filter(
+          (t) => !sessions.some((s) => s.type === t && dayKey(s.date) === hoyKey),
+        )
+      : [];
+
+  /** "Tomar lista": crea la sesión de hoy con lo del calendario y la abre. */
+  const abrirDeHoy = (type: SessionType) => {
+    if (!profile || !planHoy) return;
+    const { id, done } = createSession(
+      {
+        type,
+        modality: planHoy.modalidad,
+        date: fromInputDate(hoyKey),
+        coordinator: planHoy.coordinadora,
+      },
+      profile,
+    );
+    done.catch((e) => {
+      console.error(e);
+      if ((e as { code?: string })?.code !== 'permission-denied') {
+        toast('No se pudo crear la sesión. Revisa la conexión.', 'error');
+      }
+    });
+    navigate(`/sesiones/${id}`);
   };
 
   const handleCreate = (otraMas = false) => {
@@ -239,7 +288,29 @@ export function SessionsPage() {
     <div className="space-y-4">
       <h2 className="text-lg font-bold text-primary-900">Sesiones</h2>
 
-      <button type="button" onClick={openCreate} className="btn-primary btn-lg">
+      {pendientesHoy.map((t) => (
+        <div key={t} className="card border-2 border-primary-300 p-4">
+          <p className="text-xs font-bold uppercase tracking-wide text-primary-600">Hoy toca</p>
+          <p className="mt-1 font-semibold text-primary-900">{SESSION_TYPE_LABELS[t]}</p>
+          <p className="mt-0.5 text-sm text-slate-600">
+            {planHoy?.horario} · {MODALITY_LABELS[planHoy?.modalidad ?? 'presencial']}
+            {planHoy?.coordinadora ? ` · Coordina: ${planHoy.coordinadora}` : ''}
+          </p>
+          <button
+            type="button"
+            onClick={() => abrirDeHoy(t)}
+            className="btn-primary btn-lg mt-3"
+          >
+            Tomar lista
+          </button>
+        </div>
+      ))}
+
+      <button
+        type="button"
+        onClick={openCreate}
+        className={pendientesHoy.length ? 'btn-secondary min-h-[48px] w-full' : 'btn-primary btn-lg'}
+      >
         <PlusIcon className="text-xl" /> Nueva sesión
       </button>
 
@@ -504,7 +575,10 @@ export function SessionsPage() {
                 <button
                   key={t}
                   type="button"
-                  onClick={() => setNewType(t)}
+                  onClick={() => {
+                    setNewType(t);
+                    segunCalendario(newDate, t);
+                  }}
                   className={`rounded-xl border p-3 text-left text-sm font-medium transition ${
                     newType === t
                       ? 'border-primary-500 bg-primary-50 text-primary-800'
@@ -548,9 +622,10 @@ export function SessionsPage() {
               value={newDate}
               onChange={(e) => {
                 setNewDate(e.target.value);
-                // Al cambiar el día, sugiere el tipo que toca ese día.
+                // Al cambiar el día, sugiere lo que dice el calendario.
                 const t = isValidDateKey(e.target.value) ? tipoDelDia(e.target.value) : null;
                 if (t) setNewType(t);
+                segunCalendario(e.target.value, t ?? newType);
               }}
             />
             {isValidDateKey(newDate) && daysFromToday(fromInputDate(newDate)) > 0 && (
@@ -562,7 +637,11 @@ export function SessionsPage() {
 
           <div>
             <label className="label">¿Quién coordina? (opcional)</label>
-            <CoordinatorPicker value={newCoordinator} onChange={setNewCoordinator} />
+            <CoordinatorPicker
+              value={newCoordinator}
+              onChange={setNewCoordinator}
+              nombres={prog.config.coordinadoras}
+            />
           </div>
 
           <button

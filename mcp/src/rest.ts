@@ -1,4 +1,17 @@
 import type { Attendance, Member, Role, Session } from '../../src/types';
+import {
+  completarConfig,
+  type DiaProgramado,
+  type ProgramacionConfig,
+  type SolicitudApartado,
+} from '../../src/lib/programacion';
+
+/** El Calendario: configuración, cambios por día y solicitudes pendientes. */
+export interface Programacion {
+  config: ProgramacionConfig;
+  dias: Map<string, DiaProgramado>;
+  solicitudes: Map<string, SolicitudApartado>;
+}
 
 // ---------------------------------------------------------------------------
 //  Lectura de Firestore ENTRANDO COMO CADA PERSONA.
@@ -85,6 +98,7 @@ export interface Cliente {
   cargarSesiones(): Promise<Session[]>;
   cargarAsistencia(): Promise<Attendance[]>;
   cargarPersonas(): Promise<MemberPublico[]>;
+  cargarProgramacion(): Promise<Programacion>;
   /** Un solo documento, recién leído (sin caché). null si no existe. */
   leer<T>(ruta: string): Promise<(T & { id: string }) | null>;
   /** La asistencia de UNA reunión, recién leída. */
@@ -376,6 +390,21 @@ export async function abrirSesion(llave: string): Promise<Cliente> {
         const todas = await coleccion<Member>('members', cred.idToken);
         // Ni teléfonos ni notas privadas salen de aquí, para nadie.
         return todas.map(({ phone: _p, notes: _n, ...resto }) => resto as MemberPublico);
+      }),
+    cargarProgramacion: () =>
+      cacheado('programacion', async () => {
+        const [config, dias, solicitudes] = await Promise.all([
+          pedir(`${DOCS}/programacion/config`, cred.idToken, true) as Promise<DocRest | null>,
+          coleccion<DiaProgramado>('programacion_dias', cred.idToken),
+          coleccion<SolicitudApartado>('programacion_solicitudes', cred.idToken),
+        ]);
+        return {
+          config: completarConfig(config ? (campos(config.fields) as Partial<ProgramacionConfig>) : undefined),
+          dias: new Map(dias.map((d) => [d.id, d])),
+          solicitudes: new Map(
+            solicitudes.filter((x) => x.estado === 'pendiente').map((x) => [x.id, x]),
+          ),
+        };
       }),
     async leer<T>(ruta: string) {
       const d = (await pedir(`${DOCS}/${ruta}`, cred.idToken, true)) as DocRest | null;

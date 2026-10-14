@@ -52,11 +52,11 @@ const PALETTES: Record<SessionType, Palette> = {
   },
 };
 
-const FONT = `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
-const font = (size: number, weight = '400') => `${weight} ${size}px ${FONT}`;
+export const FONT = `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
+export const font = (size: number, weight = '400') => `${weight} ${size}px ${FONT}`;
 
 /** Rectángulo redondeado compatible con navegadores viejos. */
-function roundRect(
+export function roundRect(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
@@ -75,7 +75,7 @@ function roundRect(
 }
 
 /** Recorta un texto con "…" para que quepa en `maxW`. */
-function ellipsize(
+export function ellipsize(
   ctx: CanvasRenderingContext2D,
   text: string,
   maxW: number,
@@ -92,7 +92,7 @@ function ellipsize(
 }
 
 /** Píldora de texto (chip) usada en la cabecera. */
-function drawChip(
+export function drawChip(
   ctx: CanvasRenderingContext2D,
   text: string,
   x: number,

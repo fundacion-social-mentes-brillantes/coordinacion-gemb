@@ -108,6 +108,10 @@ service cloud.firestore {
       allow create: if isGoogle()
         && request.auth.uid == userId
         && request.resource.data.email == request.auth.token.email
+        // Solo los campos del alta: nadie se da a sí mismo permisos de más
+        // (por ejemplo "puedeProgramar") al crear su propia cuenta.
+        && request.resource.data.keys().hasOnly(
+             ['email', 'displayName', 'photoURL', 'role', 'active', 'createdAt'])
         && (
           // El super admin se crea a sí mismo como super_admin.
           (isSuperEmail(request.auth.token.email)
@@ -286,6 +290,79 @@ service cloud.firestore {
     // colección): la usan el Panel y las correcciones de nombre.
     match /{path=**}/attendance/{memberId} {
       allow read: if canRead();
+    }
+
+    // ==================== Programación (el antiguo Calendario) ====================
+    // Qué reunión hay cada día, a qué hora, en qué modalidad y quién coordina.
+    // Se LEE sin iniciar sesión (el calendario es público, como antes). La
+    // cambian la administración y quien tenga el permiso "Programación".
+
+    function puedeProgramar() {
+      return isStaff() && isActive()
+        && (isAdmin() || userData().get('puedeProgramar', false) == true);
+    }
+    function esDia(id) {
+      return id.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+    function textoCorto(v, max) {
+      return v is string && v.size() <= max;
+    }
+    function equipo() {
+      return get(/databases/$(database)/documents/programacion/config).data.coordinadoras;
+    }
+
+    match /programacion/{docId} {
+      allow read: if true;
+      allow create, update: if puedeProgramar()
+        && docId == 'config'
+        && request.resource.data.keys().hasOnly([
+             'dias', 'coordinadoras', 'desde', 'hasta', 'semanasVirtuales',
+             'grupoWhatsapp', 'updatedAt', 'updatedBy', 'updatedByName'])
+        && request.resource.data.coordinadoras is list
+        && request.resource.data.coordinadoras.size() <= 60
+        && request.resource.data.dias is map
+        && esDia(request.resource.data.desde)
+        && esDia(request.resource.data.hasta)
+        && request.resource.data.semanasVirtuales in ['par', 'impar']
+        && textoCorto(request.resource.data.grupoWhatsapp, 200)
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if false;
+    }
+
+    match /programacion_dias/{dia} {
+      allow read: if true;
+      allow create, update: if puedeProgramar()
+        && esDia(dia)
+        && request.resource.data.keys().hasOnly([
+             'coordinadora', 'modalidad', 'actividades', 'horario', 'cancelada',
+             'motivo', 'especial', 'updatedAt', 'updatedBy', 'updatedByName'])
+        && textoCorto(request.resource.data.get('coordinadora', ''), 80)
+        && request.resource.data.get('modalidad', 'virtual') in ['presencial', 'virtual']
+        && request.resource.data.get('actividades', []) is list
+        && textoCorto(request.resource.data.get('horario', ''), 40)
+        && request.resource.data.get('cancelada', false) is bool
+        && textoCorto(request.resource.data.get('motivo', ''), 120)
+        && request.resource.data.get('especial', false) is bool
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if puedeProgramar();
+    }
+
+    // "Apartar": alguien del equipo pide coordinar una fecha libre, sin
+    // iniciar sesión (así funcionaba el Calendario). Solo con un nombre del
+    // equipo, solo si la fecha sigue libre y solo una solicitud por fecha.
+    match /programacion_solicitudes/{dia} {
+      allow read: if true;
+      allow create: if esDia(dia)
+        && request.resource.data.keys().hasOnly(['nombre', 'estado', 'createdAt'])
+        && request.resource.data.estado == 'pendiente'
+        && request.resource.data.nombre is string
+        && request.resource.data.nombre in equipo()
+        && request.resource.data.createdAt == request.time
+        && !(exists(/databases/$(database)/documents/programacion_dias/$(dia))
+             && get(/databases/$(database)/documents/programacion_dias/$(dia)).data
+                  .get('coordinadora', '') != '');
+      allow update: if false;
+      allow delete: if puedeProgramar();
     }
   }
 }

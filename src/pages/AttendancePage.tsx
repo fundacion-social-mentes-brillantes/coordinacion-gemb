@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { useProgramacion } from '../hooks/useProgramacion';
+import { planDeFecha } from '../lib/programacion';
 import {
   listenSession,
   setSessionStatus,
@@ -34,6 +36,7 @@ import {
 } from '../lib/shareImage';
 import {
   capitalizeFirst,
+  dayKey,
   daysFromToday,
   fmtDate,
   fmtDateLong,
@@ -133,6 +136,8 @@ export function AttendancePage() {
   // Quién coordina.
   const [coordOpen, setCoordOpen] = useState(false);
   const [coordDraft, setCoordDraft] = useState('');
+  // El calendario: el equipo para elegir quién coordina, y a quién le tocaba.
+  const prog = useProgramacion({ conSolicitudes: false });
   const [coordSaving, setCoordSaving] = useState(false);
   // Ponerle nombre a una persona "Por identificar".
   const [resolveTarget, setResolveTarget] = useState<{
@@ -285,6 +290,13 @@ export function AttendancePage() {
    */
   const canEdit =
     (isOpen || isAdmin) && (!fueraDeFecha || (isAdmin && desbloqueoFecha));
+
+  /** A quién le tocaba según el calendario (si la sesión no lo dice). */
+  const segunCalendario = useMemo(() => {
+    if (!session || session.coordinator) return '';
+    const p = planDeFecha(dayKey(session.date), prog.config, prog.dias);
+    return p && p.actividades.includes(session.type) ? p.coordinadora : '';
+  }, [session, prog.config, prog.dias]);
   const motivoNoEditable = !isOpen
     ? 'La sesión ya se finalizó. Solo una administradora puede modificarla.'
     : diasSesion > 0
@@ -697,7 +709,7 @@ export function AttendancePage() {
           <button
             type="button"
             onClick={() => {
-              setCoordDraft(session.coordinator ?? '');
+              setCoordDraft(session.coordinator || segunCalendario);
               setCoordOpen(true);
             }}
             className="mt-1 flex min-h-[44px] items-center gap-1.5 text-sm text-primary-700"
@@ -706,6 +718,11 @@ export function AttendancePage() {
             {session.coordinator ? (
               <span>
                 Coordina: <strong>{session.coordinator}</strong>
+              </span>
+            ) : segunCalendario ? (
+              <span>
+                Según el calendario coordina <strong>{segunCalendario}</strong>{' '}
+                <span className="underline">(confirmar)</span>
               </span>
             ) : (
               <span className="underline">Asignar quién coordina</span>
@@ -1337,7 +1354,11 @@ export function AttendancePage() {
         title="¿Quién coordina esta sesión?"
       >
         <div className="space-y-4">
-          <CoordinatorPicker value={coordDraft} onChange={setCoordDraft} />
+          <CoordinatorPicker
+            value={coordDraft}
+            onChange={setCoordDraft}
+            nombres={prog.config.coordinadoras}
+          />
           <button
             type="button"
             onClick={saveCoordinator}

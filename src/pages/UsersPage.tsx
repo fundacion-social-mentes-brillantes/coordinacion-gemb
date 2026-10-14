@@ -7,6 +7,7 @@ import {
   approveUser,
   updateUserRole,
   setUserActive,
+  setPuedeProgramar,
   listenInvites,
   createInvite,
   deleteInvite,
@@ -148,6 +149,23 @@ export function UsersPage() {
       () => setUserActive(u.uid, !u.active),
       u.active ? 'Acceso quitado.' : 'Acceso reactivado.',
       'No se pudo cambiar el acceso.',
+    );
+  };
+
+  const togglePrograma = (u: UserProfile) => {
+    const dar = !u.puedeProgramar;
+    if (
+      dar &&
+      !window.confirm(
+        `¿Dejar que ${nombre(u)} cambie el Calendario? Podrá asignar quién coordina cada reunión, cambiar modalidad y días, y atender las solicitudes.`,
+      )
+    )
+      return;
+    void guardar(
+      u.uid,
+      () => setPuedeProgramar(u.uid, dar),
+      dar ? `${nombre(u)} ya puede cambiar el Calendario.` : 'Permiso de Calendario quitado.',
+      'No se pudo cambiar el permiso.',
     );
   };
 
@@ -352,6 +370,20 @@ export function UsersPage() {
                           'Reactivar'
                         )}
                       </button>
+                      {/* Las administradoras ya pueden; esto es para una
+                          coordinadora que lleva la agenda. */}
+                      {u.role === 'coordinador' && (
+                        <label className="flex min-h-[44px] w-full items-center gap-3 rounded-xl bg-slate-50 px-3 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            className="h-5 w-5"
+                            checked={u.puedeProgramar === true}
+                            disabled={busy === u.uid}
+                            onChange={() => togglePrograma(u)}
+                          />
+                          Puede cambiar el Calendario
+                        </label>
+                      )}
                     </div>
                   ) : (
                     <p className="mt-2 text-xs text-slate-400">

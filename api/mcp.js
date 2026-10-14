@@ -1,315 +1,3 @@
-// mcp/src/rest.ts
-var EMU_FIRESTORE = process.env.FIRESTORE_EMULATOR_HOST;
-var EMU_AUTH = process.env.FIREBASE_AUTH_EMULATOR_HOST;
-var PROJECT_ID = EMU_FIRESTORE && process.env.GEMB_PROJECT_ID || "coordinacion-gemb";
-var API_KEY = "AIzaSyB-KQMYvpKun5oxQhqTSyF-ElhJxAp-eGQ";
-var RAIZ_DOCS = `projects/${PROJECT_ID}/databases/(default)/documents`;
-var DOCS = EMU_FIRESTORE ? `http://${EMU_FIRESTORE}/v1/${RAIZ_DOCS}` : `https://firestore.googleapis.com/v1/${RAIZ_DOCS}`;
-var TOKEN_URL = EMU_AUTH ? `http://${EMU_AUTH}/securetoken.googleapis.com/v1/token?key=${API_KEY}` : `https://securetoken.googleapis.com/v1/token?key=${API_KEY}`;
-var ConfigError = class extends Error {
-};
-var AccesoError = class extends Error {
-};
-var LlaveInvalidaError = class extends AccesoError {
-};
-var ConflictoError = class extends AccesoError {
-  constructor(message2, motivo) {
-    super(message2);
-    this.motivo = motivo;
-  }
-};
-async function canjear(llave) {
-  const r = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(llave)}`
-  });
-  const d = await r.json();
-  if (!r.ok || !d.id_token) {
-    const codigo = d.error?.message ?? `HTTP ${r.status}`;
-    if (codigo.startsWith("TOKEN_EXPIRED") || codigo.startsWith("USER_NOT_FOUND") || codigo.startsWith("INVALID_REFRESH_TOKEN") || codigo.startsWith("INVALID_GRANT_TYPE") || codigo.startsWith("MISSING_REFRESH_TOKEN")) {
-      throw new LlaveInvalidaError(
-        "El acceso ya no sirve (caduc\xF3 o lo revocaron). Vuelve a conectar el conector desde Claude y entra otra vez con Google."
-      );
-    }
-    if (codigo.startsWith("USER_DISABLED")) {
-      throw new LlaveInvalidaError("Esta cuenta est\xE1 deshabilitada.");
-    }
-    throw new AccesoError(`No se pudo validar la llave: ${codigo}`);
-  }
-  return {
-    idToken: d.id_token,
-    uid: d.user_id ?? "",
-    expira: Date.now() + Number(d.expires_in ?? 3600) * 1e3
-  };
-}
-async function pedir(url, idToken, toleraFalta = false) {
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
-  if (r.status === 404 && toleraFalta) return null;
-  revisarRespuesta(r);
-  if (!r.ok) throw new AccesoError(`Firestore respondi\xF3 HTTP ${r.status}`);
-  return r.json();
-}
-function revisarRespuesta(r) {
-  if (r.status === 401) {
-    throw new LlaveInvalidaError(
-      "El permiso de la sesi\xF3n venci\xF3 a mitad de la consulta. Vuelve a intentarlo."
-    );
-  }
-  if (r.status === 403) throw new AccesoError("PERMISSION_DENIED");
-}
-function valor(v) {
-  if (v === null || typeof v !== "object") return v;
-  const o = v;
-  if ("stringValue" in o) return o.stringValue;
-  if ("booleanValue" in o) return o.booleanValue;
-  if ("integerValue" in o) return Number(o.integerValue);
-  if ("doubleValue" in o) return o.doubleValue;
-  if ("timestampValue" in o) return new Date(o.timestampValue);
-  if ("nullValue" in o) return null;
-  if ("arrayValue" in o) {
-    return (o.arrayValue.values ?? []).map(valor);
-  }
-  if ("mapValue" in o) {
-    return campos(o.mapValue.fields);
-  }
-  if ("referenceValue" in o) return o.referenceValue;
-  return void 0;
-}
-function campos(f) {
-  const salida = {};
-  for (const [k, v] of Object.entries(f ?? {})) salida[k] = valor(v);
-  return salida;
-}
-function aObjeto(d) {
-  const id = d.name.split("/").pop() ?? "";
-  return { ...campos(d.fields), id };
-}
-async function coleccion(nombre, idToken) {
-  const salida = [];
-  let token = "";
-  do {
-    const url = `${DOCS}/${nombre}?pageSize=300${token ? `&pageToken=${encodeURIComponent(token)}` : ""}`;
-    const r = await pedir(url, idToken);
-    for (const d of r.documents ?? []) salida.push(aObjeto(d));
-    token = r.nextPageToken ?? "";
-  } while (token);
-  return salida;
-}
-async function todaLaAsistencia(idToken) {
-  const salida = [];
-  const TANDA = 1e3;
-  let ultimo = null;
-  for (; ; ) {
-    const structuredQuery = {
-      from: [{ collectionId: "attendance", allDescendants: true }],
-      orderBy: [{ field: { fieldPath: "__name__" }, direction: "ASCENDING" }],
-      limit: TANDA
-    };
-    if (ultimo) {
-      structuredQuery.startAt = { values: [{ referenceValue: ultimo }], before: false };
-    }
-    const r = await fetch(`${DOCS}:runQuery`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ structuredQuery })
-    });
-    revisarRespuesta(r);
-    if (!r.ok) throw new AccesoError(`Firestore respondi\xF3 HTTP ${r.status} al leer la asistencia`);
-    const filas = await r.json();
-    const docs = filas.map((f) => f.document).filter((d) => !!d);
-    for (const d of docs) salida.push(aObjeto(d));
-    if (docs.length < TANDA) break;
-    ultimo = docs[docs.length - 1].name;
-  }
-  return salida;
-}
-async function asistenciasDePersona(memberId, idToken) {
-  const r = await fetch(`${DOCS}:runQuery`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      structuredQuery: {
-        from: [{ collectionId: "attendance", allDescendants: true }],
-        where: {
-          fieldFilter: {
-            field: { fieldPath: "memberId" },
-            op: "EQUAL",
-            value: { stringValue: memberId }
-          }
-        }
-      }
-    })
-  });
-  revisarRespuesta(r);
-  if (!r.ok) throw new AccesoError(`Firestore respondi\xF3 HTTP ${r.status} al leer el historial`);
-  const filas = await r.json();
-  return filas.map((f) => f.document).filter((d) => !!d).map((d) => ({
-    ruta: d.name.slice(d.name.indexOf("/documents/") + "/documents/".length),
-    datos: aObjeto(d)
-  }));
-}
-var TTL_MS = 6e4;
-var cache = /* @__PURE__ */ new Map();
-function limpiarVencidos() {
-  const ahora = Date.now();
-  for (const [k, v] of cache) if (v.hasta <= ahora) cache.delete(k);
-}
-async function abrirSesion(llave) {
-  if (!llave || llave.length < 20) {
-    throw new ConfigError(
-      'Falta entrar con Google. En Claude, toca "Conectar" en este conector y entra con tu cuenta de siempre.'
-    );
-  }
-  limpiarVencidos();
-  const cred = await canjear(llave);
-  const yo = await pedir(`${DOCS}/users/${cred.uid}`, cred.idToken, true);
-  if (!yo) {
-    throw new AccesoError(
-      "Tu cuenta todav\xEDa no est\xE1 dada de alta en la app. Entra una vez a la app con Google y pide que te aprueben."
-    );
-  }
-  const perfil = campos(yo.fields);
-  if (perfil.active === false) {
-    throw new AccesoError("Tu acceso est\xE1 desactivado en la app. Habla con la administraci\xF3n.");
-  }
-  const rol = perfil.role ?? "pending";
-  if (rol === "pending") {
-    throw new AccesoError("Tu acceso est\xE1 pendiente de aprobaci\xF3n en la app.");
-  }
-  const esAdmin = rol === "admin" || rol === "super_admin";
-  const clave2 = (sufijo) => `${cred.uid}:${sufijo}`;
-  async function cacheado(sufijo, cargar) {
-    const k = clave2(sufijo);
-    const hit = cache.get(k);
-    if (hit && hit.hasta > Date.now()) return hit.valor;
-    const v = await cargar();
-    cache.set(k, { valor: v, hasta: Date.now() + TTL_MS });
-    return v;
-  }
-  return {
-    uid: cred.uid,
-    email: perfil.email ?? "",
-    nombre: perfil.displayName || perfil.email || "Sin nombre",
-    rol,
-    esAdmin,
-    expira: cred.expira,
-    cargarSesiones: () => cacheado("sessions", () => coleccion("sessions", cred.idToken)),
-    cargarAsistencia: () => cacheado("attendance", () => todaLaAsistencia(cred.idToken)),
-    cargarPersonas: () => cacheado("members", async () => {
-      const todas = await coleccion("members", cred.idToken);
-      return todas.map(({ phone: _p, notes: _n, ...resto }) => resto);
-    }),
-    async leer(ruta) {
-      const d = await pedir(`${DOCS}/${ruta}`, cred.idToken, true);
-      return d ? aObjeto(d) : null;
-    },
-    asistenciaDe: (sessionId) => coleccion(`sessions/${sessionId}/attendance`, cred.idToken),
-    asistenciasDePersona: (memberId) => asistenciasDePersona(memberId, cred.idToken),
-    async guardar(escrituras) {
-      exigirAdmin(esAdmin);
-      try {
-        await guardarLote(escrituras, cred.idToken);
-      } finally {
-        olvidar(cred.uid);
-      }
-    }
-  };
-}
-function aValorRest(v) {
-  if (v === null || v === void 0) return { nullValue: null };
-  if (v instanceof Date) return { timestampValue: v.toISOString() };
-  if (typeof v === "string") return { stringValue: v };
-  if (typeof v === "boolean") return { booleanValue: v };
-  if (typeof v === "number") {
-    return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
-  }
-  if (Array.isArray(v)) return { arrayValue: { values: v.map(aValorRest) } };
-  if (typeof v === "object") {
-    const fields = {};
-    for (const [k, x] of Object.entries(v)) fields[k] = aValorRest(x);
-    return { mapValue: { fields } };
-  }
-  return { stringValue: String(v) };
-}
-var nombreDoc = (ruta) => `${RAIZ_DOCS}/${ruta}`;
-var rutaCampo = (campo) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(campo) ? campo : "`" + campo.replace(/[`\\]/g, "\\$&") + "`";
-function aEscrituraRest(e) {
-  switch (e.tipo) {
-    case "crear":
-    case "actualizar": {
-      const fields = {};
-      for (const [k, v] of Object.entries(e.datos)) fields[k] = aValorRest(v);
-      return {
-        update: { name: nombreDoc(e.ruta), fields },
-        // Al crear se escribe el documento entero; al actualizar, SOLO esos
-        // campos (lo demás queda como estaba).
-        ...e.tipo === "actualizar" ? { updateMask: { fieldPaths: Object.keys(e.datos).map(rutaCampo) } } : {},
-        currentDocument: { exists: e.tipo === "actualizar" }
-      };
-    }
-    case "borrar":
-      return { delete: nombreDoc(e.ruta), currentDocument: { exists: true } };
-    case "sumar":
-      return {
-        transform: {
-          document: nombreDoc(e.ruta),
-          fieldTransforms: [
-            { fieldPath: rutaCampo(e.campo), increment: { integerValue: String(e.cantidad) } }
-          ]
-        },
-        currentDocument: { exists: true }
-      };
-  }
-}
-async function guardarLote(escrituras, idToken) {
-  if (escrituras.length === 0) return;
-  if (escrituras.length > 500) {
-    throw new AccesoError("Son demasiados cambios para hacerlos de una vez (m\xE1s de 500).");
-  }
-  const r = await fetch(`${DOCS}:commit`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ writes: escrituras.map(aEscrituraRest) })
-  });
-  if (r.ok) return;
-  revisarRespuesta(r);
-  let estado = "";
-  let detalle = "";
-  try {
-    const cuerpo = await r.json();
-    estado = cuerpo.error?.status ?? "";
-    detalle = cuerpo.error?.message ?? "";
-  } catch {
-  }
-  if (r.status === 409 || estado === "ALREADY_EXISTS") {
-    throw new ConflictoError("Ya exist\xEDa. No se guard\xF3 nada.", "ya_existe");
-  }
-  if (r.status === 404 || estado === "NOT_FOUND") {
-    throw new ConflictoError("Ya no existe. No se guard\xF3 nada.", "no_existe");
-  }
-  if (estado === "FAILED_PRECONDITION" && /exist/i.test(detalle)) {
-    throw new ConflictoError(
-      "Los datos cambiaron mientras tanto. No se guard\xF3 nada.",
-      /not exist|no document/i.test(detalle) ? "no_existe" : "ya_existe"
-    );
-  }
-  throw new AccesoError(`No se pudo guardar (HTTP ${r.status}${estado ? ` ${estado}` : ""}).`);
-}
-function exigirAdmin(esAdmin) {
-  if (!esAdmin) {
-    throw new AccesoError(
-      "Tu cuenta entra como coordinador(a): solo lectura. Registrar o corregir cosas es de administraci\xF3n, y se hace desde la app."
-    );
-  }
-}
-function olvidar(uid) {
-  for (const k of [...cache.keys()]) if (k.startsWith(`${uid}:`)) cache.delete(k);
-}
-
-// mcp/src/escrituras.ts
-import { createHash } from "node:crypto";
-
 // src/lib/constants.ts
 var SESSION_TYPE_LABELS = {
   entrega_pasos: "Entrega de Pasos",
@@ -320,6 +8,13 @@ var MODALITY_LABELS = {
   presencial: "Presencial"
 };
 var MODALITIES = ["presencial", "virtual"];
+var COORDINATOR_NAMES = [
+  "Alexandra Ortega",
+  "Eva Simbaqueba",
+  "Jessica Becerra",
+  "Marcela S\xE1nchez",
+  "Tatiana L\xF3pez"
+];
 var UNKNOWN_PREFIX = "Por identificar";
 
 // src/lib/normalize.ts
@@ -2397,6 +2092,494 @@ function isValidDateKey(str) {
   return !isNaN(d.getTime()) && d.toISOString().startsWith(str);
 }
 
+// src/lib/programacion.ts
+var HORARIO = "5:30 PM - 6:45 PM";
+var CONFIG_INICIAL = {
+  dias: {
+    "0": { activo: false, actividades: [], horario: "", siempreVirtual: false },
+    "1": { activo: false, actividades: [], horario: "", siempreVirtual: false },
+    "2": { activo: true, actividades: ["reduccion_ego"], horario: HORARIO, siempreVirtual: false },
+    "3": { activo: false, actividades: [], horario: "", siempreVirtual: false },
+    "4": { activo: true, actividades: ["entrega_pasos"], horario: HORARIO, siempreVirtual: false },
+    "5": { activo: false, actividades: [], horario: "", siempreVirtual: false },
+    "6": {
+      activo: false,
+      actividades: ["reduccion_ego", "entrega_pasos"],
+      horario: "3:00 PM - 5:00 PM",
+      siempreVirtual: true
+    }
+  },
+  coordinadoras: [...COORDINATOR_NAMES],
+  desde: "2026-02-03",
+  hasta: "2026-12-10",
+  semanasVirtuales: "par",
+  grupoWhatsapp: ""
+};
+var NOMBRES_MES = [
+  "Enero",
+  "Febrero",
+  "Marzo",
+  "Abril",
+  "Mayo",
+  "Junio",
+  "Julio",
+  "Agosto",
+  "Septiembre",
+  "Octubre",
+  "Noviembre",
+  "Diciembre"
+];
+var DIA_CORTO = ["DOM", "LUN", "MAR", "MI\xC9", "JUE", "VIE", "S\xC1B"];
+var utc = (y, m, d) => new Date(Date.UTC(y, m, d, 12));
+var claveDe = (d) => d.toISOString().slice(0, 10);
+var deClave = (key) => /* @__PURE__ */ new Date(`${key}T12:00:00Z`);
+function semanaISO(key) {
+  const d = deClave(key);
+  const dia = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dia);
+  const inicio = Date.UTC(d.getUTCFullYear(), 0, 1, 12);
+  return Math.ceil(((d.getTime() - inicio) / 864e5 + 1) / 7);
+}
+function pascua(y) {
+  const a = y % 19;
+  const b = Math.floor(y / 100);
+  const c = y % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const mes = Math.floor((h + l - 7 * m + 114) / 31);
+  const dia = (h + l - 7 * m + 114) % 31 + 1;
+  return utc(y, mes - 1, dia);
+}
+var sumarDias = (d, n) => utc(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + n);
+var alLunes = (d) => sumarDias(d, (8 - d.getUTCDay()) % 7);
+var cacheFestivos = /* @__PURE__ */ new Map();
+function festivosColombia(y) {
+  const hit = cacheFestivos.get(y);
+  if (hit) return hit;
+  const f = /* @__PURE__ */ new Map();
+  const poner = (d, nombre) => f.set(claveDe(d), nombre);
+  poner(utc(y, 0, 1), "A\xF1o Nuevo");
+  poner(alLunes(utc(y, 0, 6)), "Reyes Magos");
+  poner(alLunes(utc(y, 2, 19)), "San Jos\xE9");
+  const p = pascua(y);
+  poner(sumarDias(p, -3), "Jueves Santo");
+  poner(sumarDias(p, -2), "Viernes Santo");
+  poner(utc(y, 4, 1), "D\xEDa del Trabajo");
+  poner(sumarDias(p, 43), "Ascensi\xF3n del Se\xF1or");
+  poner(sumarDias(p, 64), "Corpus Christi");
+  poner(sumarDias(p, 71), "Sagrado Coraz\xF3n");
+  poner(alLunes(utc(y, 5, 29)), "San Pedro y San Pablo");
+  poner(utc(y, 6, 20), "D\xEDa de la Independencia");
+  poner(utc(y, 7, 7), "Batalla de Boyac\xE1");
+  poner(alLunes(utc(y, 7, 15)), "Asunci\xF3n de la Virgen");
+  poner(alLunes(utc(y, 9, 12)), "D\xEDa de la Diversidad \xC9tnica y Cultural");
+  poner(alLunes(utc(y, 10, 1)), "Todos los Santos");
+  poner(alLunes(utc(y, 10, 11)), "Independencia de Cartagena");
+  poner(utc(y, 11, 8), "Inmaculada Concepci\xF3n");
+  poner(utc(y, 11, 25), "Navidad");
+  cacheFestivos.set(y, f);
+  return f;
+}
+function modalidadPorRegla(key, base, c) {
+  if (base?.siempreVirtual) return "virtual";
+  const par = semanaISO(key) % 2 === 0;
+  return par === (c.semanasVirtuales === "par") ? "virtual" : "presencial";
+}
+function planDeFecha(key, c, dias) {
+  const d = deClave(key);
+  const diaSemana = d.getUTCDay();
+  const base = c.dias[String(diaSemana)];
+  const cambio = dias.get(key);
+  const especial = cambio?.especial === true;
+  const enTemporada = key >= c.desde && key <= c.hasta;
+  if (!especial && !(base?.activo && enTemporada)) return null;
+  const actividades = cambio?.actividades?.length ? cambio.actividades : base?.actividades?.length ? base.actividades : ["reduccion_ego"];
+  return {
+    key,
+    fecha: sessionDateFromKey(key),
+    diaSemana,
+    actividades,
+    horario: cambio?.horario || base?.horario || "",
+    modalidad: cambio?.modalidad ?? modalidadPorRegla(key, base, c),
+    modalidadFija: !!cambio?.modalidad,
+    coordinadora: cambio?.coordinadora ?? "",
+    festivo: especial ? null : festivosColombia(d.getUTCFullYear()).get(key) ?? null,
+    cancelada: cambio?.cancelada === true,
+    motivo: cambio?.motivo ?? "",
+    especial
+  };
+}
+function planDelMes(y, m, c, dias) {
+  const out = [];
+  const total = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  for (let d = 1; d <= total; d++) {
+    const p = planDeFecha(claveDe(utc(y, m, d)), c, dias);
+    if (p) out.push(p);
+  }
+  return out;
+}
+var hayReunion = (p) => !p.festivo && !p.cancelada;
+var nombreActividades = (a) => a.map((t) => SESSION_TYPE_LABELS[t]).join(" + ");
+function nombreDelEquipo(nombre, equipo) {
+  const n = normalizeText(nombre);
+  return equipo.find((e) => normalizeText(e) === n) ?? nombre.trim();
+}
+function completarConfig(parcial) {
+  const c = parcial ?? {};
+  const dias = {};
+  for (let i = 0; i < 7; i++) {
+    const k = String(i);
+    const d = (c.dias ?? {})[k];
+    dias[k] = d ? {
+      activo: d.activo === true,
+      actividades: Array.isArray(d.actividades) ? d.actividades : [],
+      horario: typeof d.horario === "string" ? d.horario : "",
+      siempreVirtual: d.siempreVirtual === true
+    } : CONFIG_INICIAL.dias[k];
+  }
+  return {
+    dias,
+    coordinadoras: Array.isArray(c.coordinadoras) && c.coordinadoras.length ? c.coordinadoras : CONFIG_INICIAL.coordinadoras,
+    desde: typeof c.desde === "string" && c.desde ? c.desde : CONFIG_INICIAL.desde,
+    hasta: typeof c.hasta === "string" && c.hasta ? c.hasta : CONFIG_INICIAL.hasta,
+    semanasVirtuales: c.semanasVirtuales === "impar" ? "impar" : "par",
+    grupoWhatsapp: typeof c.grupoWhatsapp === "string" ? c.grupoWhatsapp : ""
+  };
+}
+
+// mcp/src/rest.ts
+var EMU_FIRESTORE = process.env.FIRESTORE_EMULATOR_HOST;
+var EMU_AUTH = process.env.FIREBASE_AUTH_EMULATOR_HOST;
+var PROJECT_ID = EMU_FIRESTORE && process.env.GEMB_PROJECT_ID || "coordinacion-gemb";
+var API_KEY = "AIzaSyB-KQMYvpKun5oxQhqTSyF-ElhJxAp-eGQ";
+var RAIZ_DOCS = `projects/${PROJECT_ID}/databases/(default)/documents`;
+var DOCS = EMU_FIRESTORE ? `http://${EMU_FIRESTORE}/v1/${RAIZ_DOCS}` : `https://firestore.googleapis.com/v1/${RAIZ_DOCS}`;
+var TOKEN_URL = EMU_AUTH ? `http://${EMU_AUTH}/securetoken.googleapis.com/v1/token?key=${API_KEY}` : `https://securetoken.googleapis.com/v1/token?key=${API_KEY}`;
+var ConfigError = class extends Error {
+};
+var AccesoError = class extends Error {
+};
+var LlaveInvalidaError = class extends AccesoError {
+};
+var ConflictoError = class extends AccesoError {
+  constructor(message2, motivo) {
+    super(message2);
+    this.motivo = motivo;
+  }
+};
+async function canjear(llave) {
+  const r = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(llave)}`
+  });
+  const d = await r.json();
+  if (!r.ok || !d.id_token) {
+    const codigo = d.error?.message ?? `HTTP ${r.status}`;
+    if (codigo.startsWith("TOKEN_EXPIRED") || codigo.startsWith("USER_NOT_FOUND") || codigo.startsWith("INVALID_REFRESH_TOKEN") || codigo.startsWith("INVALID_GRANT_TYPE") || codigo.startsWith("MISSING_REFRESH_TOKEN")) {
+      throw new LlaveInvalidaError(
+        "El acceso ya no sirve (caduc\xF3 o lo revocaron). Vuelve a conectar el conector desde Claude y entra otra vez con Google."
+      );
+    }
+    if (codigo.startsWith("USER_DISABLED")) {
+      throw new LlaveInvalidaError("Esta cuenta est\xE1 deshabilitada.");
+    }
+    throw new AccesoError(`No se pudo validar la llave: ${codigo}`);
+  }
+  return {
+    idToken: d.id_token,
+    uid: d.user_id ?? "",
+    expira: Date.now() + Number(d.expires_in ?? 3600) * 1e3
+  };
+}
+async function pedir(url, idToken, toleraFalta = false) {
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
+  if (r.status === 404 && toleraFalta) return null;
+  revisarRespuesta(r);
+  if (!r.ok) throw new AccesoError(`Firestore respondi\xF3 HTTP ${r.status}`);
+  return r.json();
+}
+function revisarRespuesta(r) {
+  if (r.status === 401) {
+    throw new LlaveInvalidaError(
+      "El permiso de la sesi\xF3n venci\xF3 a mitad de la consulta. Vuelve a intentarlo."
+    );
+  }
+  if (r.status === 403) throw new AccesoError("PERMISSION_DENIED");
+}
+function valor(v) {
+  if (v === null || typeof v !== "object") return v;
+  const o = v;
+  if ("stringValue" in o) return o.stringValue;
+  if ("booleanValue" in o) return o.booleanValue;
+  if ("integerValue" in o) return Number(o.integerValue);
+  if ("doubleValue" in o) return o.doubleValue;
+  if ("timestampValue" in o) return new Date(o.timestampValue);
+  if ("nullValue" in o) return null;
+  if ("arrayValue" in o) {
+    return (o.arrayValue.values ?? []).map(valor);
+  }
+  if ("mapValue" in o) {
+    return campos(o.mapValue.fields);
+  }
+  if ("referenceValue" in o) return o.referenceValue;
+  return void 0;
+}
+function campos(f) {
+  const salida = {};
+  for (const [k, v] of Object.entries(f ?? {})) salida[k] = valor(v);
+  return salida;
+}
+function aObjeto(d) {
+  const id = d.name.split("/").pop() ?? "";
+  return { ...campos(d.fields), id };
+}
+async function coleccion(nombre, idToken) {
+  const salida = [];
+  let token = "";
+  do {
+    const url = `${DOCS}/${nombre}?pageSize=300${token ? `&pageToken=${encodeURIComponent(token)}` : ""}`;
+    const r = await pedir(url, idToken);
+    for (const d of r.documents ?? []) salida.push(aObjeto(d));
+    token = r.nextPageToken ?? "";
+  } while (token);
+  return salida;
+}
+async function todaLaAsistencia(idToken) {
+  const salida = [];
+  const TANDA = 1e3;
+  let ultimo = null;
+  for (; ; ) {
+    const structuredQuery = {
+      from: [{ collectionId: "attendance", allDescendants: true }],
+      orderBy: [{ field: { fieldPath: "__name__" }, direction: "ASCENDING" }],
+      limit: TANDA
+    };
+    if (ultimo) {
+      structuredQuery.startAt = { values: [{ referenceValue: ultimo }], before: false };
+    }
+    const r = await fetch(`${DOCS}:runQuery`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ structuredQuery })
+    });
+    revisarRespuesta(r);
+    if (!r.ok) throw new AccesoError(`Firestore respondi\xF3 HTTP ${r.status} al leer la asistencia`);
+    const filas = await r.json();
+    const docs = filas.map((f) => f.document).filter((d) => !!d);
+    for (const d of docs) salida.push(aObjeto(d));
+    if (docs.length < TANDA) break;
+    ultimo = docs[docs.length - 1].name;
+  }
+  return salida;
+}
+async function asistenciasDePersona(memberId, idToken) {
+  const r = await fetch(`${DOCS}:runQuery`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: "attendance", allDescendants: true }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: "memberId" },
+            op: "EQUAL",
+            value: { stringValue: memberId }
+          }
+        }
+      }
+    })
+  });
+  revisarRespuesta(r);
+  if (!r.ok) throw new AccesoError(`Firestore respondi\xF3 HTTP ${r.status} al leer el historial`);
+  const filas = await r.json();
+  return filas.map((f) => f.document).filter((d) => !!d).map((d) => ({
+    ruta: d.name.slice(d.name.indexOf("/documents/") + "/documents/".length),
+    datos: aObjeto(d)
+  }));
+}
+var TTL_MS = 6e4;
+var cache = /* @__PURE__ */ new Map();
+function limpiarVencidos() {
+  const ahora = Date.now();
+  for (const [k, v] of cache) if (v.hasta <= ahora) cache.delete(k);
+}
+async function abrirSesion(llave) {
+  if (!llave || llave.length < 20) {
+    throw new ConfigError(
+      'Falta entrar con Google. En Claude, toca "Conectar" en este conector y entra con tu cuenta de siempre.'
+    );
+  }
+  limpiarVencidos();
+  const cred = await canjear(llave);
+  const yo = await pedir(`${DOCS}/users/${cred.uid}`, cred.idToken, true);
+  if (!yo) {
+    throw new AccesoError(
+      "Tu cuenta todav\xEDa no est\xE1 dada de alta en la app. Entra una vez a la app con Google y pide que te aprueben."
+    );
+  }
+  const perfil = campos(yo.fields);
+  if (perfil.active === false) {
+    throw new AccesoError("Tu acceso est\xE1 desactivado en la app. Habla con la administraci\xF3n.");
+  }
+  const rol = perfil.role ?? "pending";
+  if (rol === "pending") {
+    throw new AccesoError("Tu acceso est\xE1 pendiente de aprobaci\xF3n en la app.");
+  }
+  const esAdmin = rol === "admin" || rol === "super_admin";
+  const clave2 = (sufijo) => `${cred.uid}:${sufijo}`;
+  async function cacheado(sufijo, cargar) {
+    const k = clave2(sufijo);
+    const hit = cache.get(k);
+    if (hit && hit.hasta > Date.now()) return hit.valor;
+    const v = await cargar();
+    cache.set(k, { valor: v, hasta: Date.now() + TTL_MS });
+    return v;
+  }
+  return {
+    uid: cred.uid,
+    email: perfil.email ?? "",
+    nombre: perfil.displayName || perfil.email || "Sin nombre",
+    rol,
+    esAdmin,
+    expira: cred.expira,
+    cargarSesiones: () => cacheado("sessions", () => coleccion("sessions", cred.idToken)),
+    cargarAsistencia: () => cacheado("attendance", () => todaLaAsistencia(cred.idToken)),
+    cargarPersonas: () => cacheado("members", async () => {
+      const todas = await coleccion("members", cred.idToken);
+      return todas.map(({ phone: _p, notes: _n, ...resto }) => resto);
+    }),
+    cargarProgramacion: () => cacheado("programacion", async () => {
+      const [config, dias, solicitudes] = await Promise.all([
+        pedir(`${DOCS}/programacion/config`, cred.idToken, true),
+        coleccion("programacion_dias", cred.idToken),
+        coleccion("programacion_solicitudes", cred.idToken)
+      ]);
+      return {
+        config: completarConfig(config ? campos(config.fields) : void 0),
+        dias: new Map(dias.map((d) => [d.id, d])),
+        solicitudes: new Map(
+          solicitudes.filter((x) => x.estado === "pendiente").map((x) => [x.id, x])
+        )
+      };
+    }),
+    async leer(ruta) {
+      const d = await pedir(`${DOCS}/${ruta}`, cred.idToken, true);
+      return d ? aObjeto(d) : null;
+    },
+    asistenciaDe: (sessionId) => coleccion(`sessions/${sessionId}/attendance`, cred.idToken),
+    asistenciasDePersona: (memberId) => asistenciasDePersona(memberId, cred.idToken),
+    async guardar(escrituras) {
+      exigirAdmin(esAdmin);
+      try {
+        await guardarLote(escrituras, cred.idToken);
+      } finally {
+        olvidar(cred.uid);
+      }
+    }
+  };
+}
+function aValorRest(v) {
+  if (v === null || v === void 0) return { nullValue: null };
+  if (v instanceof Date) return { timestampValue: v.toISOString() };
+  if (typeof v === "string") return { stringValue: v };
+  if (typeof v === "boolean") return { booleanValue: v };
+  if (typeof v === "number") {
+    return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  }
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(aValorRest) } };
+  if (typeof v === "object") {
+    const fields = {};
+    for (const [k, x] of Object.entries(v)) fields[k] = aValorRest(x);
+    return { mapValue: { fields } };
+  }
+  return { stringValue: String(v) };
+}
+var nombreDoc = (ruta) => `${RAIZ_DOCS}/${ruta}`;
+var rutaCampo = (campo) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(campo) ? campo : "`" + campo.replace(/[`\\]/g, "\\$&") + "`";
+function aEscrituraRest(e) {
+  switch (e.tipo) {
+    case "crear":
+    case "actualizar": {
+      const fields = {};
+      for (const [k, v] of Object.entries(e.datos)) fields[k] = aValorRest(v);
+      return {
+        update: { name: nombreDoc(e.ruta), fields },
+        // Al crear se escribe el documento entero; al actualizar, SOLO esos
+        // campos (lo demás queda como estaba).
+        ...e.tipo === "actualizar" ? { updateMask: { fieldPaths: Object.keys(e.datos).map(rutaCampo) } } : {},
+        currentDocument: { exists: e.tipo === "actualizar" }
+      };
+    }
+    case "borrar":
+      return { delete: nombreDoc(e.ruta), currentDocument: { exists: true } };
+    case "sumar":
+      return {
+        transform: {
+          document: nombreDoc(e.ruta),
+          fieldTransforms: [
+            { fieldPath: rutaCampo(e.campo), increment: { integerValue: String(e.cantidad) } }
+          ]
+        },
+        currentDocument: { exists: true }
+      };
+  }
+}
+async function guardarLote(escrituras, idToken) {
+  if (escrituras.length === 0) return;
+  if (escrituras.length > 500) {
+    throw new AccesoError("Son demasiados cambios para hacerlos de una vez (m\xE1s de 500).");
+  }
+  const r = await fetch(`${DOCS}:commit`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ writes: escrituras.map(aEscrituraRest) })
+  });
+  if (r.ok) return;
+  revisarRespuesta(r);
+  let estado = "";
+  let detalle = "";
+  try {
+    const cuerpo = await r.json();
+    estado = cuerpo.error?.status ?? "";
+    detalle = cuerpo.error?.message ?? "";
+  } catch {
+  }
+  if (r.status === 409 || estado === "ALREADY_EXISTS") {
+    throw new ConflictoError("Ya exist\xEDa. No se guard\xF3 nada.", "ya_existe");
+  }
+  if (r.status === 404 || estado === "NOT_FOUND") {
+    throw new ConflictoError("Ya no existe. No se guard\xF3 nada.", "no_existe");
+  }
+  if (estado === "FAILED_PRECONDITION" && /exist/i.test(detalle)) {
+    throw new ConflictoError(
+      "Los datos cambiaron mientras tanto. No se guard\xF3 nada.",
+      /not exist|no document/i.test(detalle) ? "no_existe" : "ya_existe"
+    );
+  }
+  throw new AccesoError(`No se pudo guardar (HTTP ${r.status}${estado ? ` ${estado}` : ""}).`);
+}
+function exigirAdmin(esAdmin) {
+  if (!esAdmin) {
+    throw new AccesoError(
+      "Tu cuenta entra como coordinador(a): solo lectura. Registrar o corregir cosas es de administraci\xF3n, y se hace desde la app."
+    );
+  }
+}
+function olvidar(uid) {
+  for (const k of [...cache.keys()]) if (k.startsWith(`${uid}:`)) cache.delete(k);
+}
+
+// mcp/src/escrituras.ts
+import { createHash } from "node:crypto";
+
 // node_modules/fuse.js/dist/fuse.mjs
 function isArray(value) {
   return !Array.isArray ? getTag(value) === "[object Array]" : Array.isArray(value);
@@ -4380,6 +4563,44 @@ function informePorRevisar(personas) {
     ] : []
   ].join("\n");
 }
+function informeCalendario(prog, opciones, hoy = /* @__PURE__ */ new Date()) {
+  const hoyKey = dayKey(hoy);
+  let fechas;
+  let titulo;
+  if (opciones.mes) {
+    const [y, m] = opciones.mes.split("-").map(Number);
+    fechas = planDelMes(y, m - 1, prog.config, prog.dias);
+    titulo = `Calendario de ${NOMBRES_MES[m - 1].toLowerCase()} de ${y}`;
+  } else {
+    const semanas = Math.min(Math.max(opciones.semanas ?? 4, 1), 26);
+    const hasta = dayKey(new Date(hoy.getTime() + semanas * 7 * 864e5));
+    fechas = [];
+    const [y0, m0] = hoyKey.split("-").map(Number);
+    for (let i = 0; i < 8 && fechas.length < 200; i++) {
+      const y = y0 + Math.floor((m0 - 1 + i) / 12);
+      const m = (m0 - 1 + i) % 12;
+      for (const p of planDelMes(y, m, prog.config, prog.dias)) {
+        if (p.key >= hoyKey && p.key <= hasta) fechas.push(p);
+      }
+      if (`${y}-${String(m + 1).padStart(2, "0")}` > hasta.slice(0, 7)) break;
+    }
+    titulo = `Pr\xF3ximas reuniones (de hoy a ${semanas} semana${semanas === 1 ? "" : "s"})`;
+  }
+  if (fechas.length === 0) return `${titulo}: no hay reuniones programadas.`;
+  const lineas = fechas.map((p) => {
+    const quien = p.festivo ? `FESTIVO (${p.festivo}): no hay reuni\xF3n` : p.cancelada ? `NO HAY REUNI\xD3N${p.motivo ? ` (${p.motivo})` : ""}` : p.coordinadora ? `coordina ${p.coordinadora}` : prog.solicitudes.get(p.key) ? `sin asignar \xB7 ${prog.solicitudes.get(p.key).nombre} pidi\xF3 coordinarla` : "SIN COORDINADORA";
+    return `${DIA_CORTO[p.diaSemana]} ${fmtDate(p.fecha)}${p.key === hoyKey ? " (HOY)" : ""} \xB7 ${nombreActividades(p.actividades)} \xB7 ${p.horario} \xB7 ${hayReunion(p) ? MODALITY_LABELS[p.modalidad] : "\u2014"} \xB7 ${quien}
+  fecha: ${p.key}`;
+  });
+  const libres = fechas.filter((p) => hayReunion(p) && !p.coordinadora).length;
+  return [
+    titulo,
+    ...lineas,
+    "",
+    libres ? `${libres} reuni\xF3n(es) todav\xEDa sin coordinadora.` : "Todas las reuniones tienen coordinadora.",
+    `Equipo: ${prog.config.coordinadoras.join(", ")}.`
+  ].join("\n");
+}
 
 // mcp/src/escrituras.ts
 var VIGENCIA_MS = 15 * 6e4;
@@ -4500,10 +4721,20 @@ function asistenciaNueva(c, s, memberId, fullName) {
 }
 async function prepararCrearReunion(c, tipoRaw, modalidadRaw, fechaRaw, coordinadora, otraMas = false) {
   const tipo = tipoDe(tipoRaw);
-  const modalidad = modalidadDe(modalidadRaw);
   const fecha = fechaDe(fechaRaw);
   const type = TIPOS[tipo];
   const d = sessionDateFromKey(fecha);
+  const prog = await c.cargarProgramacion();
+  const plan = planDeFecha(fecha, prog.config, prog.dias);
+  const delCalendario = plan && hayReunion(plan) && plan.actividades.includes(type) ? plan : null;
+  if ((modalidadRaw == null || modalidadRaw === "") && !delCalendario) {
+    throw new AccesoError(
+      "Falta la modalidad (presencial o virtual): el calendario no tiene esa reuni\xF3n ese d\xEDa."
+    );
+  }
+  const modalidad = modalidadRaw == null || modalidadRaw === "" ? delCalendario.modalidad : modalidadDe(modalidadRaw);
+  coordinadora = coordinadora?.trim() || delCalendario?.coordinadora || "";
+  const avisoCalendario = !plan ? "El calendario no tiene reuni\xF3n programada ese d\xEDa." : plan.festivo ? `Seg\xFAn el calendario es festivo (${plan.festivo}).` : plan.cancelada ? `Seg\xFAn el calendario ese d\xEDa no hay reuni\xF3n${plan.motivo ? ` (${plan.motivo})` : ""}.` : !plan.actividades.includes(type) ? `Seg\xFAn el calendario ese d\xEDa toca ${nombreActividades(plan.actividades)}.` : "";
   olvidar(c.uid);
   const yaHay = (await c.cargarSesiones()).filter(
     (s) => s.type === type && dayKey(s.date) === fecha
@@ -4530,6 +4761,7 @@ async function prepararCrearReunion(c, tipoRaw, modalidadRaw, fechaRaw, coordina
       `  Coordina: ${coordinadora?.trim() || "sin asignar"}`,
       `  Queda ABIERTA para tomar asistencia.`,
       ...yaHay.length ? ["", `\u26A0\uFE0F Ser\xE1 la reuni\xF3n n\xFAmero ${yaHay.length + 1} de ese tipo ese d\xEDa.`] : [],
+      ...avisoCalendario ? ["", `\u26A0\uFE0F ${avisoCalendario}`] : [],
       ...dias < 0 ? [
         "",
         'Es de un d\xEDa que ya pas\xF3: despu\xE9s de pasar la lista, ci\xE9rrala con "preparar_cerrar_reunion" para que nadie la siga modificando.'
@@ -4595,6 +4827,35 @@ async function prepararAgregarParticipante(c, reunionRaw, nombreRaw) {
         )
       ] : [],
       ...sesion.status === "closed" ? ["", "Esa reuni\xF3n est\xE1 CERRADA; se corrige igual por ser administraci\xF3n."] : []
+    ].join("\n")
+  );
+}
+async function prepararAsignarCoordinadora(c, fechaRaw, nombreRaw) {
+  const fecha = fechaDe(fechaRaw);
+  const nombreLibre = String(nombreRaw ?? "").trim();
+  const prog = await c.cargarProgramacion();
+  const plan = planDeFecha(fecha, prog.config, prog.dias);
+  if (!plan) {
+    throw new AccesoError(`El calendario no tiene reuni\xF3n programada el ${fmtDate(sessionDateFromKey(fecha))}.`);
+  }
+  if (plan.festivo) throw new AccesoError(`Ese d\xEDa es festivo (${plan.festivo}): no hay reuni\xF3n.`);
+  if (plan.cancelada) throw new AccesoError('Ese d\xEDa est\xE1 marcado como "no hay reuni\xF3n".');
+  const nombre = nombreLibre ? nombreDelEquipo(nombreLibre, prog.config.coordinadoras) : "";
+  if (nombre === plan.coordinadora) {
+    throw new AccesoError(nombre ? `${nombre} ya coordina esa fecha.` : "Esa fecha ya est\xE1 sin coordinadora.");
+  }
+  const deFuera = nombre && !prog.config.coordinadoras.includes(nombre);
+  const solicitud = prog.solicitudes.get(fecha);
+  return borrador(
+    c.uid,
+    "asignar_coordinadora",
+    { fecha, nombre },
+    [
+      nombre ? "ASIGNAR qui\xE9n coordina:" : "QUITAR a quien coordina:",
+      `  ${plan.key} \xB7 ${nombreActividades(plan.actividades)} \xB7 ${plan.horario}`,
+      nombre ? `  Coordina: ${nombre}${plan.coordinadora ? `   (antes: ${plan.coordinadora})` : ""}` : `  Queda sin coordinadora (antes: ${plan.coordinadora}).`,
+      ...deFuera ? ["", `\u26A0\uFE0F "${nombre}" no est\xE1 en el equipo del Calendario (${prog.config.coordinadoras.join(", ")}).`] : [],
+      ...solicitud ? ["", `Hab\xEDa una solicitud de ${solicitud.nombre} para esa fecha; la atiendes desde la app.`] : []
     ].join("\n")
   );
 }
@@ -4779,6 +5040,23 @@ async function ejecutar(c, o) {
         ...avisoSiSigueAbierta(sesion)
       ].join("\n");
     }
+    case "asignar_coordinadora": {
+      const fecha = fechaDe(o.args.fecha);
+      const nombre = String(o.args.nombre ?? "").trim().slice(0, 80);
+      await c.guardar([
+        {
+          tipo: await c.leer(`programacion_dias/${fecha}`) ? "actualizar" : "crear",
+          ruta: `programacion_dias/${fecha}`,
+          datos: {
+            coordinadora: nombre,
+            updatedAt: /* @__PURE__ */ new Date(),
+            updatedBy: c.uid,
+            updatedByName: c.nombre
+          }
+        }
+      ]);
+      return nombre ? `Listo. ${nombre} coordina la reuni\xF3n del ${fmtDate(sessionDateFromKey(fecha))}. Ya se ve en el Calendario de la app.` : `Listo. La reuni\xF3n del ${fmtDate(sessionDateFromKey(fecha))} qued\xF3 sin coordinadora.`;
+    }
     case "cerrar_reunion":
     case "reabrir_reunion": {
       const reunionId = idDe(o.args.reunionId, "la reuni\xF3n");
@@ -4957,6 +5235,23 @@ var HERRAMIENTAS = [
     }
   },
   {
+    name: "calendario",
+    title: "Calendario: qui\xE9n coordina cada reuni\xF3n",
+    description: 'La programaci\xF3n del Calendario de la app: qu\xE9 reuni\xF3n hay cada d\xEDa, horario, si es presencial o virtual y qui\xE9n la coordina (o si est\xE1 sin coordinadora, es festivo o no hay reuni\xF3n). Por defecto, de hoy a 4 semanas; con "mes" (AAAA-MM) da el mes entero. \xDAsala para "\xBFqui\xE9n coordina el jueves?" o "\xBFqu\xE9 fechas faltan por asignar?".',
+    alcance: "todos",
+    inputSchema: objeto({
+      mes: txt("Mes a mostrar, AAAA-MM (opcional)"),
+      semanas: { type: "integer", minimum: 1, maximum: 26, default: 4 }
+    }),
+    async ejecutar(c, a) {
+      const mes = typeof a.mes === "string" && /^\d{4}-\d{2}$/.test(a.mes) ? a.mes : void 0;
+      return informeCalendario(await c.cargarProgramacion(), {
+        mes,
+        semanas: Number(a.semanas ?? 4)
+      });
+    }
+  },
+  {
     name: "conteos",
     title: "Conteos generales",
     description: "Totales r\xE1pidos: personas en la lista oficial (activas y totales), reuniones registradas por tipo, y cu\xE1ntas personas nuevas esperan revisi\xF3n.",
@@ -5020,16 +5315,20 @@ var HERRAMIENTAS = [
     inputSchema: objeto(
       {
         tipo: { type: "string", enum: ["pasos", "ego"] },
-        modalidad: { type: "string", enum: ["presencial", "virtual"] },
+        modalidad: {
+          type: "string",
+          enum: ["presencial", "virtual"],
+          description: "Opcional: si no se dice, la que tiene el Calendario ese d\xEDa."
+        },
         fecha: txt("Fecha en formato AAAA-MM-DD (d\xEDa en Colombia)"),
-        coordinadora: txt("Qui\xE9n coordina (opcional)"),
+        coordinadora: txt("Qui\xE9n coordina (opcional: si no se dice, la del Calendario)"),
         otra_mas: {
           type: "boolean",
           default: false,
           description: "true SOLO si de verdad hay dos reuniones del mismo tipo el mismo d\xEDa."
         }
       },
-      ["tipo", "modalidad", "fecha"]
+      ["tipo", "fecha"]
     ),
     ejecutar: (c, a) => prepararCrearReunion(
       c,
@@ -5039,6 +5338,20 @@ var HERRAMIENTAS = [
       a.coordinadora ? String(a.coordinadora) : void 0,
       a.otra_mas === true
     )
+  },
+  {
+    name: "preparar_asignar_coordinadora",
+    title: "Preparar: asignar qui\xE9n coordina una fecha del Calendario",
+    description: 'Prepara asignar (o quitar, con nombre vac\xEDo) la coordinadora de una fecha del Calendario. Usa un nombre del equipo (lo da la herramienta "calendario"). Devuelve un borrador; no cambia nada hasta confirmar.',
+    alcance: "escribir",
+    inputSchema: objeto(
+      {
+        fecha: txt("Fecha AAAA-MM-DD"),
+        nombre: txt("Nombre de quien coordina; vac\xEDo para dejarla sin coordinadora")
+      },
+      ["fecha", "nombre"]
+    ),
+    ejecutar: (c, a) => prepararAsignarCoordinadora(c, a.fecha, a.nombre)
   },
   {
     name: "preparar_marcar_presente",

@@ -73,6 +73,14 @@ export const CalendarIcon = (p: P) => (
     <path d="M16 2v4M8 2v4M3 10h18" />
   </Svg>
 );
+/** Lista con chulito: tomar asistencia. */
+export const ListCheckIcon = (p: P) => (
+  <Svg {...p}>
+    <rect x="4" y="3" width="16" height="18" rx="2" />
+    <path d="M9 3v2h6V3" />
+    <path d="m8.5 13 2.2 2.2L15.5 10.5" />
+  </Svg>
+);
 export const UsersIcon = (p: P) => (
   <Svg {...p}>
     <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />

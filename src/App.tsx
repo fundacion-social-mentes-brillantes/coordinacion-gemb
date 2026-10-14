@@ -49,6 +49,12 @@ const ConnectPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
 );
+const ProgramacionPage = lazy(() =>
+  import('./pages/ProgramacionPage').then((m) => ({ default: m.ProgramacionPage })),
+);
+const CalendarioPublicoPage = lazy(() =>
+  import('./pages/CalendarioPublicoPage').then((m) => ({ default: m.CalendarioPublicoPage })),
+);
 const NotFoundPage = lazy(() =>
   import('./pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })),
 );
@@ -67,6 +73,8 @@ export default function App() {
         <Route path="/pendiente" element={<PendingPage />} />
         {/* Aquí llega quien conecta Claude: entra con Google y vuelve. */}
         <Route path="/autorizar" element={<AuthorizePage />} />
+        {/* El calendario público (antes era la app "Calendario"). */}
+        <Route path="/calendario" element={<CalendarioPublicoPage />} />
 
         {/* Requieren sesión con rol activo */}
         <Route element={<RequireAuth allow={[...ALL]} />}>
@@ -74,6 +82,7 @@ export default function App() {
             <Route index element={<Navigate to="/sesiones" replace />} />
             <Route path="/sesiones" element={<SessionsPage />} />
             <Route path="/sesiones/:id" element={<AttendancePage />} />
+            <Route path="/programacion" element={<ProgramacionPage />} />
             {/* Ajustes y, dentro, conectar con Claude. Fuera de la barra de
                 abajo a propósito: se toca una vez y ya. Lo que Claude puede
                 hacer depende del rol de cada quien, así que también entran

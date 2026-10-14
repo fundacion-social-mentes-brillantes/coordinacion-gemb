@@ -4,6 +4,7 @@ import {
   ejecutar,
   prepararAgregarParticipante,
   prepararAprobarPersona,
+  prepararAsignarCoordinadora,
   prepararCrearReunion,
   prepararEstadoReunion,
   prepararMarcar,
@@ -12,6 +13,7 @@ import type { Session } from '../../src/types';
 import {
   informeAsistenciaReunion,
   informeBuscarPersona,
+  informeCalendario,
   informeComoVamos,
   informeConteos,
   informeHistorial,
@@ -181,6 +183,28 @@ export const HERRAMIENTAS: Herramienta[] = [
     },
   },
   {
+    name: 'calendario',
+    title: 'Calendario: quién coordina cada reunión',
+    description:
+      'La programación del Calendario de la app: qué reunión hay cada día, horario, ' +
+      'si es presencial o virtual y quién la coordina (o si está sin coordinadora, ' +
+      'es festivo o no hay reunión). Por defecto, de hoy a 4 semanas; con "mes" ' +
+      '(AAAA-MM) da el mes entero. Úsala para "¿quién coordina el jueves?" o ' +
+      '"¿qué fechas faltan por asignar?".',
+    alcance: 'todos',
+    inputSchema: objeto({
+      mes: txt('Mes a mostrar, AAAA-MM (opcional)'),
+      semanas: { type: 'integer', minimum: 1, maximum: 26, default: 4 },
+    }),
+    async ejecutar(c, a) {
+      const mes = typeof a.mes === 'string' && /^\d{4}-\d{2}$/.test(a.mes) ? a.mes : undefined;
+      return informeCalendario(await c.cargarProgramacion(), {
+        mes,
+        semanas: Number(a.semanas ?? 4),
+      });
+    },
+  },
+  {
     name: 'conteos',
     title: 'Conteos generales',
     description:
@@ -262,9 +286,13 @@ export const HERRAMIENTAS: Herramienta[] = [
     inputSchema: objeto(
       {
         tipo: { type: 'string', enum: ['pasos', 'ego'] },
-        modalidad: { type: 'string', enum: ['presencial', 'virtual'] },
+        modalidad: {
+          type: 'string',
+          enum: ['presencial', 'virtual'],
+          description: 'Opcional: si no se dice, la que tiene el Calendario ese día.',
+        },
         fecha: txt('Fecha en formato AAAA-MM-DD (día en Colombia)'),
-        coordinadora: txt('Quién coordina (opcional)'),
+        coordinadora: txt('Quién coordina (opcional: si no se dice, la del Calendario)'),
         otra_mas: {
           type: 'boolean',
           default: false,
@@ -272,7 +300,7 @@ export const HERRAMIENTAS: Herramienta[] = [
             'true SOLO si de verdad hay dos reuniones del mismo tipo el mismo día.',
         },
       },
-      ['tipo', 'modalidad', 'fecha'],
+      ['tipo', 'fecha'],
     ),
     ejecutar: (c, a) =>
       prepararCrearReunion(
@@ -283,6 +311,23 @@ export const HERRAMIENTAS: Herramienta[] = [
         a.coordinadora ? String(a.coordinadora) : undefined,
         a.otra_mas === true,
       ),
+  },
+  {
+    name: 'preparar_asignar_coordinadora',
+    title: 'Preparar: asignar quién coordina una fecha del Calendario',
+    description:
+      'Prepara asignar (o quitar, con nombre vacío) la coordinadora de una fecha del ' +
+      'Calendario. Usa un nombre del equipo (lo da la herramienta "calendario"). ' +
+      'Devuelve un borrador; no cambia nada hasta confirmar.',
+    alcance: 'escribir',
+    inputSchema: objeto(
+      {
+        fecha: txt('Fecha AAAA-MM-DD'),
+        nombre: txt('Nombre de quien coordina; vacío para dejarla sin coordinadora'),
+      },
+      ['fecha', 'nombre'],
+    ),
+    ejecutar: (c, a) => prepararAsignarCoordinadora(c, a.fecha, a.nombre),
   },
   {
     name: 'preparar_marcar_presente',

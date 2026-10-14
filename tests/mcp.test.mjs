@@ -54,6 +54,9 @@ function valorRest(v) {
   if (typeof v === 'number') return { integerValue: String(v) };
   if (Array.isArray(v)) return { arrayValue: { values: v.map(valorRest) } };
   if (v && v.ts) return { timestampValue: v.ts };
+  if (v && typeof v === 'object') {
+    return { mapValue: { fields: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, valorRest(x)])) } };
+  }
   throw new Error('tipo no soportado');
 }
 function deRest(f = {}) {
@@ -212,6 +215,7 @@ const HOY = diaBogota(0);
 const MANANA = diaBogota(1);
 const SESION = `reduccion_ego-${HOY}`;
 const FUTURA = `reduccion_ego-${MANANA}`;
+const EN_3 = diaBogota(3);
 let admin;
 let coord;
 
@@ -254,6 +258,18 @@ beforeEach(async () => {
       coordinator: '',
     });
   }
+  // Calendario: todos los días con las dos reuniones, para que cualquier
+  // fecha de la prueba tenga programación.
+  const todos = { activo: true, actividades: ['reduccion_ego', 'entrega_pasos'], horario: '5:30 PM - 6:45 PM', siempreVirtual: false };
+  await sembrar('programacion/config', {
+    dias: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((d) => [String(d), todos])),
+    coordinadoras: ['Tatiana López', 'Marcela Sánchez'],
+    desde: '2020-01-01',
+    hasta: '2099-12-31',
+    semanasVirtuales: 'par',
+    grupoWhatsapp: '',
+  });
+  await sembrar(`programacion_dias/${EN_3}`, { coordinadora: 'Marcela Sánchez', modalidad: 'presencial' });
   const personas = [
     ['m_rous', 'Rous', []],
     ['m_rosalba', 'Rosalba Martínez', ['Chava']],
@@ -549,4 +565,38 @@ test('authorize exige PKCE S256 y una vuelta de Claude', async () => {
     body: { llave: admin.llave, redirect_uri: 'https://malo.example/cb', code_challenge: reto },
   });
   assert.equal(ajena.estado, 400);
+});
+
+/* ------------------------------------------------------------------ */
+/* Calendario                                                          */
+/* ------------------------------------------------------------------ */
+
+test('calendario: dice quién coordina cada fecha', async () => {
+  const r = await llamar(coord.token, 'calendario', { semanas: 1 });
+  assert.equal(r.error, false, r.texto);
+  assert.match(r.texto, new RegExp(`coordina Marcela Sánchez[^\n]*\n  fecha: ${EN_3}`));
+  assert.match(r.texto, /SIN COORDINADORA/);
+});
+
+test('asignar coordinadora: entiende el nombre mal escrito y lo guarda bien', async () => {
+  const r = await preparaYConfirma(admin.token, 'preparar_asignar_coordinadora', {
+    fecha: EN_3,
+    nombre: 'tatiana lopez',
+  });
+  assert.equal(r.error, false, r.texto);
+  const d = await leer(`programacion_dias/${EN_3}`);
+  assert.equal(d.coordinadora, 'Tatiana López');
+  assert.equal(d.modalidad, 'presencial', 'no toca lo demás del día');
+});
+
+test('la coordinadora no puede asignar desde Claude', async () => {
+  const r = await llamar(coord.token, 'preparar_asignar_coordinadora', { fecha: EN_3, nombre: 'Tatiana López' });
+  assert.equal(r.error, true);
+});
+
+test('crear reunión sin modalidad ni coordinadora: las toma del Calendario', async () => {
+  const p = await llamar(admin.token, 'preparar_crear_reunion', { tipo: 'pasos', fecha: EN_3 });
+  assert.equal(p.error, false, p.texto);
+  assert.match(p.texto, /Modalidad: Presencial/);
+  assert.match(p.texto, /Coordina: Marcela Sánchez/);
 });

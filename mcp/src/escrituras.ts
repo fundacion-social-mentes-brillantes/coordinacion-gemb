@@ -18,6 +18,12 @@ import {
 } from '../../src/lib/dates';
 import { findSimilarMembers } from '../../src/lib/search';
 import { sessionIdDelDia, walkinId } from '../../src/lib/ids';
+import {
+  hayReunion,
+  nombreActividades,
+  nombreDelEquipo,
+  planDeFecha,
+} from '../../src/lib/programacion';
 import { TIPOS, type TipoCorto } from './informes';
 import type { Member, Modality, Session, SessionType } from '../../src/types';
 
@@ -214,10 +220,31 @@ export async function prepararCrearReunion(
   otraMas = false,
 ): Promise<string> {
   const tipo = tipoDe(tipoRaw);
-  const modalidad = modalidadDe(modalidadRaw);
   const fecha = fechaDe(fechaRaw);
   const type = TIPOS[tipo];
   const d = sessionDateFromKey(fecha);
+
+  // Lo que no se diga sale del Calendario (modalidad y quién coordina).
+  const prog = await c.cargarProgramacion();
+  const plan = planDeFecha(fecha, prog.config, prog.dias);
+  const delCalendario = plan && hayReunion(plan) && plan.actividades.includes(type) ? plan : null;
+  if ((modalidadRaw == null || modalidadRaw === '') && !delCalendario) {
+    throw new AccesoError(
+      'Falta la modalidad (presencial o virtual): el calendario no tiene esa reunión ese día.',
+    );
+  }
+  const modalidad =
+    modalidadRaw == null || modalidadRaw === '' ? delCalendario!.modalidad : modalidadDe(modalidadRaw);
+  coordinadora = coordinadora?.trim() || delCalendario?.coordinadora || '';
+  const avisoCalendario = !plan
+    ? 'El calendario no tiene reunión programada ese día.'
+    : plan.festivo
+      ? `Según el calendario es festivo (${plan.festivo}).`
+      : plan.cancelada
+        ? `Según el calendario ese día no hay reunión${plan.motivo ? ` (${plan.motivo})` : ''}.`
+        : !plan.actividades.includes(type)
+          ? `Según el calendario ese día toca ${nombreActividades(plan.actividades)}.`
+          : '';
 
   // Datos frescos: justo esto es lo que no puede salir de una caché vieja.
   olvidar(c.uid);
@@ -250,6 +277,7 @@ export async function prepararCrearReunion(
       `  Coordina: ${coordinadora?.trim() || 'sin asignar'}`,
       `  Queda ABIERTA para tomar asistencia.`,
       ...(yaHay.length ? ['', `⚠️ Será la reunión número ${yaHay.length + 1} de ese tipo ese día.`] : []),
+      ...(avisoCalendario ? ['', `⚠️ ${avisoCalendario}`] : []),
       ...(dias < 0
         ? [
             '',
@@ -359,6 +387,52 @@ export async function prepararAgregarParticipante(
         : []),
       ...(sesion.status === 'closed'
         ? ['', 'Esa reunión está CERRADA; se corrige igual por ser administración.']
+        : []),
+    ].join('\n'),
+  );
+}
+
+/**
+ * Asignar (o quitar) quién coordina una fecha del Calendario. Es lo mismo que
+ * tocar la fecha en la pantalla Calendario de la app.
+ */
+export async function prepararAsignarCoordinadora(
+  c: Cliente,
+  fechaRaw: unknown,
+  nombreRaw: unknown,
+): Promise<string> {
+  const fecha = fechaDe(fechaRaw);
+  const nombreLibre = String(nombreRaw ?? '').trim();
+  const prog = await c.cargarProgramacion();
+  const plan = planDeFecha(fecha, prog.config, prog.dias);
+  if (!plan) {
+    throw new AccesoError(`El calendario no tiene reunión programada el ${fmtDate(sessionDateFromKey(fecha))}.`);
+  }
+  if (plan.festivo) throw new AccesoError(`Ese día es festivo (${plan.festivo}): no hay reunión.`);
+  if (plan.cancelada) throw new AccesoError('Ese día está marcado como "no hay reunión".');
+
+  const nombre = nombreLibre ? nombreDelEquipo(nombreLibre, prog.config.coordinadoras) : '';
+  if (nombre === plan.coordinadora) {
+    throw new AccesoError(nombre ? `${nombre} ya coordina esa fecha.` : 'Esa fecha ya está sin coordinadora.');
+  }
+  const deFuera = nombre && !prog.config.coordinadoras.includes(nombre);
+  const solicitud = prog.solicitudes.get(fecha);
+
+  return borrador(
+    c.uid,
+    'asignar_coordinadora',
+    { fecha, nombre },
+    [
+      nombre ? 'ASIGNAR quién coordina:' : 'QUITAR a quien coordina:',
+      `  ${plan.key} · ${nombreActividades(plan.actividades)} · ${plan.horario}`,
+      nombre
+        ? `  Coordina: ${nombre}${plan.coordinadora ? `   (antes: ${plan.coordinadora})` : ''}`
+        : `  Queda sin coordinadora (antes: ${plan.coordinadora}).`,
+      ...(deFuera
+        ? ['', `⚠️ "${nombre}" no está en el equipo del Calendario (${prog.config.coordinadoras.join(', ')}).`]
+        : []),
+      ...(solicitud
+        ? ['', `Había una solicitud de ${solicitud.nombre} para esa fecha; la atiendes desde la app.`]
         : []),
     ].join('\n'),
   );
@@ -605,6 +679,26 @@ export async function ejecutar(c: Cliente, o: Operacion): Promise<string> {
           `\n  id: ${id}`,
         ...avisoSiSigueAbierta(sesion),
       ].join('\n');
+    }
+
+    case 'asignar_coordinadora': {
+      const fecha = fechaDe(o.args.fecha);
+      const nombre = String(o.args.nombre ?? '').trim().slice(0, 80);
+      await c.guardar([
+        {
+          tipo: (await c.leer(`programacion_dias/${fecha}`)) ? 'actualizar' : 'crear',
+          ruta: `programacion_dias/${fecha}`,
+          datos: {
+            coordinadora: nombre,
+            updatedAt: new Date(),
+            updatedBy: c.uid,
+            updatedByName: c.nombre,
+          },
+        },
+      ]);
+      return nombre
+        ? `Listo. ${nombre} coordina la reunión del ${fmtDate(sessionDateFromKey(fecha))}. Ya se ve en el Calendario de la app.`
+        : `Listo. La reunión del ${fmtDate(sessionDateFromKey(fecha))} quedó sin coordinadora.`;
     }
 
     case 'cerrar_reunion':

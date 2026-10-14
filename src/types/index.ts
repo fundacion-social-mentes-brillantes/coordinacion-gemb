@@ -11,6 +11,8 @@ export interface UserProfile {
   role: Role;
   active: boolean;
   createdAt?: Timestamp | null;
+  /** Puede cambiar el calendario (quién coordina, modalidad, días). */
+  puedeProgramar?: boolean;
 }
 
 // --- Sesiones (reuniones) ---

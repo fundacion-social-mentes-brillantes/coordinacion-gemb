@@ -3,7 +3,15 @@ import { toDate, fmtDate, dayKey, daysFromToday } from '../../src/lib/dates';
 import { buildFuse, searchMembers, toSearchable } from '../../src/lib/search';
 import { SESSION_TYPE_LABELS, MODALITY_LABELS } from '../../src/lib/constants';
 import type { Attendance, Member, Session, SessionType } from '../../src/types';
-import type { MemberPublico } from './rest';
+import type { MemberPublico, Programacion } from './rest';
+import {
+  DIA_CORTO,
+  NOMBRES_MES,
+  hayReunion,
+  nombreActividades,
+  planDelMes,
+  type FechaPlan,
+} from '../../src/lib/programacion';
 
 // ---------------------------------------------------------------------------
 //  Los textos que devuelve cada herramienta del MCP.
@@ -253,5 +261,66 @@ export function informePorRevisar(personas: MemberPublico[]): string {
           ...sinNombre.map(ficha),
         ]
       : []),
+  ].join('\n');
+}
+
+/**
+ * El Calendario: qué reuniones hay, en qué modalidad y quién coordina cada
+ * una. Por defecto, de hoy a cuatro semanas; o un mes entero.
+ */
+export function informeCalendario(
+  prog: Programacion,
+  opciones: { mes?: string; semanas?: number },
+  hoy: Date = new Date(),
+): string {
+  const hoyKey = dayKey(hoy);
+  let fechas: FechaPlan[];
+  let titulo: string;
+  if (opciones.mes) {
+    const [y, m] = opciones.mes.split('-').map(Number);
+    fechas = planDelMes(y, m - 1, prog.config, prog.dias);
+    titulo = `Calendario de ${NOMBRES_MES[m - 1].toLowerCase()} de ${y}`;
+  } else {
+    const semanas = Math.min(Math.max(opciones.semanas ?? 4, 1), 26);
+    const hasta = dayKey(new Date(hoy.getTime() + semanas * 7 * 86_400_000));
+    fechas = [];
+    const [y0, m0] = hoyKey.split('-').map(Number);
+    for (let i = 0; i < 8 && fechas.length < 200; i++) {
+      const y = y0 + Math.floor((m0 - 1 + i) / 12);
+      const m = (m0 - 1 + i) % 12;
+      for (const p of planDelMes(y, m, prog.config, prog.dias)) {
+        if (p.key >= hoyKey && p.key <= hasta) fechas.push(p);
+      }
+      if (`${y}-${String(m + 1).padStart(2, '0')}` > hasta.slice(0, 7)) break;
+    }
+    titulo = `Próximas reuniones (de hoy a ${semanas} semana${semanas === 1 ? '' : 's'})`;
+  }
+  if (fechas.length === 0) return `${titulo}: no hay reuniones programadas.`;
+
+  const lineas = fechas.map((p) => {
+    const quien = p.festivo
+      ? `FESTIVO (${p.festivo}): no hay reunión`
+      : p.cancelada
+        ? `NO HAY REUNIÓN${p.motivo ? ` (${p.motivo})` : ''}`
+        : p.coordinadora
+          ? `coordina ${p.coordinadora}`
+          : prog.solicitudes.get(p.key)
+            ? `sin asignar · ${prog.solicitudes.get(p.key)!.nombre} pidió coordinarla`
+            : 'SIN COORDINADORA';
+    return (
+      `${DIA_CORTO[p.diaSemana]} ${fmtDate(p.fecha)}${p.key === hoyKey ? ' (HOY)' : ''} · ` +
+      `${nombreActividades(p.actividades)} · ${p.horario} · ` +
+      `${hayReunion(p) ? MODALITY_LABELS[p.modalidad] : '—'} · ${quien}\n  fecha: ${p.key}`
+    );
+  });
+  const libres = fechas.filter((p) => hayReunion(p) && !p.coordinadora).length;
+  return [
+    titulo,
+    ...lineas,
+    '',
+    libres
+      ? `${libres} reunión(es) todavía sin coordinadora.`
+      : 'Todas las reuniones tienen coordinadora.',
+    `Equipo: ${prog.config.coordinadoras.join(', ')}.`,
   ].join('\n');
 }
