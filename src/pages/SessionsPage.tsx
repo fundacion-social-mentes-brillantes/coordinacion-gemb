@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import {
@@ -27,7 +27,15 @@ import {
 } from '../lib/dates';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useProgramacion } from '../hooks/useProgramacion';
-import { hayReunion, planDeFecha } from '../lib/programacion';
+import { useAbrirReunion } from '../hooks/useAbrirReunion';
+import { useMiNombre } from '../hooks/useMiNombre';
+import {
+  hayReunion,
+  moverDia,
+  nombreActividades,
+  planDeFecha,
+  type FechaPlan,
+} from '../lib/programacion';
 import { Modal } from '../components/Modal';
 import { CoordinatorPicker } from '../components/CoordinatorPicker';
 import { InstallButton, IosInstallHelp } from '../components/InstallPrompt';
@@ -38,8 +46,11 @@ import {
   PlusIcon,
   CalendarIcon,
   ChevronRightIcon,
+  ListCheckIcon,
   TrashIcon,
 } from '../components/Icons';
+
+const fechaDePlan = (p: FechaPlan) => capitalizeFirst(fmtDateLong(p.fecha));
 
 /** El tipo de reunión que toca ese día si el calendario no dice nada. */
 function tipoPorDefecto(key: string): SessionType | null {
@@ -59,6 +70,8 @@ export function SessionsPage() {
   const [loading, setLoading] = useState(true);
   // El calendario: qué toca cada día, en qué modalidad y quién coordina.
   const prog = useProgramacion({ conSolicitudes: false });
+  const abrirReunion = useAbrirReunion();
+  const { miNombre } = useMiNombre(prog.config.coordinadoras);
   const planDe = (key: string) => planDeFecha(key, prog.config, prog.dias);
   const tipoDelDia = (key: string): SessionType | null => {
     const p = planDe(key);
@@ -155,36 +168,42 @@ export function SessionsPage() {
     setCreating(true);
   };
 
-  // Lo que el calendario dice que toca hoy y todavía no tiene sesión.
+  // Las reuniones ya están "creadas": salen del calendario. Al tocar "Tomar
+  // asistencia" se abre su lista (se crea en ese momento si no existía), ya
+  // con la modalidad y quién coordina.
   const hoyKey = toInputDate(new Date());
   const planHoy = planDe(hoyKey);
-  const pendientesHoy =
-    !loading && planHoy && hayReunion(planHoy)
-      ? planHoy.actividades.filter(
-          (t) => !sessions.some((s) => s.type === t && dayKey(s.date) === hoyKey),
-        )
-      : [];
-
-  /** "Tomar lista": crea la sesión de hoy con lo del calendario y la abre. */
-  const abrirDeHoy = (type: SessionType) => {
-    if (!profile || !planHoy) return;
-    const { id, done } = createSession(
-      {
-        type,
-        modality: planHoy.modalidad,
-        date: fromInputDate(hoyKey),
-        coordinator: planHoy.coordinadora,
-      },
-      profile,
-    );
-    done.catch((e) => {
-      console.error(e);
-      if ((e as { code?: string })?.code !== 'permission-denied') {
-        toast('No se pudo crear la sesión. Revisa la conexión.', 'error');
-      }
-    });
-    navigate(`/sesiones/${id}`);
-  };
+  const sesionDe = useMemo(() => {
+    const m = new Map<string, Session>();
+    for (const s of sessions) m.set(`${dayKey(s.date)}|${s.type}`, s);
+    return m;
+  }, [sessions]);
+  const reunionesHoy = planHoy && hayReunion(planHoy) ? planHoy.actividades : [];
+  /**
+   * Reuniones de ayer y anteayer sin lista: todavía se puede tomar (las reglas
+   * dejan marcar hasta 72 horas después del mediodía de la reunión).
+   */
+  const sinLista = loading
+    ? []
+    : [1, 2].flatMap((n) => {
+        const p = planDe(moverDia(hoyKey, -n));
+        return p && hayReunion(p)
+          ? p.actividades.filter((t) => !sesionDe.has(`${p.key}|${t}`)).map((t) => ({ p, t }))
+          : [];
+      });
+  /** Las de hoy que ya se ven arriba, en grande (no se repiten en la lista). */
+  const enGrande = new Set(
+    reunionesHoy.map((t) => sesionDe.get(`${hoyKey}|${t}`)?.id).filter((x): x is string => !!x),
+  );
+  /** Si hoy no hay reunión: la próxima, para que se sepa cuándo toca. */
+  const proxima = useMemo(() => {
+    if (reunionesHoy.length) return null;
+    for (let n = 1; n <= 62; n++) {
+      const p = planDeFecha(moverDia(hoyKey, n), prog.config, prog.dias);
+      if (p && hayReunion(p)) return p;
+    }
+    return null;
+  }, [reunionesHoy.length, hoyKey, prog.config, prog.dias]);
 
   const handleCreate = (otraMas = false) => {
     if (!profile || !newType) return;
@@ -286,40 +305,134 @@ export function SessionsPage() {
 
   return (
     <div className="space-y-4">
-      <h2 className="titulo-pantalla">Sesiones</h2>
+      <div>
+        <h2 className="titulo-pantalla">Asistencia</h2>
+        <p className="text-sm text-slate-500">Toca la reunión para tomar asistencia.</p>
+      </div>
 
-      {pendientesHoy.map((t) => (
-        <div key={t} className="card border-2 border-primary-300 p-4">
-          <p className="text-xs font-bold uppercase tracking-wide text-primary-600">Hoy toca</p>
-          <p className="mt-1 font-semibold text-primary-900">{SESSION_TYPE_LABELS[t]}</p>
-          <p className="mt-0.5 text-sm text-slate-600">
-            {planHoy?.horario} · {MODALITY_LABELS[planHoy?.modalidad ?? 'presencial']}
-            {planHoy?.coordinadora ? ` · Coordina: ${planHoy.coordinadora}` : ''}
-          </p>
-          <button
-            type="button"
-            onClick={() => abrirDeHoy(t)}
-            className="btn-primary btn-lg mt-3"
-          >
-            Tomar lista
-          </button>
-        </div>
-      ))}
+      {/* Hoy: la reunión del calendario, lista para tomar asistencia. */}
+      {prog.cargando || loading ? (
+        <div className="card esqueleto h-[188px]" aria-hidden />
+      ) : reunionesHoy.length > 0 && planHoy ? (
+        reunionesHoy.map((t) => {
+          const s = sesionDe.get(`${hoyKey}|${t}`);
+          const n = Math.max(0, s?.presentCount ?? 0);
+          const tuya = !!planHoy.coordinadora && planHoy.coordinadora === miNombre;
+          return (
+            <section key={t} className="card relative overflow-hidden p-5">
+              <span
+                aria-hidden
+                className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full opacity-40 blur-3xl"
+                style={{ background: 'rgb(var(--app-glow-1) / 0.55)' }}
+              />
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-500">
+                Hoy{planHoy.horario ? ` · ${planHoy.horario}` : ''}
+              </p>
+              <p className="mt-1 font-display text-2xl font-bold leading-tight text-slate-900">
+                {SESSION_TYPE_LABELS[t]}
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <ModalityBadge modality={s?.modality ?? planHoy.modalidad} />
+                {s && <StatusBadge status={s.status} />}
+              </div>
+              <p className="mt-3 text-sm text-slate-600">
+                {planHoy.coordinadora ? (
+                  <>
+                    Coordina{' '}
+                    <strong className={tuya ? 'text-primary-500' : 'text-slate-900'}>
+                      {planHoy.coordinadora}
+                      {tuya ? ' (tú)' : ''}
+                    </strong>
+                  </>
+                ) : (
+                  <>
+                    Sin coordinadora.{' '}
+                    <Link to="/programacion" className="font-bold text-primary-500 underline">
+                      Tómala en Coordinación
+                    </Link>
+                  </>
+                )}
+              </p>
+              <button
+                type="button"
+                onClick={() => abrirReunion(planHoy, t, s)}
+                className="btn-primary btn-lg mt-4"
+              >
+                <ListCheckIcon className="text-xl" />
+                {!s
+                  ? 'Tomar asistencia'
+                  : s.status === 'open'
+                    ? `Seguir con la asistencia · ${n}`
+                    : `Ver asistencia · ${n} presente${n === 1 ? '' : 's'}`}
+              </button>
+            </section>
+          );
+        })
+      ) : (
+        <section className="card p-5">
+          <p className="font-display text-lg font-bold text-slate-900">Hoy no hay reunión</p>
+          {planHoy && (planHoy.festivo || planHoy.cancelada) && (
+            <p className="mt-0.5 text-sm text-slate-500">
+              {planHoy.festivo
+                ? `Festivo · ${planHoy.festivo}`
+                : `No hay reunión${planHoy.motivo ? ` · ${planHoy.motivo}` : ''}`}
+            </p>
+          )}
+          {proxima && (
+            <p className="mt-2 text-sm text-slate-600">
+              La próxima: <strong className="text-slate-900">{fechaDePlan(proxima)}</strong> ·{' '}
+              {nombreActividades(proxima.actividades)}
+              {proxima.coordinadora ? ` · coordina ${proxima.coordinadora}` : ' · todavía libre'}
+            </p>
+          )}
+          <Link to="/programacion" className="btn-secondary mt-4 min-h-[48px] w-full text-sm">
+            <CalendarIcon className="text-lg" /> Ver el calendario
+          </Link>
+        </section>
+      )}
 
-      <button
-        type="button"
-        onClick={openCreate}
-        className={pendientesHoy.length ? 'btn-secondary min-h-[48px] w-full' : 'btn-primary btn-lg'}
-      >
-        <PlusIcon className="text-xl" /> Nueva sesión
-      </button>
+      {/* Reuniones de estos días a las que les faltó la lista. */}
+      {sinLista.length > 0 && (
+        <section>
+          <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+            Faltó tomar asistencia
+          </h3>
+          <ul className="space-y-2">
+            {sinLista.map(({ p, t }) => (
+              <li key={`${p.key}|${t}`} className="card flex items-center gap-3 p-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-semibold text-slate-900">{fechaDePlan(p)}</p>
+                  <p className="truncate text-sm text-slate-500">
+                    {SESSION_TYPE_LABELS[t]}
+                    {p.coordinadora ? ` · ${p.coordinadora}` : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => abrirReunion(p, t)}
+                  className="btn-secondary min-h-[44px] shrink-0 px-3 text-sm"
+                >
+                  Tomar ahora
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* Instalar la app (aquí sigue disponible tras iniciar sesión). */}
       <InstallButton className="btn-secondary min-h-[48px] w-full text-sm" />
       <IosInstallHelp />
 
-      {/* Conectar con Claude se movió a Ajustes (rueda dentada, arriba):
-          se hace una sola vez y aquí competía con "Nueva sesión". */}
+      {/* Conectar con Claude se movió a Ajustes (rueda dentada, arriba). */}
+
+      {/* Una reunión que no está en el calendario: solo la administración.
+          Lo normal es programarla en Coordinación y tomarla desde ahí. */}
+      {isAdmin && (
+        <button type="button" onClick={openCreate} className="btn-ghost min-h-[44px] w-full text-sm">
+          <PlusIcon className="text-lg" /> Otra reunión (fuera del calendario)
+        </button>
+      )}
 
       {/* Filtros */}
       <div className="card p-3">
@@ -328,7 +441,7 @@ export function SessionsPage() {
           onClick={() => setShowFilters((v) => !v)}
           className="flex min-h-[44px] w-full items-center justify-between text-[15px] font-medium text-slate-600"
         >
-          <span>Buscar por fecha o tipo</span>
+          <span>Buscar una reunión anterior</span>
           <span className="text-primary-500">
             {showFilters ? 'Ocultar' : 'Mostrar'}
           </span>
@@ -438,19 +551,14 @@ export function SessionsPage() {
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<CalendarIcon />}
-          title="No hay sesiones"
-          description="Crea la primera sesión para empezar a tomar asistencia."
-          action={
-            <button onClick={openCreate} className="btn-primary">
-              <PlusIcon className="text-lg" /> Nueva sesión
-            </button>
-          }
+          title="Todavía no hay listas"
+          description="Cuando se tome asistencia en una reunión, aparecerá aquí."
         />
       ) : (
         <div className="space-y-5">
           {(
             [
-              ['Hoy', grupos.hoy],
+              [reunionesHoy.length ? 'Otras de hoy' : 'Hoy', grupos.hoy.filter((s) => !enGrande.has(s.id))],
               ['Agendadas', grupos.proximas],
               ['Anteriores', grupos.anteriores],
             ] as [string, Session[]][]
@@ -463,7 +571,7 @@ export function SessionsPage() {
                 </h3>
                 <ul className="space-y-3">
                   {lista.map((s) => {
-                    const today = titulo === 'Hoy';
+                    const today = titulo !== 'Agendadas' && titulo !== 'Anteriores';
                     return (
                       <li
                         key={s.id}

@@ -7,9 +7,9 @@ import { ProgramacionView } from './ProgramacionPage';
 
 /**
  * El calendario público (/calendario): lo que antes era la página del
- * Calendario de Mentes Brillantes. Cualquiera lo ve sin iniciar sesión y
- * puede "Apartar" una fecha libre. Si quien entra ya tiene cuenta activa, se
- * le lleva al mismo calendario dentro de la app.
+ * Calendario de Mentes Brillantes. Cualquiera lo ve sin iniciar sesión; para
+ * tomarse una fecha ("Yo la coordino") hay que entrar con Google. Si quien
+ * entra ya tiene cuenta activa, se le lleva al mismo calendario en la app.
  */
 export function CalendarioPublicoPage() {
   const { user, profile, loading } = useAuth();

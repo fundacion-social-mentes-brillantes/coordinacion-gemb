@@ -80,7 +80,13 @@ export class ConflictoError extends AccesoError {
  */
 export type Escritura =
   | { tipo: 'crear'; ruta: string; datos: Record<string, unknown> }
-  | { tipo: 'actualizar'; ruta: string; datos: Record<string, unknown> }
+  | {
+      tipo: 'actualizar';
+      ruta: string;
+      datos: Record<string, unknown>;
+      /** Campos que se borran del documento. */
+      borrar?: string[];
+    }
   | { tipo: 'borrar'; ruta: string }
   | { tipo: 'sumar'; ruta: string; campo: string; cantidad: number };
 
@@ -463,8 +469,13 @@ function aEscrituraRest(e: Escritura): Record<string, unknown> {
         update: { name: nombreDoc(e.ruta), fields },
         // Al crear se escribe el documento entero; al actualizar, SOLO esos
         // campos (lo demás queda como estaba).
+        // Un campo en la máscara pero sin valor se borra.
         ...(e.tipo === 'actualizar'
-          ? { updateMask: { fieldPaths: Object.keys(e.datos).map(rutaCampo) } }
+          ? {
+              updateMask: {
+                fieldPaths: [...Object.keys(e.datos), ...(e.borrar ?? [])].map(rutaCampo),
+              },
+            }
           : {}),
         currentDocument: { exists: e.tipo === 'actualizar' },
       };

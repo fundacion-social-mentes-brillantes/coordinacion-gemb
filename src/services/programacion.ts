@@ -21,7 +21,7 @@ import type { UserProfile } from '../types';
 //   programacion/config        cómo es cada semana, la temporada y el equipo
 //   programacion_dias/{día}     lo que se cambió a mano ese día (quién
 //                               coordina, modalidad, si no hay reunión…)
-//   programacion_solicitudes/{día}  alguien pidió coordinar esa fecha
+//   programacion_solicitudes/{día}  pedidos viejos de "Apartar" (ya no se crean)
 // Las tres se leen sin iniciar sesión: el calendario es público, como antes.
 
 const configRef = doc(db, 'programacion', 'config');
@@ -88,12 +88,41 @@ export function guardarConfig(c: ProgramacionConfig, user: UserProfile) {
  */
 export function guardarDia(
   key: string,
-  cambios: { [K in keyof Omit<DiaProgramado, 'id' | 'updatedByName'>]?: DiaProgramado[K] | null },
+  cambios: {
+    [K in keyof Omit<DiaProgramado, 'id' | 'updatedByName' | 'coordinadoraUid'>]?: DiaProgramado[K] | null;
+  },
   user: UserProfile,
+  /** Quién coordinaba antes: si cambia, se borra quién se la había tomado. */
+  coordinadoraAntes?: string,
 ) {
   const datos: Record<string, unknown> = { ...firma(user) };
   for (const [k, v] of Object.entries(cambios)) datos[k] = v === null ? deleteField() : v;
+  if ('coordinadora' in cambios && (cambios.coordinadora ?? '') !== (coordinadoraAntes ?? '')) {
+    datos.coordinadoraUid = deleteField();
+  }
   return setDoc(doc(diasCol, key), datos, { merge: true });
+}
+
+/**
+ * "Yo la coordino": se pone ella misma en una fecha libre, al instante.
+ * Las reglas exigen que siga libre, que el nombre sea del equipo y que la
+ * marca sea su propia cuenta; si otra llegó primero, falla (permiso).
+ */
+export function tomarFecha(key: string, nombre: string, user: UserProfile) {
+  return setDoc(
+    doc(diasCol, key),
+    { coordinadora: nombre, coordinadoraUid: user.uid, ...firma(user) },
+    { merge: true },
+  );
+}
+
+/** "Soltar": deja libre la fecha que ella misma se tomó. */
+export function soltarFecha(key: string, user: UserProfile) {
+  return setDoc(
+    doc(diasCol, key),
+    { coordinadora: deleteField(), coordinadoraUid: deleteField(), ...firma(user) },
+    { merge: true },
+  );
 }
 
 /** Ese día vuelve a ser como dice la regla (sin cambios a mano). */
@@ -102,22 +131,17 @@ export function restaurarDia(key: string) {
 }
 
 /**
- * "Apartar": alguien del equipo pide coordinar una fecha libre. Funciona sin
- * iniciar sesión, como en el Calendario viejo; las reglas exigen que el
- * nombre sea del equipo y que la fecha siga libre.
+ * Solicitudes de "Apartar" que quedaron del Calendario viejo (ya no se crean:
+ * ahora cada una se toma la fecha con "Yo la coordino").
+ * Aceptar: la fecha queda asignada a quien la pidió.
  */
-export function crearSolicitud(key: string, nombre: string) {
-  return setDoc(doc(solicitudesCol, key), {
-    nombre,
-    estado: 'pendiente',
-    createdAt: serverTimestamp(),
-  });
-}
-
-/** Aceptar: la fecha queda asignada a quien la pidió. */
 export function atenderSolicitud(key: string, nombre: string, user: UserProfile) {
   const b = writeBatch(db);
-  b.set(doc(diasCol, key), { coordinadora: nombre, ...firma(user) }, { merge: true });
+  b.set(
+    doc(diasCol, key),
+    { coordinadora: nombre, coordinadoraUid: deleteField(), ...firma(user) },
+    { merge: true },
+  );
   b.delete(doc(solicitudesCol, key));
   return b.commit();
 }

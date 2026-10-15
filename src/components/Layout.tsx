@@ -32,9 +32,10 @@ const ALL: Role[] = ['coordinador', 'admin', 'super_admin'];
 const ADMIN: Role[] = ['admin', 'super_admin'];
 
 const NAV: NavItem[] = [
-  { to: '/sesiones', label: 'Sesiones', icon: ListCheckIcon, roles: ALL },
-  // El calendario (antes era otra app): quién coordina cada reunión.
-  { to: '/programacion', label: 'Calendario', icon: CalendarIcon, roles: ALL },
+  // Las coordinadoras solo ven estos dos: tomar asistencia y el calendario
+  // de quién coordina cada reunión (antes eran dos apps).
+  { to: '/sesiones', label: 'Asistencia', icon: ListCheckIcon, roles: ALL },
+  { to: '/programacion', label: 'Coordinación', icon: CalendarIcon, roles: ALL },
   // El panel y la administración son solo para admin/super_admin.
   { to: '/panel', label: 'Panel', icon: ChartIcon, roles: ADMIN },
   { to: '/personas', label: 'Personas', icon: UsersIcon, roles: ADMIN },

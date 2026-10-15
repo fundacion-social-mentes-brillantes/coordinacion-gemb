@@ -684,20 +684,21 @@ export async function ejecutar(c: Cliente, o: Operacion): Promise<string> {
     case 'asignar_coordinadora': {
       const fecha = fechaDe(o.args.fecha);
       const nombre = String(o.args.nombre ?? '').trim().slice(0, 80);
+      const ruta = `programacion_dias/${fecha}`;
+      const datos = {
+        coordinadora: nombre,
+        updatedAt: new Date(),
+        updatedBy: c.uid,
+        updatedByName: c.nombre,
+      };
       await c.guardar([
-        {
-          tipo: (await c.leer(`programacion_dias/${fecha}`)) ? 'actualizar' : 'crear',
-          ruta: `programacion_dias/${fecha}`,
-          datos: {
-            coordinadora: nombre,
-            updatedAt: new Date(),
-            updatedBy: c.uid,
-            updatedByName: c.nombre,
-          },
-        },
+        (await c.leer(ruta))
+          ? // Se borra quién se la había tomado con "Yo la coordino": ya no es suya.
+            { tipo: 'actualizar', ruta, datos, borrar: ['coordinadoraUid'] }
+          : { tipo: 'crear', ruta, datos },
       ]);
       return nombre
-        ? `Listo. ${nombre} coordina la reunión del ${fmtDate(sessionDateFromKey(fecha))}. Ya se ve en el Calendario de la app.`
+        ? `Listo. ${nombre} coordina la reunión del ${fmtDate(sessionDateFromKey(fecha))}. Ya se ve en la pestaña Coordinación de la app.`
         : `Listo. La reunión del ${fmtDate(sessionDateFromKey(fecha))} quedó sin coordinadora.`;
     }
 

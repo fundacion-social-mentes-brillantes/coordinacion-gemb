@@ -21,6 +21,7 @@ import {
   Timestamp,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -456,20 +457,15 @@ describe('Programación (el antiguo Calendario)', () => {
     await assertFails(setDoc(doc(db, 'programacion_dias/no-es-fecha'), cambio('admin')));
   });
 
-  test('Apartar sin sesión: solo alguien del equipo, en una fecha libre, una vez', async () => {
-    const anon = como.anonimo();
-    const pedir = (dia, nombre) =>
-      setDoc(doc(anon, `programacion_solicitudes/${dia}`), {
+  test('Apartar sin sesión ya no se usa; quien programa limpia las solicitudes viejas', async () => {
+    const pedir = (db, dia, nombre) =>
+      setDoc(doc(db, `programacion_solicitudes/${dia}`), {
         nombre,
         estado: 'pendiente',
         createdAt: serverTimestamp(),
       });
-    await assertSucceeds(pedir('2026-10-15', 'Marcela Sánchez'));
-    await assertFails(pedir('2026-10-15', 'Tatiana López'), 'la misma fecha dos veces');
-    await assertFails(pedir('2026-10-20', 'Alguien de afuera'), 'nombre fuera del equipo');
-    await assertFails(pedir('2026-10-13', 'Marcela Sánchez'), 'fecha ya asignada');
-    await assertFails(pedir('martes', 'Marcela Sánchez'), 'id que no es fecha');
-    // Atenderla o rechazarla es de quien programa.
+    await assertFails(pedir(como.anonimo(), '2026-10-15', 'Marcela Sánchez'));
+    await assertFails(pedir(como.coord(), '2026-10-15', 'Marcela Sánchez'));
     await assertFails(deleteDoc(doc(como.coord(), 'programacion_solicitudes/2026-10-15')));
     await assertSucceeds(deleteDoc(doc(como.progra(), 'programacion_solicitudes/2026-10-15')));
   });
@@ -545,5 +541,118 @@ describe('Roles: Coordinador, Coordinador de coordinadores y Administrador', () 
   test('el principal borra la solicitud de alguien que no es del equipo', async () => {
     await assertFails(deleteDoc(doc(como.admin(), 'users/pendiente')));
     await assertSucceeds(deleteDoc(doc(como.super(), 'users/pendiente')));
+  });
+});
+
+describe('Yo la coordino: cada coordinadora se toma una fecha libre', () => {
+  /** "aaaa-mm-dd" de hoy + `dias`, en Bogotá. */
+  const diaBogota = (dias = 0) =>
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(Date.now() + dias * DIA));
+  const LIBRE = diaBogota(3);
+  const OTRA = diaBogota(5);
+  const PASADA = diaBogota(-10);
+  const firma = (uid) => ({ updatedAt: serverTimestamp(), updatedBy: uid, updatedByName: uid });
+  const tomar = (db, uid, dia, nombre = 'Marcela Sánchez', extra = {}) =>
+    setDoc(
+      doc(db, `programacion_dias/${dia}`),
+      { coordinadora: nombre, coordinadoraUid: uid, ...firma(uid), ...extra },
+      { merge: true },
+    );
+  const soltar = (db, uid, dia) =>
+    setDoc(
+      doc(db, `programacion_dias/${dia}`),
+      { coordinadora: deleteField(), coordinadoraUid: deleteField(), ...firma(uid) },
+      { merge: true },
+    );
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      // Un día ya asignado por la coordinación, y uno con un cambio pero libre.
+      await setDoc(doc(ctx.firestore(), `programacion_dias/${OTRA}`), { coordinadora: 'Tatiana López' });
+      await setDoc(doc(ctx.firestore(), `programacion_dias/${diaBogota(7)}`), { modalidad: 'virtual' });
+    });
+  });
+
+  test('una coordinadora se toma una fecha libre, al instante', async () => {
+    await assertSucceeds(tomar(como.coord(), 'coord', LIBRE));
+    const d = (await getDoc(doc(como.coord(), `programacion_dias/${LIBRE}`))).data();
+    assert.equal(d.coordinadora, 'Marcela Sánchez');
+    assert.equal(d.coordinadoraUid, 'coord');
+  });
+
+  test('si el día ya tenía cambios, solo se pone ella y no toca lo demás', async () => {
+    const dia = diaBogota(7);
+    await assertFails(tomar(como.coord(), 'coord', dia, 'Marcela Sánchez', { modalidad: 'presencial' }));
+    await assertSucceeds(tomar(como.coord(), 'coord', dia));
+    const d = (await getDoc(doc(como.coord(), `programacion_dias/${dia}`))).data();
+    assert.equal(d.modalidad, 'virtual');
+  });
+
+  test('no se toma una fecha que ya tiene coordinadora (aunque lleguen dos a la vez)', async () => {
+    await assertFails(tomar(como.coord(), 'coord', OTRA));
+    await assertSucceeds(tomar(como.coord(), 'coord', LIBRE));
+    await assertFails(tomar(como.coord2(), 'coord2', LIBRE, 'Tatiana López'));
+  });
+
+  test('solo con un nombre del equipo y con su propia cuenta', async () => {
+    await assertFails(tomar(como.coord(), 'coord', LIBRE, 'Alguien de afuera'));
+    await assertFails(tomar(como.coord(), 'coord2', LIBRE), 'a nombre de la cuenta de otra');
+    await assertFails(
+      setDoc(doc(como.coord(), `programacion_dias/${LIBRE}`), {
+        coordinadora: 'Marcela Sánchez',
+        coordinadoraUid: 'coord',
+        ...firma('coord'),
+        cancelada: true,
+      }),
+      'no puede cancelar la reunión de paso',
+    );
+  });
+
+  test('no cambia quién coordinó reuniones que ya pasaron', async () => {
+    await assertFails(tomar(como.coord(), 'coord', PASADA));
+  });
+
+  test('sin acceso (pendiente o pausada) no se toma nada', async () => {
+    await assertFails(tomar(como.pendiente(), 'pendiente', LIBRE));
+    await assertFails(tomar(como.inactiva(), 'inactiva', LIBRE));
+    await assertFails(tomar(como.anonimo(), 'x', LIBRE));
+  });
+
+  test('suelta solo la que ella se tomó', async () => {
+    await assertSucceeds(tomar(como.coord(), 'coord', LIBRE));
+    await assertFails(soltar(como.coord2(), 'coord2', LIBRE), 'otra no se la quita');
+    await assertFails(soltar(como.coord(), 'coord', OTRA), 'la que asignó la coordinación no');
+    await assertSucceeds(soltar(como.coord(), 'coord', LIBRE));
+    // Queda libre otra vez: ya la puede tomar otra.
+    await assertSucceeds(tomar(como.coord2(), 'coord2', LIBRE, 'Tatiana López'));
+  });
+
+  test('si quien programa la cambia de persona, se borra quién se la había tomado', async () => {
+    await assertSucceeds(tomar(como.coord(), 'coord', LIBRE));
+    const reasignar = (extra = {}) =>
+      setDoc(
+        doc(como.progra(), `programacion_dias/${LIBRE}`),
+        { coordinadora: 'Tatiana López', ...firma('progra'), ...extra },
+        { merge: true },
+      );
+    await assertFails(reasignar(), 'dejaría la marca de la anterior');
+    await assertFails(reasignar({ coordinadoraUid: 'coord2' }), 'ni inventarse una marca');
+    await assertSucceeds(reasignar({ coordinadoraUid: deleteField() }));
+    // La anterior ya no la puede soltar.
+    await assertFails(soltar(como.coord(), 'coord', LIBRE));
+    // Quien programa sí cambia otras cosas del día sin tocar la marca.
+    await assertSucceeds(tomar(como.coord2(), 'coord2', diaBogota(9), 'Tatiana López'));
+    await assertSucceeds(
+      setDoc(
+        doc(como.progra(), `programacion_dias/${diaBogota(9)}`),
+        { modalidad: 'virtual', ...firma('progra') },
+        { merge: true },
+      ),
+    );
   });
 });

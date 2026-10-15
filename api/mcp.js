@@ -2210,6 +2210,7 @@ function planDeFecha(key, c, dias) {
     modalidad: cambio?.modalidad ?? modalidadPorRegla(key, base, c),
     modalidadFija: !!cambio?.modalidad,
     coordinadora: cambio?.coordinadora ?? "",
+    coordinadoraUid: cambio?.coordinadora ? cambio.coordinadoraUid ?? "" : "",
     festivo: especial ? null : festivosColombia(d.getUTCFullYear()).get(key) ?? null,
     cancelada: cambio?.cancelada === true,
     motivo: cambio?.motivo ?? "",
@@ -2514,7 +2515,12 @@ function aEscrituraRest(e) {
         update: { name: nombreDoc(e.ruta), fields },
         // Al crear se escribe el documento entero; al actualizar, SOLO esos
         // campos (lo demás queda como estaba).
-        ...e.tipo === "actualizar" ? { updateMask: { fieldPaths: Object.keys(e.datos).map(rutaCampo) } } : {},
+        // Un campo en la máscara pero sin valor se borra.
+        ...e.tipo === "actualizar" ? {
+          updateMask: {
+            fieldPaths: [...Object.keys(e.datos), ...e.borrar ?? []].map(rutaCampo)
+          }
+        } : {},
         currentDocument: { exists: e.tipo === "actualizar" }
       };
     }
@@ -5043,19 +5049,20 @@ async function ejecutar(c, o) {
     case "asignar_coordinadora": {
       const fecha = fechaDe(o.args.fecha);
       const nombre = String(o.args.nombre ?? "").trim().slice(0, 80);
+      const ruta = `programacion_dias/${fecha}`;
+      const datos = {
+        coordinadora: nombre,
+        updatedAt: /* @__PURE__ */ new Date(),
+        updatedBy: c.uid,
+        updatedByName: c.nombre
+      };
       await c.guardar([
-        {
-          tipo: await c.leer(`programacion_dias/${fecha}`) ? "actualizar" : "crear",
-          ruta: `programacion_dias/${fecha}`,
-          datos: {
-            coordinadora: nombre,
-            updatedAt: /* @__PURE__ */ new Date(),
-            updatedBy: c.uid,
-            updatedByName: c.nombre
-          }
-        }
+        await c.leer(ruta) ? (
+          // Se borra quién se la había tomado con "Yo la coordino": ya no es suya.
+          { tipo: "actualizar", ruta, datos, borrar: ["coordinadoraUid"] }
+        ) : { tipo: "crear", ruta, datos }
       ]);
-      return nombre ? `Listo. ${nombre} coordina la reuni\xF3n del ${fmtDate(sessionDateFromKey(fecha))}. Ya se ve en el Calendario de la app.` : `Listo. La reuni\xF3n del ${fmtDate(sessionDateFromKey(fecha))} qued\xF3 sin coordinadora.`;
+      return nombre ? `Listo. ${nombre} coordina la reuni\xF3n del ${fmtDate(sessionDateFromKey(fecha))}. Ya se ve en la pesta\xF1a Coordinaci\xF3n de la app.` : `Listo. La reuni\xF3n del ${fmtDate(sessionDateFromKey(fecha))} qued\xF3 sin coordinadora.`;
     }
     case "cerrar_reunion":
     case "reabrir_reunion": {

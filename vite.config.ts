@@ -34,14 +34,14 @@ export default defineConfig({
           {
             name: 'Tomar asistencia',
             short_name: 'Asistencia',
-            description: 'Abre las sesiones para marcar quién llegó',
+            description: 'La reunión de hoy, lista para marcar quién llegó',
             url: '/sesiones',
             icons: [{ src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
           },
           {
-            name: 'Calendario',
-            short_name: 'Calendario',
-            description: 'Quién coordina cada reunión',
+            name: 'Coordinación',
+            short_name: 'Coordinación',
+            description: 'El calendario: quién coordina cada reunión',
             url: '/programacion',
             icons: [{ src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
           },

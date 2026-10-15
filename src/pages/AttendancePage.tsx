@@ -610,7 +610,7 @@ export function AttendancePage() {
     else toggle(m);
   };
 
-  // Fichas parecidas a lo que se está escribiendo en "Agregar persona".
+  // Fichas parecidas a lo que se está escribiendo en "Participante nuevo".
   const similares = useMemo(
     () =>
       walkinOpen && !walkinUnknown && walkinName.trim().length >= 2
@@ -695,7 +695,7 @@ export function AttendancePage() {
           onClick={() => navigate('/sesiones')}
           className="btn-ghost -ml-2 mb-1 min-h-[44px] text-sm"
         >
-          <ArrowLeftIcon className="text-lg" /> Sesiones
+          <ArrowLeftIcon className="text-lg" /> Asistencia
         </button>
         <h2 className="titulo-pantalla">
           {capitalizeFirst(fmtDateLong(session.date))}
@@ -760,8 +760,8 @@ export function AttendancePage() {
           </p>
           <p className="mt-1">
             {diasSesion > 0
-              ? 'Todavía no se puede tomar lista aquí. Si la reunión es hoy, vuelve a Sesiones y abre (o crea) la de hoy.'
-              : 'Ya no se puede tomar lista aquí. Si la reunión es hoy, vuelve a Sesiones y abre (o crea) la de hoy.'}
+              ? 'Todavía no se puede tomar lista aquí. Si la reunión es hoy, vuelve a Asistencia y toca la de hoy.'
+              : 'Ya no se puede tomar lista aquí. Si la reunión es hoy, vuelve a Asistencia y toca la de hoy.'}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
@@ -769,7 +769,7 @@ export function AttendancePage() {
               onClick={() => navigate('/sesiones')}
               className="btn-secondary min-h-[44px] flex-1 text-sm"
             >
-              Ir a Sesiones
+              Ir a Asistencia
             </button>
             {isAdmin && !desbloqueoFecha && (
               <button
@@ -1004,9 +1004,9 @@ export function AttendancePage() {
             type="button"
             onClick={() => setWalkinOpen(true)}
             disabled={!canEdit}
-            className="btn-ghost min-h-[44px] text-sm"
+            className="btn-secondary min-h-[44px] px-3 text-sm"
           >
-            <UserPlusIcon className="text-lg" /> Agregar persona
+            <UserPlusIcon className="text-lg" /> Participante nuevo
           </button>
         </div>
       </div>
@@ -1209,7 +1209,7 @@ export function AttendancePage() {
       <Modal
         open={walkinOpen}
         onClose={cerrarWalkin}
-        title={walkinUnknown ? 'Marcar sin saber el nombre' : 'Agregar persona nueva'}
+        title={walkinUnknown ? 'Marcar sin saber el nombre' : 'Participante nuevo'}
       >
         {walkinUnknown ? (
           <form

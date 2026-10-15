@@ -1,29 +1,35 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useProgramacion } from '../hooks/useProgramacion';
+import { useMiNombre } from '../hooks/useMiNombre';
+import { useAbrirReunion } from '../hooks/useAbrirReunion';
 import { listenSessions } from '../services/sessions';
 import {
   atenderSolicitud,
-  crearSolicitud,
   guardarConfig,
   guardarDia,
   rechazarSolicitud,
   restaurarDia,
+  soltarFecha,
+  tomarFecha,
 } from '../services/programacion';
 import {
   DIA_CORTO,
   NOMBRES_DIA,
   festivosColombia,
   NOMBRES_MES,
+  estadoDeFecha,
   hayReunion,
-  mensajeApartado,
+  mensajeCoordino,
   modalidadPorRegla,
+  moverDia,
   nombreActividades,
-  nombreDelEquipo,
   planDelMes,
+  planNuevo,
   textoWhatsApp,
+  type EstadoFecha,
   type FechaPlan,
   type ProgramacionConfig,
 } from '../lib/programacion';
@@ -39,22 +45,28 @@ import { CoordinatorPicker } from '../components/CoordinatorPicker';
 import { Spinner } from '../components/Spinner';
 import { ModalityBadge } from '../components/badges';
 import {
+  CheckIcon,
   ChevronRightIcon,
   ClipboardIcon,
   DownloadIcon,
+  EditIcon,
   ImageIcon,
+  ListCheckIcon,
   SettingsIcon,
   ShareIcon,
 } from '../components/Icons';
 
 // ---------------------------------------------------------------------------
-//  Calendario (antes era otra app: "Calendario — Mentes Brillantes").
+//  Coordinación (antes era otra app: "Calendario — Mentes Brillantes").
 //
-//  Muestra la programación del mes: cada reunión con su horario, modalidad y
-//  quién la coordina. Quien puede programar (administración o el permiso
-//  "Programación") asigna coordinadoras y cambia días; el resto del equipo
-//  puede "Apartar" una fecha libre. La misma vista sirve para la página
-//  pública /calendario, sin iniciar sesión.
+//  Un calendario de mes, como el de la Agenda: debajo de cada día con
+//  reunión hay una rayita de color.
+//    verde   libre: nadie la coordina todavía
+//    rojo    ya la coordina otra persona
+//    dorado  te toca a ti
+//  Al tocar un día se ve la reunión y, según el caso, "Yo la coordino" (queda
+//  tuya al instante), "Tomar asistencia" o, para quien programa, "Cambiar".
+//  La misma vista sirve para la página pública /calendario, sin iniciar sesión.
 // ---------------------------------------------------------------------------
 
 /** La pantalla dentro de la app (con la barra de abajo). */
@@ -62,73 +74,773 @@ export function ProgramacionPage() {
   return <ProgramacionView publico={false} />;
 }
 
-const fechaLarga = (p: FechaPlan) =>
+const fechaLarga = (p: { diaSemana: number; fecha: Date }) =>
   `${NOMBRES_DIA[p.diaSemana]} ${p.fecha.getUTCDate()} de ${NOMBRES_MES[
     p.fecha.getUTCMonth()
   ].toLowerCase()}`;
 
+const minus = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
+
+/** Los colores de la rayita: fijos, no cambian con el tema elegido. */
+const COLOR: Record<EstadoFecha, string> = {
+  libre: '#34d399',
+  ocupada: '#f87171',
+  tuya: '#e9c46a',
+  sin: 'rgb(148 163 184 / 0.45)',
+};
+const LEYENDA: [EstadoFecha, string][] = [
+  ['libre', 'Libre'],
+  ['ocupada', 'Ocupada'],
+  ['tuya', 'Tuya'],
+  ['sin', 'Sin reunión'],
+];
+
+/** Lunes primero, como en Colombia. */
+const SEMANA = [1, 2, 3, 4, 5, 6, 0];
+
 export function ProgramacionView({ publico }: { publico: boolean }) {
-  const { profile, puedeProgramar } = useAuth();
-  const puede = !publico && puedeProgramar && !!profile;
+  const { profile, puedeProgramar, isAdmin, isCoordinador } = useAuth();
+  const conCuenta = !publico && !!profile;
+  const puede = conCuenta && puedeProgramar;
   const { toast } = useToast();
-  const navigate = useNavigate();
-  const prog = useProgramacion();
+  const abrirReunion = useAbrirReunion();
+  const prog = useProgramacion({ conSolicitudes: puede });
   const { config, dias, solicitudes } = prog;
+  const { miNombre, elegirMiNombre } = useMiNombre(config.coordinadoras);
+  const yo = useMemo(
+    () => (conCuenta ? { uid: profile?.uid, nombre: miNombre } : {}),
+    [conCuenta, profile?.uid, miNombre],
+  );
 
   const hoyKey = dayKey(new Date());
   const [anio, setAnio] = useState(Number(hoyKey.slice(0, 4)));
   const [mes, setMes] = useState(Number(hoyKey.slice(5, 7)) - 1);
+  const [elegido, setElegido] = useState(hoyKey);
   const plan = useMemo(() => planDelMes(anio, mes, config, dias), [anio, mes, config, dias]);
+  const planDe = useMemo(() => new Map(plan.map((p) => [p.key, p])), [plan]);
 
   // Lo que de verdad pasó (solo con sesión iniciada: la asistencia no es
-  // pública). Sirve para mostrar, en fechas pasadas, cuánta gente fue.
+  // pública). Sirve para "Tomar asistencia" y para ver cuánta gente fue.
   const [sesiones, setSesiones] = useState<Session[]>([]);
   useEffect(() => {
-    if (publico || !profile) return;
+    if (!conCuenta) return;
     return listenSessions(setSesiones, (e) => console.warn(e));
-  }, [publico, profile]);
+  }, [conCuenta]);
   const sesionDe = useMemo(() => {
     const m = new Map<string, Session>();
+    // La lista viene de la más nueva a la más vieja: si un día hubo dos de
+    // un mismo tipo, queda la primera que se creó.
     for (const s of sesiones) m.set(`${dayKey(s.date)}|${s.type}`, s);
     return m;
   }, [sesiones]);
 
-  const [editando, setEditando] = useState<FechaPlan | null>(null);
-  const [apartando, setApartando] = useState<FechaPlan | null>(null);
+  const [editando, setEditando] = useState<{ fecha: FechaPlan; nueva: boolean } | null>(null);
+  const [eligiendoNombre, setEligiendoNombre] = useState<FechaPlan | null>(null);
   const [verSolicitudes, setVerSolicitudes] = useState(false);
   const [verAjustes, setVerAjustes] = useState(false);
-  const [manual, setManual] = useState<string | null>(null);
-  const [armandoImagen, setArmandoImagen] = useState(false);
+  const [verCompartir, setVerCompartir] = useState(false);
+  const [ocupado, setOcupado] = useState<string | null>(null);
 
-  /** Las sesiones que de verdad se hicieron (hasta hoy) de esa fecha. */
-  const realesDe = (p: FechaPlan) =>
-    p.key > hoyKey
-      ? []
-      : p.actividades
-          .map((t) => sesionDe.get(`${p.key}|${t}`))
-          .filter((s): s is Session => !!s);
-  /** Lo que de verdad fue (si ya se hizo) o lo que dice el calendario. */
-  const modalidadDe = (p: FechaPlan): Modality => realesDe(p)[0]?.modality ?? p.modalidad;
+  // Lo que se ve en el detalle: el día elegido, si es de este mes.
+  const mesClave = `${anio}-${String(mes + 1).padStart(2, '0')}`;
+  const elegidoKey = elegido.startsWith(mesClave) ? elegido : '';
+  const elegidoPlan = elegidoKey ? planDe.get(elegidoKey) ?? null : null;
 
   const reuniones = plan.filter(hayReunion);
-  const mesClave = `${anio}-${String(mes + 1).padStart(2, '0')}`;
   const fueraDeTemporada =
     mesClave < config.desde.slice(0, 7) || mesClave > config.hasta.slice(0, 7);
-  const resumen = {
-    total: reuniones.length,
-    asignadas: reuniones.filter((p) => p.coordinadora).length,
-    virtuales: reuniones.filter((p) => modalidadDe(p) === 'virtual').length,
-    presenciales: reuniones.filter((p) => modalidadDe(p) === 'presencial').length,
-  };
+  const libres = reuniones.filter((p) => !p.coordinadora && p.key >= hoyKey).length;
+  const tuyas = conCuenta ? reuniones.filter((p) => estadoDeFecha(p, yo) === 'tuya').length : 0;
 
-  const copiar = async (texto: string, ok: string) => {
-    try {
-      await navigator.clipboard.writeText(texto);
-      toast(ok, 'success');
-    } catch {
-      setManual(texto);
+  /** Al cambiar de mes: hoy si cae ahí; si no, la primera reunión del mes. */
+  const irAMes = (y: number, m: number) => {
+    setAnio(y);
+    setMes(m);
+    const clave = `${y}-${String(m + 1).padStart(2, '0')}`;
+    if (hoyKey.startsWith(clave)) setElegido(hoyKey);
+    else {
+      const primera = planDelMes(y, m, config, dias).find(hayReunion);
+      setElegido(primera?.key ?? `${clave}-01`);
     }
   };
+  const cambiarMes = (delta: number) => {
+    const n = mes + delta;
+    if (n < 0) irAMes(anio - 1, 11);
+    else if (n > 11) irAMes(anio + 1, 0);
+    else irAMes(anio, n);
+  };
+  const enEsteMes = hoyKey.startsWith(mesClave);
+
+  // Deslizar el dedo sobre el calendario cambia de mes, como en la Agenda.
+  const toque = useRef<{ x: number; y: number } | null>(null);
+  const alSoltar = (x: number, y: number) => {
+    const t = toque.current;
+    toque.current = null;
+    if (!t) return;
+    const dx = x - t.x;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(y - t.y) * 1.5) cambiarMes(dx < 0 ? 1 : -1);
+  };
+
+  // En el celular el detalle queda debajo: al tocar un día se asoma.
+  const detalleRef = useRef<HTMLDivElement>(null);
+  const elegirDia = (key: string) => {
+    setElegido(key);
+    requestAnimationFrame(() => {
+      const el = detalleRef.current;
+      if (!el || window.matchMedia('(min-width: 768px)').matches) return;
+      const r = el.getBoundingClientRect();
+      if (r.top > window.innerHeight - 160) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  /* -------- Yo la coordino / Soltar -------- */
+
+  const tomar = async (p: FechaPlan, nombre = miNombre) => {
+    if (!profile || ocupado) return;
+    if (!nombre) {
+      setEligiendoNombre(p);
+      return;
+    }
+    setOcupado(p.key);
+    const promesa = tomarFecha(p.key, nombre, profile);
+    try {
+      const ok = await esperarConLimite(promesa, 8000);
+      if (ok) toast(`¡Listo! Coordinas el ${minus(fechaLarga(p))}.`, 'success');
+      else {
+        toast('Sin señal: quedará tuya al volver la conexión, si nadie la toma antes.', 'info');
+        promesa.catch(() => toast(`El ${minus(fechaLarga(p))} lo tomó otra persona antes.`, 'error'));
+      }
+    } catch (e) {
+      console.error(e);
+      toast(
+        (e as { code?: string })?.code === 'permission-denied'
+          ? 'Otra persona la tomó un momento antes que tú.'
+          : 'No se pudo guardar. Revisa la conexión.',
+        'error',
+      );
+    } finally {
+      setOcupado(null);
+    }
+  };
+
+  const soltar = async (p: FechaPlan) => {
+    if (!profile || ocupado) return;
+    if (!window.confirm(`¿Soltar el ${minus(fechaLarga(p))}? Quedará libre para que otra persona la tome.`)) {
+      return;
+    }
+    setOcupado(p.key);
+    try {
+      const ok = await esperarConLimite(soltarFecha(p.key, profile), 8000);
+      toast(ok ? 'Listo: la fecha quedó libre.' : 'Sin señal: se soltará al volver la conexión.', ok ? 'success' : 'info');
+    } catch (e) {
+      console.error(e);
+      toast('No se pudo soltar. Revisa la conexión.', 'error');
+    } finally {
+      setOcupado(null);
+    }
+  };
+
+  const avisar = async (p: FechaPlan) => {
+    const texto = mensajeCoordino(p, p.coordinadora);
+    const nav = navigator as Navigator & { share?: (d: { text: string }) => Promise<void> };
+    if (nav.share) {
+      try {
+        await nav.share({ text: texto });
+        return;
+      } catch {
+        /* cerró el menú: se copia */
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(texto);
+      toast('Mensaje copiado: pégalo en el grupo.', 'success');
+    } catch {
+      toast('No se pudo copiar el mensaje.', 'error');
+    }
+  };
+
+  /* -------- Cuadrícula -------- */
+
+  const totalDias = new Date(Date.UTC(anio, mes + 1, 0)).getUTCDate();
+  const huecos = (new Date(Date.UTC(anio, mes, 1, 12)).getUTCDay() + 6) % 7;
+  const celdas: (string | null)[] = [
+    ...Array.from({ length: huecos }, () => null),
+    ...Array.from({ length: totalDias }, (_, i) => `${mesClave}-${String(i + 1).padStart(2, '0')}`),
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h2 className="titulo-pantalla">Coordinación</h2>
+          <p className="text-sm text-slate-500">
+            {publico ? 'Quién coordina cada reunión.' : 'Toca un día para ver la reunión.'}
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-1.5">
+          <button
+            type="button"
+            onClick={() => setVerCompartir(true)}
+            className="btn-secondary min-h-[44px] px-3 text-sm"
+            aria-label="Compartir el mes"
+            title="Compartir el mes"
+          >
+            <ShareIcon className="text-lg" />
+            <span className="hidden sm:inline">Compartir</span>
+          </button>
+          {puede && (
+            <button
+              type="button"
+              onClick={() => setVerAjustes(true)}
+              className="btn-secondary min-h-[44px] px-3 text-sm"
+              aria-label="Ajustes del calendario"
+              title="Ajustes del calendario"
+            >
+              <SettingsIcon className="text-lg" />
+              <span className="hidden sm:inline">Ajustar</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Solicitudes que quedaron del Calendario viejo (quien programa) */}
+      {puede && solicitudes.size > 0 && (
+        <button
+          type="button"
+          onClick={() => setVerSolicitudes(true)}
+          className="flex w-full items-center gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 text-left"
+        >
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-400 text-lg font-bold text-white">
+            {solicitudes.size}
+          </span>
+          <span className="min-w-0 flex-1 font-semibold text-amber-900">
+            {solicitudes.size === 1
+              ? 'Alguien pidió coordinar una fecha'
+              : `${solicitudes.size} pedidos para coordinar fechas`}
+          </span>
+          <ChevronRightIcon className="text-xl text-amber-500" />
+        </button>
+      )}
+
+      <div className="md:grid md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] md:items-start md:gap-4">
+        {/* El mes */}
+        <section
+          className="card p-3 sm:p-4"
+          onTouchStart={(e) => {
+            const t = e.touches[0];
+            toque.current = { x: t.clientX, y: t.clientY };
+          }}
+          onTouchEnd={(e) => {
+            const t = e.changedTouches[0];
+            alSoltar(t.clientX, t.clientY);
+          }}
+        >
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => cambiarMes(-1)}
+              className="tap rounded-full text-slate-600 active:bg-white/10"
+              aria-label="Mes anterior"
+            >
+              <ChevronRightIcon className="rotate-180 text-2xl" />
+            </button>
+            <div className="min-w-0 flex-1 text-center">
+              <p className="font-display text-[22px] font-bold leading-tight text-slate-900">
+                {NOMBRES_MES[mes]} <span className="text-primary-500">{anio}</span>
+              </p>
+              {enEsteMes ? (
+                <p className="text-xs text-slate-500">
+                  {prog.cargando
+                    ? 'Cargando…'
+                    : reuniones.length === 0
+                      ? 'Sin reuniones'
+                      : `${reuniones.length} reuniones · ${libres} libre${libres === 1 ? '' : 's'}${
+                          conCuenta ? ` · ${tuyas} tuya${tuyas === 1 ? '' : 's'}` : ''
+                        }`}
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => irAMes(Number(hoyKey.slice(0, 4)), Number(hoyKey.slice(5, 7)) - 1)}
+                  className="text-xs font-bold text-primary-500"
+                >
+                  Volver a hoy
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => cambiarMes(1)}
+              className="tap rounded-full text-slate-600 active:bg-white/10"
+              aria-label="Mes siguiente"
+            >
+              <ChevronRightIcon className="text-2xl" />
+            </button>
+          </div>
+
+          <div className="mt-3 grid grid-cols-7 text-center">
+            {SEMANA.map((d) => (
+              <span key={d} className="pb-1 text-[11px] font-bold tracking-wide text-slate-500">
+                {DIA_CORTO[d]}
+              </span>
+            ))}
+          </div>
+
+          {prog.cargando ? (
+            <div className="flex h-[300px] items-center justify-center">
+              <Spinner className="h-8 w-8" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-7 gap-y-1" role="grid" aria-label={`${NOMBRES_MES[mes]} ${anio}`}>
+              {celdas.map((key, i) => {
+                if (!key) return <span key={`h${i}`} aria-hidden />;
+                const p = planDe.get(key);
+                const estado = p ? estadoDeFecha(p, yo) : null;
+                const pasada = key < hoyKey;
+                const esHoy = key === hoyKey;
+                const sel = key === elegidoKey;
+                const n = Number(key.slice(8));
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    role="gridcell"
+                    aria-selected={sel}
+                    aria-label={`${n}${
+                      estado === 'libre'
+                        ? ', libre'
+                        : estado === 'tuya'
+                          ? ', te toca a ti'
+                          : estado === 'ocupada'
+                            ? `, coordina ${p?.coordinadora}`
+                            : estado === 'sin'
+                              ? ', no hay reunión'
+                              : ''
+                    }`}
+                    onClick={() => elegirDia(key)}
+                    className={`relative mx-auto flex h-[54px] w-full max-w-[56px] flex-col items-center justify-start gap-1 rounded-2xl pt-1.5 transition active:scale-95 ${
+                      sel
+                        ? 'bg-primary-500/15 shadow-[inset_0_0_0_1.5px_rgb(var(--app-glow-1)/0.55)]'
+                        : 'hover:bg-white/5'
+                    }`}
+                  >
+                    <span
+                      className={`flex h-7 w-7 items-center justify-center rounded-full text-[15px] leading-none ${
+                        esHoy
+                          ? 'bg-primary-500 font-bold text-white'
+                          : p
+                            ? 'font-bold text-slate-900'
+                            : 'text-slate-500'
+                      } ${pasada && !esHoy ? 'opacity-45' : ''}`}
+                    >
+                      {n}
+                    </span>
+                    {estado && (
+                      <span
+                        className={`h-[5px] w-7 rounded-full ${pasada ? 'opacity-40' : ''}`}
+                        style={{
+                          background: COLOR[estado],
+                          boxShadow:
+                            estado === 'tuya' && !pasada ? `0 0 10px ${COLOR.tuya}` : undefined,
+                        }}
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Leyenda */}
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-[color:var(--app-border)] pt-3 text-xs text-slate-500">
+            {LEYENDA.filter(([e]) => conCuenta || e !== 'tuya').map(([e, t]) => (
+              <span key={e} className="inline-flex items-center gap-1.5">
+                <span className="h-[5px] w-4 rounded-full" style={{ background: COLOR[e] }} />
+                {t}
+              </span>
+            ))}
+          </div>
+        </section>
+
+        {/* El día elegido */}
+        <div ref={detalleRef} className="mt-4 scroll-mt-24 md:mt-0">
+          {prog.error && plan.length === 0 ? (
+            <p className="card p-4 text-center text-sm text-slate-500">
+              No se pudo cargar el calendario. Revisa la conexión.
+            </p>
+          ) : !prog.cargando && plan.length === 0 ? (
+            <div className="card p-5 text-center text-sm text-slate-500">
+              No hay reuniones en {NOMBRES_MES[mes].toLowerCase()} de {anio}
+              {fueraDeTemporada ? ': está fuera de la temporada.' : '.'}
+              {puede && elegidoKey && (
+                <button
+                  type="button"
+                  onClick={() => setEditando({ fecha: planNuevo(elegidoKey, config), nueva: true })}
+                  className="btn-secondary mt-3 min-h-[44px] w-full text-sm"
+                >
+                  Programar una reunión el {Number(elegidoKey.slice(8))}
+                </button>
+              )}
+            </div>
+          ) : elegidoKey && !prog.cargando ? (
+            <DetalleDia
+              key={elegidoKey}
+              diaKey={elegidoKey}
+              p={elegidoPlan}
+              hoyKey={hoyKey}
+              estado={elegidoPlan ? estadoDeFecha(elegidoPlan, yo) : null}
+              publico={!conCuenta}
+              puede={puede}
+              esStaff={conCuenta && isCoordinador}
+              isAdmin={conCuenta && isAdmin}
+              propia={!!elegidoPlan && !!profile && elegidoPlan.coordinadoraUid === profile.uid}
+              solicitud={puede ? solicitudes.get(elegidoKey)?.nombre ?? '' : ''}
+              sesiones={
+                elegidoPlan
+                  ? elegidoPlan.actividades.map((t) => [t, sesionDe.get(`${elegidoKey}|${t}`)] as const)
+                  : []
+              }
+              ocupado={ocupado === elegidoKey}
+              onTomar={() => elegidoPlan && tomar(elegidoPlan)}
+              onSoltar={() => elegidoPlan && soltar(elegidoPlan)}
+              onAvisar={() => elegidoPlan && avisar(elegidoPlan)}
+              onEditar={() =>
+                setEditando(
+                  elegidoPlan
+                    ? { fecha: elegidoPlan, nueva: false }
+                    : { fecha: planNuevo(elegidoKey, config), nueva: true },
+                )
+              }
+              onAsistencia={(t, s) => elegidoPlan && abrirReunion(elegidoPlan, t, s)}
+            />
+          ) : null}
+        </div>
+      </div>
+
+      {publico && (
+        <p className="px-2 text-center text-xs text-slate-400">
+          ¿Eres del equipo? Entra con tu cuenta de Google para coordinar y tomar asistencia.
+        </p>
+      )}
+
+      {/* Modales */}
+      {editando && (
+        <EditarFecha
+          fecha={editando.fecha}
+          nueva={editando.nueva}
+          config={config}
+          onClose={() => setEditando(null)}
+        />
+      )}
+      {eligiendoNombre && (
+        <ElegirMiNombre
+          equipo={config.coordinadoras}
+          onClose={() => setEligiendoNombre(null)}
+          onElegir={(n) => {
+            elegirMiNombre(n);
+            const p = eligiendoNombre;
+            setEligiendoNombre(null);
+            void tomar(p, n);
+          }}
+        />
+      )}
+      {verSolicitudes && (
+        <Modal open onClose={() => setVerSolicitudes(false)} title="Pedidos para coordinar">
+          <ul className="space-y-3">
+            {[...solicitudes.values()]
+              .sort((a, b) => a.id.localeCompare(b.id))
+              .map((s) => {
+                const p = planDelMes(Number(s.id.slice(0, 4)), Number(s.id.slice(5, 7)) - 1, config, dias).find(
+                  (x) => x.key === s.id,
+                );
+                return (
+                  <li key={s.id} className="rounded-xl border border-[color:var(--app-border)] p-3">
+                    <p className="font-semibold text-slate-800">{s.nombre}</p>
+                    <p className="text-sm text-slate-500">
+                      {p ? `${fechaLarga(p)} · ${nombreActividades(p.actividades)}` : s.id}
+                    </p>
+                    {p && <SolicitudBotones fecha={p} nombre={s.nombre} sinBorde />}
+                  </li>
+                );
+              })}
+          </ul>
+        </Modal>
+      )}
+      {verAjustes && <Ajustes config={config} onClose={() => setVerAjustes(false)} />}
+      {verCompartir && (
+        <CompartirMes anio={anio} mes={mes} plan={plan} onClose={() => setVerCompartir(false)} />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* El detalle del día elegido                                          */
+/* ------------------------------------------------------------------ */
+
+function DetalleDia({
+  diaKey,
+  p,
+  hoyKey,
+  estado,
+  publico,
+  puede,
+  esStaff,
+  isAdmin,
+  propia,
+  solicitud,
+  sesiones,
+  ocupado,
+  onTomar,
+  onSoltar,
+  onAvisar,
+  onEditar,
+  onAsistencia,
+}: {
+  diaKey: string;
+  p: FechaPlan | null;
+  hoyKey: string;
+  estado: EstadoFecha | null;
+  publico: boolean;
+  puede: boolean;
+  esStaff: boolean;
+  isAdmin: boolean;
+  /** Ella misma se la tomó (y por eso la puede soltar). */
+  propia: boolean;
+  solicitud: string;
+  sesiones: (readonly [SessionType, Session | undefined])[];
+  ocupado: boolean;
+  onTomar: () => void;
+  onSoltar: () => void;
+  onAvisar: () => void;
+  onEditar: () => void;
+  onAsistencia: (t: SessionType, s?: Session) => void;
+}) {
+  const fecha = new Date(`${diaKey}T12:00:00Z`);
+  const titulo = fechaLarga({ diaSemana: fecha.getUTCDay(), fecha });
+  const esHoy = diaKey === hoyKey;
+  const pasada = diaKey < hoyKey;
+  // Las coordinadoras toman asistencia hasta anteayer (las reglas dejan
+  // marcar hasta 72 horas después); la administración, cuando sea.
+  const enVentana = diaKey <= hoyKey && (isAdmin || diaKey >= moverDia(hoyKey, -2));
+
+  return (
+    <section className="card entrar overflow-hidden">
+      <div className="flex items-center gap-2 px-4 pt-4">
+        <h3 className="min-w-0 flex-1 font-display text-lg font-bold leading-tight text-slate-900">
+          {titulo}
+        </h3>
+        {esHoy && <span className="chip bg-primary-100 text-primary-700">Hoy</span>}
+      </div>
+
+      {!p ? (
+        <div className="space-y-3 p-4 pt-2">
+          <p className="text-sm text-slate-500">Este día no hay reunión.</p>
+          {puede && !pasada && (
+            <button type="button" onClick={onEditar} className="btn-secondary min-h-[44px] w-full text-sm">
+              Programar una reunión especial
+            </button>
+          )}
+        </div>
+      ) : !hayReunion(p) ? (
+        <div className="space-y-3 p-4 pt-2">
+          <p className="text-sm text-slate-500">{nombreActividades(p.actividades)}</p>
+          <p className={`text-sm font-semibold ${p.festivo ? 'text-amber-700' : 'text-rose-700'}`}>
+            {p.festivo ? `Festivo · ${p.festivo}. No hay reunión.` : `No hay reunión${p.motivo ? ` · ${p.motivo}` : ''}`}
+          </p>
+          {puede && (
+            <button type="button" onClick={onEditar} className="btn-secondary min-h-[44px] w-full text-sm">
+              <EditIcon className="text-base" /> Cambiar este día
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3 p-4 pt-1">
+          <div>
+            <p className="font-semibold text-primary-900">{nombreActividades(p.actividades)}</p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {p.horario && <span className="chip bg-slate-100 text-slate-600">{p.horario}</span>}
+              {/* Si ya se hizo, cómo fue de verdad; si no, lo que dice el calendario. */}
+              <ModalityBadge modality={sesiones.find(([, s]) => s)?.[1]?.modality ?? p.modalidad} />
+              {p.especial && <span className="chip bg-accent-100 text-accent-700">Especial</span>}
+            </div>
+          </div>
+
+          {/* Quién coordina */}
+          <div
+            className="flex items-center gap-3 rounded-2xl p-3"
+            style={{
+              background: `color-mix(in srgb, ${COLOR[estado ?? 'sin']} 18%, transparent)`,
+              boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${COLOR[estado ?? 'sin']} 35%, transparent)`,
+            }}
+          >
+            <span
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-base font-bold"
+              style={{ background: COLOR[estado ?? 'sin'], color: '#0b1226' }}
+              aria-hidden
+            >
+              {estado === 'libre' ? '+' : estado === 'tuya' ? '★' : p.coordinadora.charAt(0).toUpperCase()}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                {estado === 'libre' ? (pasada ? 'Sin coordinadora' : 'Libre') : estado === 'tuya' ? 'Te toca a ti' : 'Coordina'}
+              </p>
+              <p className="truncate font-bold text-slate-900">
+                {estado === 'libre' ? (pasada ? 'Nadie la tomó' : 'Nadie la coordina todavía') : p.coordinadora}
+              </p>
+            </div>
+          </div>
+
+          {/* Yo la coordino */}
+          {esStaff && estado === 'libre' && !pasada && (
+            <button type="button" onClick={onTomar} disabled={ocupado} className="btn-primary btn-lg">
+              {ocupado ? <Spinner className="h-5 w-5 text-white" /> : <CheckIcon className="text-lg" />}
+              Yo la coordino
+            </button>
+          )}
+
+          {/* Tomar asistencia (las reuniones ya están "creadas") */}
+          {esStaff &&
+            sesiones.map(([t, s]) => {
+              if (!s && !enVentana) return null;
+              const n = Math.max(0, s?.presentCount ?? 0);
+              const abierta = s?.status === 'open' && enVentana;
+              const prefijo = p.actividades.length > 1 ? `${SESSION_TYPE_LABELS[t]}: ` : '';
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => onAsistencia(t, s)}
+                  className={
+                    // Si está libre, lo primero es "Yo la coordino".
+                    esHoy && (!s || abierta) && estado !== 'libre'
+                      ? 'btn-primary btn-lg'
+                      : 'btn-secondary min-h-[48px] w-full text-sm'
+                  }
+                >
+                  <ListCheckIcon className="text-lg" />
+                  <span className="truncate">
+                    {prefijo}
+                    {!s
+                      ? 'Tomar asistencia'
+                      : abierta
+                        ? `Seguir con la asistencia · ${n}`
+                        : `Ver asistencia · ${n} presente${n === 1 ? '' : 's'}`}
+                  </span>
+                </button>
+              );
+            })}
+
+          {estado === 'tuya' && !pasada && (
+            <div className="flex gap-2">
+              <button type="button" onClick={onAvisar} className="btn-secondary min-h-[44px] flex-1 text-sm">
+                <ShareIcon className="text-base" /> Avisar al grupo
+              </button>
+              {propia && (
+                <button
+                  type="button"
+                  onClick={onSoltar}
+                  disabled={ocupado}
+                  className="btn-ghost min-h-[44px] flex-1 text-sm text-rose-600"
+                >
+                  Ya no puedo
+                </button>
+              )}
+            </div>
+          )}
+          {estado === 'tuya' && !pasada && !propia && !puede && (
+            <p className="text-xs text-slate-500">
+              Te la asignó la coordinación. Si no puedes, avísales para que la cambien.
+            </p>
+          )}
+
+          {/* Sin cuenta (página pública) */}
+          {publico && estado === 'libre' && !pasada && (
+            <Link
+              to="/login"
+              state={{ from: { pathname: '/programacion' } }}
+              className="btn-primary min-h-[48px] w-full text-sm"
+            >
+              Entra para coordinarla
+            </Link>
+          )}
+
+          {/* Pedido viejo de "Apartar" */}
+          {puede && solicitud && !p.coordinadora && <SolicitudBotones fecha={p} nombre={solicitud} sinBorde />}
+
+          {puede && (
+            <button type="button" onClick={onEditar} className="btn-ghost min-h-[44px] w-full text-sm">
+              <EditIcon className="text-base" /> Cambiar este día
+            </button>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* ¿Cuál eres tú? (una sola vez por teléfono)                          */
+/* ------------------------------------------------------------------ */
+
+function ElegirMiNombre({
+  equipo,
+  onElegir,
+  onClose,
+}: {
+  equipo: string[];
+  onElegir: (nombre: string) => void;
+  onClose: () => void;
+}) {
+  const [nombre, setNombre] = useState('');
+  return (
+    <Modal open onClose={onClose} title="¿Cuál eres tú?">
+      {equipo.length === 0 ? (
+        <p className="text-sm text-slate-600">
+          Todavía no hay equipo en el calendario. Pídele a la coordinación que te agregue (Ajustes del
+          calendario → Equipo que coordina).
+        </p>
+      ) : (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Elige tu nombre como aparece en el equipo. Solo se pregunta una vez en este teléfono.
+          </p>
+          <CoordinatorPicker value={nombre} onChange={setNombre} nombres={equipo} conLibre={false} />
+          <p className="text-xs text-slate-500">
+            ¿No estás en la lista? Pídele a la coordinación que te agregue al equipo.
+          </p>
+          <button
+            type="button"
+            disabled={!nombre}
+            onClick={() => onElegir(nombre)}
+            className="btn-primary btn-lg"
+          >
+            Soy {nombre || '…'}: coordinarla
+          </button>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Compartir el mes (imagen, WhatsApp o PDF)                           */
+/* ------------------------------------------------------------------ */
+
+function CompartirMes({
+  anio,
+  mes,
+  plan,
+  onClose,
+}: {
+  anio: number;
+  mes: number;
+  plan: FechaPlan[];
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const [armandoImagen, setArmandoImagen] = useState(false);
+  const [manual, setManual] = useState<string | null>(null);
 
   const compartirImagen = async () => {
     setArmandoImagen(true);
@@ -147,6 +859,17 @@ export function ProgramacionView({ publico }: { publico: boolean }) {
       toast('No se pudo crear la imagen.', 'error');
     } finally {
       setArmandoImagen(false);
+    }
+  };
+
+  const copiarWhatsApp = async () => {
+    const texto = textoWhatsApp(anio, mes, plan);
+    try {
+      await navigator.clipboard.writeText(texto);
+      toast('Copiado: pégalo en WhatsApp.', 'success');
+      onClose();
+    } catch {
+      setManual(texto);
     }
   };
 
@@ -173,306 +896,49 @@ export function ProgramacionView({ publico }: { publico: boolean }) {
     });
   };
 
-  const cambiarMes = (delta: number) => {
-    const n = mes + delta;
-    if (n < 0) {
-      setMes(11);
-      setAnio((a) => a - 1);
-    } else if (n > 11) {
-      setMes(0);
-      setAnio((a) => a + 1);
-    } else setMes(n);
-  };
-
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <h2 className="titulo-pantalla">Calendario</h2>
-          <p className="text-sm text-slate-500">Quién coordina cada reunión.</p>
-        </div>
-        {puede && (
-          <button
-            type="button"
-            onClick={() => setVerAjustes(true)}
-            className="btn-secondary min-h-[44px] shrink-0 px-3 text-sm"
-            aria-label="Ajustes del calendario"
-          >
-            <SettingsIcon className="text-lg" /> Ajustar
-          </button>
-        )}
-      </div>
-
-      {/* Mes */}
-      <div className="card flex items-center gap-2 p-2">
-        <button
-          type="button"
-          onClick={() => cambiarMes(-1)}
-          className="tap rounded-full text-primary-700 active:bg-primary-50"
-          aria-label="Mes anterior"
-        >
-          <ChevronRightIcon className="rotate-180 text-xl" />
-        </button>
-        <p className="flex-1 text-center text-base font-bold text-primary-900">
-          {NOMBRES_MES[mes]} {anio}
-        </p>
-        <button
-          type="button"
-          onClick={() => cambiarMes(1)}
-          className="tap rounded-full text-primary-700 active:bg-primary-50"
-          aria-label="Mes siguiente"
-        >
-          <ChevronRightIcon className="text-xl" />
-        </button>
-      </div>
-
-      {/* Solicitudes pendientes (quien programa) */}
-      {puede && solicitudes.size > 0 && (
-        <button
-          type="button"
-          onClick={() => setVerSolicitudes(true)}
-          className="flex w-full items-center gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 text-left"
-        >
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-400 text-lg font-bold text-white">
-            {solicitudes.size}
-          </span>
-          <span className="min-w-0 flex-1 font-semibold text-amber-900">
-            {solicitudes.size === 1
-              ? 'Alguien pidió coordinar una fecha'
-              : `${solicitudes.size} solicitudes para coordinar fechas`}
-          </span>
-          <ChevronRightIcon className="text-xl text-amber-500" />
-        </button>
-      )}
-
-      {/* Resumen */}
-      {!prog.cargando && (
-        <div className="grid grid-cols-4 gap-2 text-center">
-          {(
-            [
-              ['Reuniones', resumen.total],
-              ['Asignadas', resumen.asignadas],
-              ['Virtuales', resumen.virtuales],
-              ['Presenciales', resumen.presenciales],
-            ] as [string, number][]
-          ).map(([t, n]) => (
-            <div key={t} className="card px-1 py-2">
-              <p className="text-xl font-bold text-primary-800">{n}</p>
-              <p className="text-[11px] text-slate-500">{t}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Compartir */}
-      <div className="grid grid-cols-3 gap-2">
-        <button
-          type="button"
-          onClick={compartirImagen}
-          disabled={armandoImagen || plan.length === 0}
-          className="btn-secondary min-h-[48px] px-2 text-sm"
-        >
-          {armandoImagen ? <Spinner className="h-4 w-4" /> : <ImageIcon className="text-lg" />} Imagen
-        </button>
-        <button
-          type="button"
-          onClick={() => copiar(textoWhatsApp(anio, mes, plan), 'Copiado: pégalo en WhatsApp.')}
-          className="btn-secondary min-h-[48px] px-2 text-sm"
-        >
-          <ClipboardIcon className="text-lg" /> WhatsApp
-        </button>
-        <button
-          type="button"
-          onClick={descargarPdf}
-          disabled={plan.length === 0}
-          className="btn-secondary min-h-[48px] px-2 text-sm"
-        >
-          <DownloadIcon className="text-lg" /> PDF
-        </button>
-      </div>
-
-      {/* Fechas */}
-      {prog.cargando ? (
-        <div className="flex justify-center py-12">
-          <Spinner className="h-8 w-8" />
-        </div>
-      ) : prog.error && plan.length === 0 ? (
-        <p className="card p-4 text-center text-sm text-slate-500">
-          No se pudo cargar el calendario. Revisa la conexión.
-        </p>
-      ) : plan.length === 0 ? (
-        <p className="card p-6 text-center text-sm text-slate-500">
-          No hay reuniones programadas en {NOMBRES_MES[mes].toLowerCase()} de {anio}
-          {fueraDeTemporada ? ': está fuera de la temporada.' : '.'}
-        </p>
-      ) : (
-        <ul className="space-y-3">
-          {plan.map((p) => {
-            const solicitud = solicitudes.get(p.key);
-            const reales = realesDe(p);
-            const pasada = p.key < hoyKey;
-            const esHoy = p.key === hoyKey;
-            const activa = hayReunion(p);
-            const puedeApartar =
-              !puede && activa && !p.coordinadora && !solicitud && !pasada && config.coordinadoras.length > 0;
-            const modalidad = modalidadDe(p);
-            return (
-              <li
-                key={p.key}
-                className={`card overflow-hidden ${esHoy ? 'ring-2 ring-primary-400' : ''} ${
-                  activa ? '' : 'opacity-75'
-                }`}
-              >
-                <button
-                  type="button"
-                  disabled={!puede}
-                  onClick={() => setEditando(p)}
-                  className="flex w-full items-start gap-3 p-4 text-left disabled:cursor-default enabled:active:bg-primary-50"
-                >
-                  <div
-                    className={`flex w-14 shrink-0 flex-col items-center rounded-xl py-2 ${
-                      activa ? 'bg-primary-500 text-white shadow-[0_8px_20px_-10px_rgb(var(--app-glow-1)/0.8)]' : 'bg-slate-200 text-slate-500'
-                    }`}
-                  >
-                    <span className="text-[11px] font-bold tracking-wide opacity-80">
-                      {DIA_CORTO[p.diaSemana]}
-                    </span>
-                    <span className="text-2xl font-extrabold leading-none">{p.fecha.getUTCDate()}</span>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className={`font-semibold text-primary-900 ${activa ? '' : 'line-through'}`}>
-                      {nombreActividades(p.actividades)}
-                    </p>
-                    {p.festivo ? (
-                      <p className="mt-1 text-sm font-medium text-amber-700">Festivo · {p.festivo}</p>
-                    ) : p.cancelada ? (
-                      <p className="mt-1 text-sm font-medium text-rose-700">
-                        No hay reunión{p.motivo ? ` · ${p.motivo}` : ''}
-                      </p>
-                    ) : (
-                      <>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                          <span className="chip bg-slate-100 text-slate-600">{p.horario}</span>
-                          <ModalityBadge modality={modalidad} />
-                          {esHoy && <span className="chip bg-primary-100 text-primary-700">Hoy</span>}
-                        </div>
-                        <p className="mt-1.5 text-sm">
-                          {p.coordinadora ? (
-                            <span className="font-semibold text-slate-800">Coordina: {p.coordinadora}</span>
-                          ) : solicitud ? (
-                            <span className="font-semibold text-amber-700">
-                              En revisión: {solicitud.nombre}
-                            </span>
-                          ) : (
-                            <span className="font-medium text-emerald-700">Disponible</span>
-                          )}
-                        </p>
-                      </>
-                    )}
-                  </div>
-                  {puede && <ChevronRightIcon className="mt-1 text-xl text-slate-300" />}
-                </button>
-
-                {/* Lo que pasó de verdad */}
-                {reales.length > 0 && (
-                  <div className="border-t border-primary-100 bg-primary-50/40 px-4 py-2">
-                    {reales.map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        onClick={() => navigate(`/sesiones/${s.id}`)}
-                        className="flex min-h-[40px] w-full items-center gap-2 text-left text-sm text-primary-800"
-                      >
-                        <span className="min-w-0 flex-1">
-                          {p.actividades.length > 1 ? `${SESSION_TYPE_LABELS[s.type]}: ` : ''}
-                          {Math.max(0, s.presentCount ?? 0)} presentes
-                          {s.coordinator && s.coordinator !== p.coordinadora
-                            ? ` · coordinó ${s.coordinator}`
-                            : ''}
-                        </span>
-                        <ChevronRightIcon className="text-lg text-primary-300" />
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* Atender una solicitud ahí mismo */}
-                {puede && solicitud && activa && !p.coordinadora && (
-                  <SolicitudBotones fecha={p} nombre={solicitud.nombre} />
-                )}
-
-                {puedeApartar && (
-                  <div className="border-t border-slate-100 px-4 py-2">
-                    <button
-                      type="button"
-                      onClick={() => setApartando(p)}
-                      className="btn-secondary min-h-[44px] w-full text-sm"
-                    >
-                      Apartar esta fecha
-                    </button>
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {publico && (
-        <p className="px-2 text-center text-xs text-slate-400">
-          ¿Eres del equipo? Entra a la app para ver también la asistencia de cada reunión.
-        </p>
-      )}
-
-      {/* Modales */}
-      {editando && (
-        <EditarFecha fecha={editando} config={config} onClose={() => setEditando(null)} />
-      )}
-      {apartando && (
-        <Apartar
-          fecha={apartando}
-          config={config}
-          sugerido={profile ? nombreDelEquipo(profile.displayName, config.coordinadoras) : ''}
-          onClose={() => setApartando(null)}
-        />
-      )}
-      {verSolicitudes && (
-        <Modal open onClose={() => setVerSolicitudes(false)} title="Solicitudes">
-          <ul className="space-y-3">
-            {[...solicitudes.values()]
-              .sort((a, b) => a.id.localeCompare(b.id))
-              .map((s) => {
-                const p = planDelMes(Number(s.id.slice(0, 4)), Number(s.id.slice(5, 7)) - 1, config, dias).find(
-                  (x) => x.key === s.id,
-                );
-                return (
-                  <li key={s.id} className="rounded-xl border border-slate-200 p-3">
-                    <p className="font-semibold text-slate-800">{s.nombre}</p>
-                    <p className="text-sm text-slate-500">
-                      {p ? `${fechaLarga(p)} · ${nombreActividades(p.actividades)}` : s.id}
-                    </p>
-                    {p && <SolicitudBotones fecha={p} nombre={s.nombre} sinBorde />}
-                  </li>
-                );
-              })}
-          </ul>
-        </Modal>
-      )}
-      {verAjustes && <Ajustes config={config} onClose={() => setVerAjustes(false)} />}
-      <Modal open={manual !== null} onClose={() => setManual(null)} title="Copia esto">
+    <Modal open onClose={onClose} title={`${NOMBRES_MES[mes]} ${anio}`}>
+      {manual !== null ? (
         <div className="space-y-3">
           <p className="text-sm text-slate-500">
             Tu navegador no dejó copiarlo solo. Mantén pulsado el texto, selecciónalo todo y cópialo.
           </p>
           <textarea
             readOnly
-            value={manual ?? ''}
+            value={manual}
             onFocus={(e) => e.currentTarget.select()}
             className="input h-48 w-full text-xs"
           />
         </div>
-      </Modal>
-    </div>
+      ) : (
+        <div className="grid gap-2">
+          <button
+            type="button"
+            onClick={compartirImagen}
+            disabled={armandoImagen || plan.length === 0}
+            className="btn-secondary min-h-[52px] justify-start px-4"
+          >
+            {armandoImagen ? <Spinner className="h-5 w-5" /> : <ImageIcon className="text-xl" />}
+            Imagen del mes
+          </button>
+          <button
+            type="button"
+            onClick={copiarWhatsApp}
+            className="btn-secondary min-h-[52px] justify-start px-4"
+          >
+            <ClipboardIcon className="text-xl" /> Texto para WhatsApp
+          </button>
+          <button
+            type="button"
+            onClick={descargarPdf}
+            disabled={plan.length === 0}
+            className="btn-secondary min-h-[52px] justify-start px-4"
+          >
+            <DownloadIcon className="text-xl" /> PDF
+          </button>
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -535,10 +1001,13 @@ function SolicitudBotones({
 
 function EditarFecha({
   fecha,
+  nueva = false,
   config,
   onClose,
 }: {
   fecha: FechaPlan;
+  /** Ese día normalmente no hay reunión: se programa una especial. */
+  nueva?: boolean;
   config: ProgramacionConfig;
   onClose: () => void;
 }) {
@@ -579,7 +1048,7 @@ function EditarFecha({
     setGuardando(true);
     try {
       const ok = await esperarConLimite(
-        vacio ? restaurarDia(fecha.key) : guardarDia(fecha.key, cambios, profile),
+        vacio ? restaurarDia(fecha.key) : guardarDia(fecha.key, cambios, profile, fecha.coordinadora),
       );
       toast(ok ? 'Guardado.' : 'Sin conexión: se guardará al volver la señal.', ok ? 'success' : 'info');
       onClose();
@@ -609,6 +1078,12 @@ function EditarFecha({
   return (
     <Modal open onClose={onClose} title={fechaLarga(fecha)}>
       <div className="space-y-5">
+        {nueva && (
+          <p className="rounded-xl bg-accent-50 p-3 text-sm text-accent-800">
+            Normalmente este día no hay reunión. Al guardar queda programada una{' '}
+            <strong>reunión especial</strong>.
+          </p>
+        )}
         {festivo && (
           <label className="flex items-start gap-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
             <input
@@ -712,14 +1187,16 @@ function EditarFecha({
         <button type="button" onClick={guardar} disabled={guardando} className="btn-primary btn-lg">
           {guardando ? <Spinner className="h-5 w-5 text-white" /> : 'Guardar'}
         </button>
-        <button
-          type="button"
-          onClick={restaurar}
-          disabled={guardando}
-          className="btn-ghost min-h-[44px] w-full text-sm text-slate-500"
-        >
-          Volver a lo normal
-        </button>
+        {!nueva && (
+          <button
+            type="button"
+            onClick={restaurar}
+            disabled={guardando}
+            className="btn-ghost min-h-[44px] w-full text-sm text-slate-500"
+          >
+            {fecha.especial && !festivo ? 'Quitar esta reunión especial' : 'Volver a lo normal'}
+          </button>
+        )}
       </div>
     </Modal>
   );
@@ -727,112 +1204,6 @@ function EditarFecha({
 
 /** El festivo de esa fecha, aunque se haya marcado "sí hay reunión". */
 const festivoDe = (p: FechaPlan) => festivosColombia(p.fecha.getUTCFullYear()).get(p.key) ?? null;
-
-/* ------------------------------------------------------------------ */
-/* Apartar una fecha                                                   */
-/* ------------------------------------------------------------------ */
-
-function Apartar({
-  fecha,
-  config,
-  sugerido,
-  onClose,
-}: {
-  fecha: FechaPlan;
-  config: ProgramacionConfig;
-  sugerido: string;
-  onClose: () => void;
-}) {
-  const { toast } = useToast();
-  const [nombre, setNombre] = useState(config.coordinadoras.includes(sugerido) ? sugerido : '');
-  const [enviando, setEnviando] = useState(false);
-  const [listo, setListo] = useState(false);
-  const mensaje = mensajeApartado(fecha, nombre);
-
-  const enviar = async () => {
-    if (!nombre || enviando) return;
-    setEnviando(true);
-    try {
-      const ok = await esperarConLimite(crearSolicitud(fecha.key, nombre), 8000);
-      if (!ok) {
-        toast('Sin conexión: la solicitud se enviará al volver la señal.', 'info');
-      }
-      setListo(true);
-    } catch (e) {
-      console.error(e);
-      toast(
-        'No se pudo apartar: quizá alguien la pidió o la asignaron hace un momento. Recarga la página.',
-        'error',
-      );
-    } finally {
-      setEnviando(false);
-    }
-  };
-
-  const compartir = async () => {
-    const nav = navigator as Navigator & { share?: (d: { text: string }) => Promise<void> };
-    if (nav.share) {
-      try {
-        await nav.share({ text: mensaje });
-        return;
-      } catch {
-        /* cerró el menú: se copia */
-      }
-    }
-    try {
-      await navigator.clipboard.writeText(mensaje);
-      toast('Mensaje copiado: pégalo en el grupo.', 'success');
-    } catch {
-      toast('No se pudo copiar el mensaje.', 'error');
-    }
-  };
-
-  return (
-    <Modal open onClose={onClose} title={listo ? 'Solicitud enviada' : 'Apartar esta fecha'}>
-      {listo ? (
-        <div className="space-y-4">
-          <p className="text-sm text-slate-600">
-            Quedó <strong>en revisión</strong>. La coordinación la confirma y te aparece asignada. Avisa en
-            el grupo:
-          </p>
-          <pre className="whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-xs text-slate-700">{mensaje}</pre>
-          <button type="button" onClick={compartir} className="btn-primary btn-lg">
-            <ShareIcon className="text-lg" /> Compartir el mensaje
-          </button>
-          {config.grupoWhatsapp && (
-            <a
-              href={config.grupoWhatsapp}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-secondary min-h-[48px] w-full"
-            >
-              Abrir el grupo de WhatsApp
-            </a>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <p className="text-sm text-slate-600">
-            Vas a pedir coordinar <strong>{nombreActividades(fecha.actividades)}</strong> el{' '}
-            <strong>{fechaLarga(fecha)}</strong> ({fecha.horario}, {MODALITY_LABELS[fecha.modalidad]}).
-          </p>
-          <div>
-            <label className="label">¿Quién eres?</label>
-            <CoordinatorPicker
-              value={nombre}
-              onChange={setNombre}
-              nombres={config.coordinadoras}
-              conLibre={false}
-            />
-          </div>
-          <button type="button" onClick={enviar} disabled={!nombre || enviando} className="btn-primary btn-lg">
-            {enviando ? <Spinner className="h-5 w-5 text-white" /> : 'Pedir esta fecha'}
-          </button>
-        </div>
-      )}
-    </Modal>
-  );
-}
 
 /* ------------------------------------------------------------------ */
 /* Ajustes del calendario                                              */

@@ -304,7 +304,9 @@ service cloud.firestore {
     // ==================== Programación (el antiguo Calendario) ====================
     // Qué reunión hay cada día, a qué hora, en qué modalidad y quién coordina.
     // Se LEE sin iniciar sesión (el calendario es público, como antes). La
-    // cambian la administración y quien tenga el permiso "Programación".
+    // cambian la administración y quien tenga el permiso "Programación"; el
+    // resto del equipo solo se toma una fecha libre ("Yo la coordino") o
+    // suelta la que se tomó.
 
     function puedeProgramar() {
       return isStaff() && isActive()
@@ -338,39 +340,80 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Los campos que toca "Yo la coordino" / "Soltar": nada más del día.
+    function camposDeTomar() {
+      return ['coordinadora', 'coordinadoraUid', 'updatedAt', 'updatedBy', 'updatedByName'];
+    }
+    // De hoy en adelante (con un día de holgura por la hora de Bogotá): una
+    // coordinadora no cambia quién coordinó reuniones que ya pasaron.
+    function noEsPasada(id) {
+      let p = id.split('-');
+      return timestamp.date(int(p[0]), int(p[1]), int(p[2])) > request.time - duration.value(2, 'd');
+    }
+    // Lo que puede guardar quien programa (administración o el permiso).
+    function diaValido() {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+             'coordinadora', 'coordinadoraUid', 'modalidad', 'actividades', 'horario',
+             'cancelada', 'motivo', 'especial', 'updatedAt', 'updatedBy', 'updatedByName'])
+        && textoCorto(d.get('coordinadora', ''), 80)
+        && d.get('modalidad', 'virtual') in ['presencial', 'virtual']
+        && d.get('actividades', []) is list
+        && textoCorto(d.get('horario', ''), 40)
+        && d.get('cancelada', false) is bool
+        && textoCorto(d.get('motivo', ''), 120)
+        && d.get('especial', false) is bool
+        && d.updatedBy == request.auth.uid;
+    }
+    // "Yo la coordino": alguien del equipo se pone a sí misma en una fecha
+    // libre, con su nombre de la lista y su propia cuenta (coordinadoraUid).
+    function seLaToma() {
+      let d = request.resource.data;
+      return isStaff() && isActive()
+        && d.coordinadora is string
+        && d.coordinadora in equipo()
+        && d.coordinadoraUid == request.auth.uid
+        && d.updatedBy == request.auth.uid
+        && textoCorto(d.get('updatedByName', ''), 120);
+    }
+    // "Soltar": solo la fecha que ella misma se tomó, y la deja libre.
+    function sueltaLaSuya() {
+      let d = request.resource.data;
+      return isStaff() && isActive()
+        && resource.data.get('coordinadoraUid', '') == request.auth.uid
+        && d.get('coordinadora', '') == ''
+        && !('coordinadoraUid' in d)
+        && d.updatedBy == request.auth.uid
+        && d.diff(resource.data).affectedKeys().hasOnly(camposDeTomar());
+    }
+
     match /programacion_dias/{dia} {
       allow read: if true;
-      allow create, update: if puedeProgramar()
-        && esDia(dia)
-        && request.resource.data.keys().hasOnly([
-             'coordinadora', 'modalidad', 'actividades', 'horario', 'cancelada',
-             'motivo', 'especial', 'updatedAt', 'updatedBy', 'updatedByName'])
-        && textoCorto(request.resource.data.get('coordinadora', ''), 80)
-        && request.resource.data.get('modalidad', 'virtual') in ['presencial', 'virtual']
-        && request.resource.data.get('actividades', []) is list
-        && textoCorto(request.resource.data.get('horario', ''), 40)
-        && request.resource.data.get('cancelada', false) is bool
-        && textoCorto(request.resource.data.get('motivo', ''), 120)
-        && request.resource.data.get('especial', false) is bool
-        && request.resource.data.updatedBy == request.auth.uid;
+      allow create: if esDia(dia) && (
+        // Quien programa no se inventa una "tomada por" ajena.
+        (puedeProgramar() && diaValido() && !('coordinadoraUid' in request.resource.data))
+        || (seLaToma() && noEsPasada(dia)
+            && request.resource.data.keys().hasOnly(camposDeTomar())));
+      allow update: if esDia(dia) && (
+        // Si quien programa cambia quién coordina, se borra la marca de quién
+        // se la había tomado: así nadie "suelta" una fecha que ya no es suya.
+        (puedeProgramar() && diaValido()
+          && (request.resource.data.get('coordinadoraUid', '') == ''
+              || (request.resource.data.get('coordinadora', '') == resource.data.get('coordinadora', '')
+                  && request.resource.data.get('coordinadoraUid', '') == resource.data.get('coordinadoraUid', ''))))
+        || (seLaToma() && noEsPasada(dia)
+            && resource.data.get('coordinadora', '') == ''
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(camposDeTomar()))
+        || (sueltaLaSuya() && noEsPasada(dia)));
       allow delete: if puedeProgramar();
     }
 
-    // "Apartar": alguien del equipo pide coordinar una fecha libre, sin
-    // iniciar sesión (así funcionaba el Calendario). Solo con un nombre del
-    // equipo, solo si la fecha sigue libre y solo una solicitud por fecha.
+    // "Apartar" sin iniciar sesión (como en el Calendario viejo) ya no se
+    // usa: ahora cada una entra con Google y se toma la fecha al instante.
+    // Quedan las solicitudes viejas, que quien programa atiende o rechaza.
     match /programacion_solicitudes/{dia} {
       allow read: if true;
-      allow create: if esDia(dia)
-        && request.resource.data.keys().hasOnly(['nombre', 'estado', 'createdAt'])
-        && request.resource.data.estado == 'pendiente'
-        && request.resource.data.nombre is string
-        && request.resource.data.nombre in equipo()
-        && request.resource.data.createdAt == request.time
-        && !(exists(/databases/$(database)/documents/programacion_dias/$(dia))
-             && get(/databases/$(database)/documents/programacion_dias/$(dia)).data
-                  .get('coordinadora', '') != '');
-      allow update: if false;
+      allow create, update: if false;
       allow delete: if puedeProgramar();
     }
   }

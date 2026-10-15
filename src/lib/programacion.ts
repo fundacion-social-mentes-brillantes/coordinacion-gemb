@@ -40,6 +40,8 @@ export interface ProgramacionConfig {
 export interface DiaProgramado {
   id: string; // "aaaa-mm-dd"
   coordinadora?: string;
+  /** Quién se la tomó con "Yo la coordino" (solo esa cuenta la puede soltar). */
+  coordinadoraUid?: string;
   modalidad?: Modality;
   actividades?: SessionType[];
   horario?: string;
@@ -69,6 +71,8 @@ export interface FechaPlan {
   /** true si la modalidad se fijó a mano (no sale de la regla). */
   modalidadFija: boolean;
   coordinadora: string;
+  /** La cuenta que se la tomó con "Yo la coordino" ('' si la asignó la coordinación). */
+  coordinadoraUid: string;
   /** Nombre del festivo, o null. Ese día no hay reunión. */
   festivo: string | null;
   cancelada: boolean;
@@ -222,6 +226,7 @@ export function planDeFecha(
     modalidad: cambio?.modalidad ?? modalidadPorRegla(key, base, c),
     modalidadFija: !!cambio?.modalidad,
     coordinadora: cambio?.coordinadora ?? '',
+    coordinadoraUid: cambio?.coordinadora ? cambio.coordinadoraUid ?? '' : '',
     festivo: especial ? null : festivosColombia(d.getUTCFullYear()).get(key) ?? null,
     cancelada: cambio?.cancelada === true,
     motivo: cambio?.motivo ?? '',
@@ -283,20 +288,6 @@ export function textoWhatsApp(y: number, m: number, plan: FechaPlan[]): string {
   ].join('\n');
 }
 
-/** El mensaje que se manda al grupo al apartar una fecha. */
-export function mensajeApartado(p: FechaPlan, nombre: string): string {
-  return [
-    '*Hola, solicito apartar:*',
-    '',
-    `📅 *Fecha:* ${NOMBRES_DIA[p.diaSemana]} ${p.fecha.getUTCDate()} de ${NOMBRES_MES[
-      p.fecha.getUTCMonth()
-    ].toLowerCase()}`,
-    `🎯 *Actividad:* ${nombreActividades(p.actividades)}`,
-    `⏰ *Horario:* ${p.horario} (${MODALITY_LABELS[p.modalidad]})`,
-    `👤 *Coordina:* ${nombre}`,
-  ].join('\n');
-}
-
 /** Junta lo guardado con los valores por defecto (por si falta algo). */
 export function completarConfig(parcial: Partial<ProgramacionConfig> | undefined): ProgramacionConfig {
   const c = parcial ?? {};
@@ -324,4 +315,82 @@ export function completarConfig(parcial: Partial<ProgramacionConfig> | undefined
     semanasVirtuales: c.semanasVirtuales === 'impar' ? 'impar' : 'par',
     grupoWhatsapp: typeof c.grupoWhatsapp === 'string' ? c.grupoWhatsapp : '',
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* El calendario de mes (Coordinación)                                 */
+/* ------------------------------------------------------------------ */
+
+/** La clave del día `n` días antes o después ("2026-10-15", 2 → "2026-10-17"). */
+export const moverDia = (key: string, n: number) => claveDe(sumarDias(deClave(key), n));
+
+/**
+ * Un día que normalmente no tiene reunión, listo para que quien programa
+ * ponga una reunión especial (por ejemplo, un sábado).
+ */
+export function planNuevo(key: string, c: ProgramacionConfig): FechaPlan {
+  const diaSemana = deClave(key).getUTCDay();
+  const base = c.dias[String(diaSemana)];
+  return {
+    key,
+    fecha: sessionDateFromKey(key),
+    diaSemana,
+    actividades: base?.actividades?.length ? base.actividades : ['reduccion_ego'],
+    horario: base?.horario || '',
+    modalidad: modalidadPorRegla(key, base, c),
+    modalidadFija: false,
+    coordinadora: '',
+    coordinadoraUid: '',
+    festivo: null,
+    cancelada: false,
+    motivo: '',
+    especial: true,
+  };
+}
+
+/**
+ * Cómo se pinta la fecha: verde libre, rojo ya tiene coordinadora, dorado te
+ * toca a ti, gris no hay reunión (festivo o cancelada).
+ */
+export type EstadoFecha = 'libre' | 'ocupada' | 'tuya' | 'sin';
+
+export function estadoDeFecha(p: FechaPlan, yo: { uid?: string; nombre?: string }): EstadoFecha {
+  if (!hayReunion(p)) return 'sin';
+  if (!p.coordinadora) return 'libre';
+  if ((yo.uid && p.coordinadoraUid === yo.uid) || (yo.nombre && p.coordinadora === yo.nombre)) {
+    return 'tuya';
+  }
+  return 'ocupada';
+}
+
+/**
+ * El nombre del equipo que le corresponde a un nombre de Google, aunque traiga
+ * más apellidos o sin tildes ("marcela sanchez rojas" → "Marcela Sánchez").
+ * '' si no hay uno solo que encaje.
+ */
+export function buscarEnEquipo(nombre: string, equipo: string[]): string {
+  const n = normalizeText(nombre);
+  if (!n) return '';
+  const exacto = equipo.find((e) => normalizeText(e) === n);
+  if (exacto) return exacto;
+  const palabras = new Set(n.split(' '));
+  const parecidos = equipo.filter((e) => {
+    const p = normalizeText(e).split(' ').filter(Boolean);
+    return p.length >= 2 && p.every((x) => palabras.has(x));
+  });
+  return parecidos.length === 1 ? parecidos[0] : '';
+}
+
+/** El aviso para el grupo cuando alguien se toma una fecha. */
+export function mensajeCoordino(p: FechaPlan, nombre: string): string {
+  return [
+    '*Coordino esta reunión* ✨',
+    '',
+    `📅 *Fecha:* ${NOMBRES_DIA[p.diaSemana]} ${p.fecha.getUTCDate()} de ${NOMBRES_MES[
+      p.fecha.getUTCMonth()
+    ].toLowerCase()}`,
+    `🎯 *Reunión:* ${nombreActividades(p.actividades)}`,
+    `⏰ *Horario:* ${p.horario}${p.horario ? ' ' : ''}(${MODALITY_LABELS[p.modalidad]})`,
+    `👤 *Coordina:* ${nombre}`,
+  ].join('\n');
 }

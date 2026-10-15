@@ -269,7 +269,12 @@ beforeEach(async () => {
     semanasVirtuales: 'par',
     grupoWhatsapp: '',
   });
-  await sembrar(`programacion_dias/${EN_3}`, { coordinadora: 'Marcela Sánchez', modalidad: 'presencial' });
+  // Marcela se la tomó con "Yo la coordino" (coordinadoraUid).
+  await sembrar(`programacion_dias/${EN_3}`, {
+    coordinadora: 'Marcela Sánchez',
+    coordinadoraUid: 'uid-marcela',
+    modalidad: 'presencial',
+  });
   const personas = [
     ['m_rous', 'Rous', []],
     ['m_rosalba', 'Rosalba Martínez', ['Chava']],
@@ -587,6 +592,7 @@ test('asignar coordinadora: entiende el nombre mal escrito y lo guarda bien', as
   const d = await leer(`programacion_dias/${EN_3}`);
   assert.equal(d.coordinadora, 'Tatiana López');
   assert.equal(d.modalidad, 'presencial', 'no toca lo demás del día');
+  assert.equal(d.coordinadoraUid, undefined, 'Marcela ya no la puede soltar: no es suya');
 });
 
 test('la coordinadora no puede asignar desde Claude', async () => {
