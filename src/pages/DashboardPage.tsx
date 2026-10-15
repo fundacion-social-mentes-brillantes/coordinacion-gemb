@@ -34,6 +34,7 @@ import {
   ChevronRightIcon,
   ClipboardIcon,
 } from '../components/Icons';
+import { copiarTexto } from '../lib/nativo';
 
 type Tab = 'actividad' | 'ranking' | 'resumen' | 'sesion';
 
@@ -666,7 +667,7 @@ function ActividadView({
         onClick={async () => {
           const texto = resumenActividad(rep, true);
           try {
-            await navigator.clipboard.writeText(texto);
+            await copiarTexto(texto);
             toast('Resumen copiado. Ya lo puedes pegar donde quieras.', 'success');
           } catch {
             // Sin permiso de portapapeles: se muestra para copiarlo a mano.

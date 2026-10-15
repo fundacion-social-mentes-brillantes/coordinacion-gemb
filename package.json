@@ -20,6 +20,7 @@
     "build:api": "esbuild mcp/src/http.ts --bundle --platform=node --format=esm --target=node20 --outfile=api/mcp.js --log-level=warning && esbuild mcp/src/oauth-http.ts --bundle --platform=node --format=esm --target=node20 --outfile=api/oauth.js --log-level=warning"
   },
   "dependencies": {
+    "@capacitor/core": "^8.5.3",
     "date-fns": "^3.6.0",
     "firebase": "^11.1.0",
     "fuse.js": "^7.0.0",
@@ -32,6 +33,8 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/cli": "^8.5.3",
     "@firebase/rules-unit-testing": "^4.0.1",
     "@types/node": "^22.10.0",
     "@types/papaparse": "^5.3.15",

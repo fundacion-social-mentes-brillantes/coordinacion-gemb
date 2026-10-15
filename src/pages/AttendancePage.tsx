@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
@@ -109,6 +109,9 @@ function useAltoVisible(activo: boolean) {
 export function AttendancePage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
+  // Dentro de la burbuja flotante (app de Android), "volver" es a la burbuja.
+  const enBurbuja = useLocation().pathname.startsWith('/burbuja');
+  const volverA = enBurbuja ? '/burbuja' : '/sesiones';
   const { profile, isAdmin } = useAuth();
   const { toast } = useToast();
   const online = useOnlineStatus();
@@ -679,7 +682,7 @@ export function AttendancePage() {
         title="Sesión no encontrada"
         description="Es posible que haya sido eliminada."
         action={
-          <button onClick={() => navigate('/sesiones')} className="btn-primary">
+          <button onClick={() => navigate(volverA)} className="btn-primary">
             Volver a sesiones
           </button>
         }
@@ -693,10 +696,10 @@ export function AttendancePage() {
       <div>
         <button
           type="button"
-          onClick={() => navigate('/sesiones')}
+          onClick={() => navigate(volverA)}
           className="btn-ghost -ml-2 mb-1 min-h-[44px] text-sm"
         >
-          <ArrowLeftIcon className="text-lg" /> Asistencia
+          <ArrowLeftIcon className="text-lg" /> {enBurbuja ? 'Reunión de hoy' : 'Asistencia'}
         </button>
         <h2 className="titulo-pantalla">
           {capitalizeFirst(fmtDateLong(session.date))}
@@ -770,7 +773,7 @@ export function AttendancePage() {
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => navigate('/sesiones')}
+              onClick={() => navigate(volverA)}
               className="btn-secondary min-h-[44px] flex-1 text-sm"
             >
               Ir a Asistencia

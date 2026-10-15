@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "1019293780998",
+    "project_id": "coordinacion-gemb",
+    "storage_bucket": "coordinacion-gemb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1019293780998:android:0f3a5098f552f961c4c787",
+        "android_client_info": {
+          "package_name": "com.gimnasioemocionalmb.coordinacion"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1019293780998-q0skt6pv6detptjb0n4ei36sq2b5qs67.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.gimnasioemocionalmb.coordinacion",
+            "certificate_hash": "c2d97ed4e07a894844a83f867661c49473cf3198"
+          }
+        },
+        {
+          "client_id": "1019293780998-rgi4eu70dekg9id9172e4tp5mg5jr39f.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBJ8a0oaTHnhhifneJ8A-6D8hJ9-0UN6W4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1019293780998-rgi4eu70dekg9id9172e4tp5mg5jr39f.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -59,6 +59,7 @@ import {
   SettingsIcon,
   ShareIcon,
 } from '../components/Icons';
+import { copiarTexto } from '../lib/nativo';
 
 // ---------------------------------------------------------------------------
 //  Coordinación (antes era otra app: "Calendario — Mentes Brillantes").
@@ -260,7 +261,7 @@ export function ProgramacionView({ publico }: { publico: boolean }) {
       }
     }
     try {
-      await navigator.clipboard.writeText(texto);
+      await copiarTexto(texto);
       toast('Mensaje copiado: pégalo en el grupo.', 'success');
     } catch {
       toast('No se pudo copiar el mensaje.', 'error');
@@ -878,7 +879,7 @@ function CompartirMes({
   const copiarWhatsApp = async () => {
     const texto = textoWhatsApp(anio, mes, plan);
     try {
-      await navigator.clipboard.writeText(texto);
+      await copiarTexto(texto);
       toast('Copiado: pégalo en WhatsApp.', 'success');
       onClose();
     } catch {

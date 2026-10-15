@@ -8,6 +8,7 @@ import type { SessionType } from '../types';
 import { Modal } from './Modal';
 import { Spinner } from './Spinner';
 import { CopyIcon, FolderIcon, ShareIcon, VideoIcon } from './Icons';
+import { copiarTexto } from '../lib/nativo';
 
 // ---------------------------------------------------------------------------
 //  Lo que la coordinadora necesita a mano en la reunión, sin buscarlo en
@@ -19,7 +20,7 @@ import { CopyIcon, FolderIcon, ShareIcon, VideoIcon } from './Icons';
 /** Copia un enlace; si el navegador no deja, lo muestra para copiarlo a mano. */
 async function copiarEnlace(url: string): Promise<boolean> {
   try {
-    await navigator.clipboard.writeText(url);
+    await copiarTexto(url);
     return true;
   } catch {
     window.prompt('Copia el enlace:', url);

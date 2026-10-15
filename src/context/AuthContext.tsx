@@ -7,7 +7,9 @@ import {
   type ReactNode,
 } from 'react';
 import {
+  GoogleAuthProvider,
   onAuthStateChanged,
+  signInWithCredential,
   signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
@@ -35,6 +37,7 @@ import {
   SUPER_ADMIN_EMAIL,
 } from '../lib/firebase';
 import { isAppleMobile, isStandalone } from '../lib/device';
+import { enAppAndroid, ErrorNativo, olvidarCuentaDeGoogle, tokenDeGoogle } from '../lib/nativo';
 import type { UserProfile, Role } from '../types';
 
 interface AuthContextValue {
@@ -341,6 +344,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async () => {
     setAuthError(null);
 
+    // App de Android: Google no deja entrar desde su WebView. Se elige la
+    // cuenta con el selector del teléfono y con ese token se entra a Firebase.
+    if (enAppAndroid) {
+      try {
+        const idToken = await tokenDeGoogle();
+        await authReady;
+        await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+      } catch (e) {
+        if (e instanceof ErrorNativo) {
+          if (e.codigo === 'cancelado') return;
+          setAuthError(
+            e.codigo === 'sin-cuenta'
+              ? 'Este teléfono no tiene ninguna cuenta de Google. Agrégala en Ajustes → Cuentas y vuelve a intentarlo.'
+              : 'No se pudo entrar con Google desde la app. Inténtalo de nuevo; si sigue fallando, entra desde Chrome.',
+          );
+          console.error('Ingreso nativo con Google', e.codigo, e.message);
+          return;
+        }
+        setAuthError(mapAuthError(e));
+      }
+      return;
+    }
+
     const viaRedirect = async () => {
       // Espera a que la persistencia esté fijada: si no, la sesión podría
       // guardarse donde no debe y perderse al volver de Google. Aquí sí se
@@ -452,6 +478,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearRedirectFlag();
     setStuck(false);
     await signOut(auth);
+    // En la app de Android: que la próxima vez pregunte con qué cuenta entrar.
+    await olvidarCuentaDeGoogle();
     if (enviado) {
       try {
         await terminate(db);

@@ -1,4 +1,5 @@
 // Utilidades de exportación a Excel y PDF, reutilizables en todo el panel.
+import { compartirArchivo, enAppAndroid } from './nativo';
 //
 // Las librerías (xlsx, jsPDF) pesan cientos de KB y solo las usa la
 // administración al exportar: se cargan en ese momento, no al abrir el Panel.
@@ -10,6 +11,12 @@
  */
 export function downloadBlob(content: BlobPart, filename: string, type: string) {
   const blob = new Blob([content], { type });
+  // App de Android: su WebView no descarga; el menú de Android deja
+  // guardarlo (Archivos, Drive) o enviarlo.
+  if (enAppAndroid) {
+    void compartirArchivo(blob, filename).catch((e) => console.error('No se pudo compartir el archivo', e));
+    return;
+  }
   const nav = navigator as Navigator & {
     canShare?: (d: unknown) => boolean;
     share?: (d: unknown) => Promise<void>;

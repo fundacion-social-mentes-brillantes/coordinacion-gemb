@@ -390,6 +390,12 @@
     backdrop-filter: blur(26px) saturate(170%);
     -webkit-backdrop-filter: blur(26px) saturate(170%);
   }
+  .icono-burbuja {
+    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-xl;
+    color: rgb(var(--app-cta-glow));
+    background: rgb(var(--app-cta-glow) / 0.14);
+    box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.2);
+  }
   .icono-recurso {
     @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-xl;
     color: #f5c451;

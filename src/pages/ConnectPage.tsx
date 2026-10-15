@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Modal } from '../components/Modal';
 import { ClipboardIcon, LockIcon, CheckIcon, ArrowLeftIcon } from '../components/Icons';
+import { copiarTexto } from '../lib/nativo';
 
 const URL_MCP = 'https://coordinacion-gemb.vercel.app/api/mcp';
 
@@ -28,7 +29,7 @@ export function ConnectPage() {
 
   const copiar = async () => {
     try {
-      await navigator.clipboard.writeText(URL_MCP);
+      await copiarTexto(URL_MCP);
       toast('Dirección copiada.', 'success');
     } catch {
       setManual(URL_MCP);

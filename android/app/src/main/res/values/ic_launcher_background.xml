@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#03050F</color>
+    <!-- El azul de la app (preset «Azul GEMB»). -->
+    <color name="fondo_app">#03050F</color>
+    <color name="colorPrimary">#2B59FF</color>
+    <color name="colorPrimaryDark">#03050F</color>
+    <color name="colorAccent">#7F9CFF</color>
+</resources>

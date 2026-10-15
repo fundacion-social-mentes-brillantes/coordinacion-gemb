@@ -6,6 +6,7 @@ import { InstallButton, IosInstallHelp } from '../components/InstallPrompt';
 import { AuthStuck } from '../components/AuthStuck';
 import { isUpdateReady } from '../lib/swUpdate';
 import { useEffect, useState } from 'react';
+import { copiarTexto } from '../lib/nativo';
 
 /**
  * ¿La app se está abriendo DENTRO de otra app (Facebook, Instagram…)?
@@ -182,7 +183,7 @@ function AbrirEnSafari() {
 
   const copiar = async () => {
     try {
-      await navigator.clipboard.writeText(`https://${direccion}`);
+      await copiarTexto(`https://${direccion}`);
       setCopiado(true);
     } catch {
       /* sin portapapeles: la dirección está escrita justo al lado */

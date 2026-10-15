@@ -55,6 +55,13 @@ const ProgramacionPage = lazy(() =>
 const CalendarioPublicoPage = lazy(() =>
   import('./pages/CalendarioPublicoPage').then((m) => ({ default: m.CalendarioPublicoPage })),
 );
+// La burbuja flotante de la app de Android.
+const LayoutBurbuja = lazy(() =>
+  import('./pages/BurbujaPage').then((m) => ({ default: m.LayoutBurbuja })),
+);
+const BurbujaPage = lazy(() =>
+  import('./pages/BurbujaPage').then((m) => ({ default: m.BurbujaPage })),
+);
 const NotFoundPage = lazy(() =>
   import('./pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })),
 );
@@ -78,6 +85,12 @@ export default function App() {
 
         {/* Requieren sesión con rol activo */}
         <Route element={<RequireAuth allow={[...ALL]} />}>
+          {/* Dentro de la burbuja flotante (app de Android): la reunión de
+              hoy y su asistencia, sin la barra de pestañas. */}
+          <Route element={<LayoutBurbuja />}>
+            <Route path="/burbuja" element={<BurbujaPage />} />
+            <Route path="/burbuja/:id" element={<AttendancePage />} />
+          </Route>
           <Route element={<Layout />}>
             <Route index element={<Navigate to="/sesiones" replace />} />
             <Route path="/sesiones" element={<SessionsPage />} />

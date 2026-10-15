@@ -1,5 +1,6 @@
 import type { Modality, SessionType } from '../types';
 import { SESSION_TYPE_LABELS, MODALITY_LABELS } from './constants';
+import { compartirArchivo, enAppAndroid } from './nativo';
 
 /**
  * Genera una imagen PNG bonita con la lista de asistencia, pensada para
@@ -424,6 +425,16 @@ export async function shareOrDownloadImage(
   filename: string,
   text: string,
 ): Promise<ShareOutcome> {
+  // App de Android: su WebView no tiene el menú de compartir de la web.
+  if (enAppAndroid) {
+    try {
+      await compartirArchivo(blob, filename, text);
+      return 'shared';
+    } catch (e) {
+      console.error('No se pudo compartir desde la app', e);
+      return 'cancelled';
+    }
+  }
   const nav = navigator as Navigator & {
     canShare?: (d: unknown) => boolean;
     share?: (d: unknown) => Promise<void>;

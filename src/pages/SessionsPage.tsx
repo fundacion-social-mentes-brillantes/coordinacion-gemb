@@ -39,6 +39,7 @@ import {
 import { Modal } from '../components/Modal';
 import { CoordinatorPicker } from '../components/CoordinatorPicker';
 import { RecursosReunion } from '../components/RecursosReunion';
+import { BotonBurbuja } from '../components/Burbuja';
 import { InstallButton, IosInstallHelp } from '../components/InstallPrompt';
 import { Spinner } from '../components/Spinner';
 import { EmptyState } from '../components/EmptyState';
@@ -396,6 +397,9 @@ export function SessionsPage() {
       {/* Justo debajo de la reunión, en dorado: la carpeta de coordinación y
           los enlaces de Meet, para no buscarlos en otra pestaña. */}
       <RecursosReunion primero={reunionesHoy[0]} />
+
+      {/* App de Android: la burbuja flotante encima de Meet. */}
+      <BotonBurbuja />
 
       {/* Reuniones de estos días a las que les faltó la lista. */}
       {sinLista.length > 0 && (

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Coordinación GEMB</string>
+    <string name="title_activity_main">Coordinación GEMB</string>
+    <string name="package_name">com.gimnasioemocionalmb.coordinacion</string>
+    <string name="custom_url_scheme">com.gimnasioemocionalmb.coordinacion</string>
+</resources>

@@ -215,3 +215,20 @@ export const CopyIcon = (p: P) => (
     <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
   </Svg>
 );
+
+/** Burbuja flotante: una ventana pequeña encima de otra. */
+export const BurbujaIcon = (p: P) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="13" height="11" rx="2.5" />
+    <circle cx="17.5" cy="16.5" r="3.5" />
+  </Svg>
+);
+
+export const AndroidIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M5 16v-3a7 7 0 0 1 14 0v3z" />
+    <path d="M7.5 7.5 6 5M16.5 7.5 18 5" />
+    <circle cx="9.5" cy="12.5" r=".6" fill="currentColor" />
+    <circle cx="14.5" cy="12.5" r=".6" fill="currentColor" />
+  </Svg>
+);

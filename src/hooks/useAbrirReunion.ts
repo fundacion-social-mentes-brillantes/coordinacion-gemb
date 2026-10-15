@@ -14,7 +14,7 @@ import type { Session, SessionType } from '../types';
  * ("entrega_pasos-2026-10-16"), así que si dos coordinadoras tocan a la vez
  * caen en la misma lista.
  */
-export function useAbrirReunion() {
+export function useAbrirReunion(base = '/sesiones') {
   const { profile } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -22,7 +22,7 @@ export function useAbrirReunion() {
   return useCallback(
     (p: FechaPlan, type: SessionType, existente?: Session) => {
       if (existente) {
-        navigate(`/sesiones/${existente.id}`);
+        navigate(`${base}/${existente.id}`);
         return;
       }
       if (!profile) return;
@@ -43,8 +43,8 @@ export function useAbrirReunion() {
           toast('No se pudo abrir la lista. Revisa la conexión.', 'error');
         }
       });
-      navigate(`/sesiones/${id}`);
+      navigate(`${base}/${id}`);
     },
-    [profile, navigate, toast],
+    [profile, navigate, toast, base],
   );
 }
