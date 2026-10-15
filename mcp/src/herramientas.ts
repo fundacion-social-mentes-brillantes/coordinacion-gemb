@@ -438,9 +438,9 @@ export const HERRAMIENTAS: Herramienta[] = [
 ];
 
 const ROL_LEGIBLE: Record<string, string> = {
-  super_admin: 'Super administrador(a) — lectura y escritura',
-  admin: 'Administrador(a) — lectura y escritura',
-  coordinador: 'Coordinador(a) — SOLO LECTURA',
+  super_admin: 'Principal — lectura y escritura',
+  admin: 'Administrador — lectura y escritura',
+  coordinador: 'Coordinador — SOLO LECTURA',
 };
 
 /** Las herramientas que puede ver y usar esta persona, según su rol. */

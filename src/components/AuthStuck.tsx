@@ -17,7 +17,7 @@ export function AuthStuck() {
   };
 
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-surface px-6 text-center">
+    <div className="safe-top safe-bottom flex min-h-[100dvh] flex-col items-center justify-center px-6 text-center">
       <div className="card w-full max-w-sm p-8">
         <div className="mx-auto mb-5 flex justify-center">
           <Logo className="h-16 w-16" />

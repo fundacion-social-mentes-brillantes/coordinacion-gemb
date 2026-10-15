@@ -214,7 +214,7 @@ export function MembersPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-bold text-primary-900">Personas</h2>
+        <h2 className="titulo-pantalla">Personas</h2>
         <p className="text-xs text-slate-500">{activeCount} en la lista oficial</p>
       </div>
 

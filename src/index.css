@@ -3,163 +3,132 @@
 @tailwind utilities;
 
 /* ==================================================================
-   SISTEMA DE TEMAS
-   3 modos: light (Verde), pink (Pink Brillante), dark (Noche Dorada).
-   - Las variables --c-* son canales "R G B" que alimentan la paleta de
-     Tailwind (primary, slate, surface, white) para que TODA la app cambie
-     de color con el tema, incluidas las utilidades con opacidad.
-   - Las variables --app-* son semánticas (degradados, paneles, bordes)
-     usadas por las clases de componentes (.card, .btn-*, .input, body).
-   Para cambiar un tema, edita solo su bloque de abajo.
+   COLORES
+   Toda la app se pinta con variables: --c-* son canales "R G B" que
+   alimentan la paleta de Tailwind (primary, slate, surface, white) y --app-*
+   son las de los componentes (tarjetas, botones, fondo con luces).
+   Las calcula src/lib/tema.ts a partir de tres colores (fondo, luz 1 y
+   luz 2), igual que en Budget. Aquí solo va el tema de partida.
    ================================================================== */
 @layer base {
-  :root,
-  [data-theme='light'] {
-    /* Hace que el sistema pinte desplegables, calendario y teclado acordes
-       al tema (si no, en Noche Dorada salen blanco sobre blanco). */
-    color-scheme: light;
-    /* Canales de color (R G B) */
-    --c-surface: 245 250 248;
-    --c-white: 255 255 255;
-    --c-p-50: 242 250 247;
-    --c-p-100: 217 242 234;
-    --c-p-200: 179 228 211;
-    --c-p-300: 132 207 183;
-    --c-p-400: 79 180 151;
-    --c-p-500: 43 150 120;
-    --c-p-600: 31 120 98;
-    --c-p-700: 28 95 79;
-    --c-p-800: 25 76 64;
-    --c-p-900: 22 63 54;
-    --c-sl-50: 248 250 252;
-    --c-sl-100: 241 245 249;
-    --c-sl-200: 226 232 240;
-    --c-sl-300: 203 213 225;
-    --c-sl-400: 148 163 184;
-    --c-sl-500: 100 116 139;
-    --c-sl-600: 71 85 105;
-    --c-sl-700: 51 65 85;
-    --c-sl-800: 30 41 59;
-    --c-sl-900: 15 23 42;
-    /* Semánticas */
-    --app-bg-gradient: linear-gradient(155deg, #e9f6f1 0%, #f5faf8 55%, #eef7f3 100%);
-    --app-panel: rgba(255, 255, 255, 0.86);
-    --app-panel-solid: #ffffff;
-    --app-soft-solid: #e9f5f0;
-    --app-border: rgba(43, 150, 120, 0.18);
-    --app-strong: #163f36;
-    --app-muted: #475569;
-    --app-faint: #94a3b8;
-    --app-accent: #2b9678;
-    --app-accent-strong: #1f7862;
-    --app-accent-gradient: linear-gradient(135deg, #2b9678 0%, #1f7862 100%);
-    --app-on-accent: #ffffff;
-    --app-danger: #dc2626;
-  }
-
-  [data-theme='pink'] {
-    color-scheme: light;
-    --c-surface: 255 242 255;
-    --c-white: 255 255 255;
-    --c-p-50: 253 240 251;
-    --c-p-100: 251 220 245;
-    --c-p-200: 244 194 236;
-    --c-p-300: 233 155 217;
-    --c-p-400: 217 104 196;
-    --c-p-500: 200 58 184;
-    --c-p-600: 166 47 154;
-    --c-p-700: 124 36 114;
-    --c-p-800: 85 33 78;
-    --c-p-900: 54 33 51;
-    --c-sl-50: 250 241 247;
-    --c-sl-100: 245 230 241;
-    --c-sl-200: 236 214 230;
-    --c-sl-300: 217 189 208;
-    --c-sl-400: 169 132 155;
-    --c-sl-500: 141 106 131;
-    --c-sl-600: 116 86 110;
-    --c-sl-700: 88 65 82;
-    --c-sl-800: 63 45 59;
-    --c-sl-900: 42 28 40;
-    --app-bg-gradient: linear-gradient(155deg, #ffa1ff 0%, #fff2ff 50%, #ffb2f6 100%);
-    --app-panel: rgba(255, 255, 255, 0.86);
-    --app-panel-solid: #ffffff;
-    --app-soft-solid: #fbe4f6;
-    --app-border: rgba(202, 126, 170, 0.24);
-    --app-strong: #362133;
-    --app-muted: #74566e;
-    --app-faint: #a9849b;
-    --app-accent: #c83ab8;
-    --app-accent-strong: #ff9ef2;
-    --app-accent-gradient: linear-gradient(135deg, #c83ab8 0%, #ff9ef2 100%);
-    --app-on-accent: #ffffff;
-    --app-danger: #dc2626;
-  }
-
-  [data-theme='dark'] {
+  /* Azul GEMB, el tema de siempre. Generado con tokensDeTema() de
+     src/lib/tema.ts: es lo que se ve antes de que cargue la app. Al abrirla,
+     ThemeContext pone encima los colores que cada quien eligió en Ajustes. */
+  :root {
     color-scheme: dark;
-    --c-surface: 6 9 19;
-    --c-white: 17 24 39; /* los "bg-white" se vuelven panel oscuro */
-    --c-p-50: 20 27 48;
-    --c-p-100: 30 39 64;
-    --c-p-200: 43 55 87;
-    --c-p-300: 138 122 78;
-    --c-p-400: 184 154 86;
-    --c-p-500: 215 180 106;
-    --c-p-600: 227 198 128;
-    --c-p-700: 238 212 154;
-    --c-p-800: 244 230 194;
-    --c-p-900: 255 247 230;
-    --c-sl-50: 15 22 38;
-    --c-sl-100: 27 37 64;
-    --c-sl-200: 39 51 80;
-    --c-sl-300: 57 70 106;
-    --c-sl-400: 116 128 150;
-    --c-sl-500: 151 161 181;
-    --c-sl-600: 184 192 212;
-    --c-sl-700: 210 216 228;
-    --c-sl-800: 232 236 243;
-    --c-sl-900: 244 247 251;
-    --app-bg-gradient: radial-gradient(120% 78% at 50% -12%, rgba(215, 180, 106, 0.2), transparent 55%),
-      linear-gradient(160deg, #05070e 0%, #090e1c 48%, #0c1222 100%);
-    --app-panel: rgba(14, 20, 37, 0.82);
-    --app-panel-solid: #111827;
-    --app-soft-solid: #182036;
-    --app-border: rgba(226, 196, 120, 0.18);
-    --app-strong: #fff7e6;
-    --app-muted: #b8c0d4;
-    --app-faint: #748096;
-    --app-accent: #d7b46a;
-    --app-accent-strong: #f4d992;
-    --app-accent-gradient: linear-gradient(135deg, #b8934a 0%, #d7b46a 45%, #f6e0a0 100%);
-    --app-on-accent: #0c1020;
-    --app-danger: #ef4444;
+    --c-surface: 5 10 28;
+    --c-white: 17 25 50;
+    --c-p-50: 29 36 56;
+    --c-p-100: 43 49 67;
+    --c-p-200: 64 67 75;
+    --c-p-300: 118 109 90;
+    --c-p-400: 164 143 99;
+    --c-p-500: 226 189 106;
+    --c-p-600: 230 202 143;
+    --c-p-700: 237 217 173;
+    --c-p-800: 243 231 203;
+    --c-p-900: 248 241 225;
+    --c-sl-50: 14 23 47;
+    --c-sl-100: 23 33 58;
+    --c-sl-200: 35 45 71;
+    --c-sl-300: 52 63 91;
+    --c-sl-400: 138 146 165;
+    --c-sl-500: 156 164 184;
+    --c-sl-600: 181 190 210;
+    --c-sl-700: 202 209 226;
+    --c-sl-800: 223 228 242;
+    --c-sl-900: 247 238 218;
+    --app-bg-gradient: radial-gradient(110% 65% at 92% -8%, rgba(47, 107, 255, 0.32), transparent 58%), radial-gradient(80% 55% at -12% 12%, rgba(226, 189, 106, 0.12), transparent 55%), radial-gradient(90% 60% at 50% 112%, rgba(47, 107, 255, 0.18), transparent 62%), linear-gradient(165deg, #050a1c 0%, #081028 100%);
+    --app-panel: rgba(17, 25, 50, 0.72);
+    --app-panel-solid: #111932;
+    --app-soft-solid: #1a233c;
+    --app-border: rgba(226, 189, 106, 0.18);
+    --app-border-strong: rgba(226, 189, 106, 0.38);
+    --app-strong: #f7eeda;
+    --app-muted: #b5bed2;
+    --app-faint: #8a92a5;
+    --app-accent: #e2bd6a;
+    --app-accent-strong: #ecd6a7;
+    --app-accent-gradient: linear-gradient(135deg, #f3d9a1 0%, #e2bd6a 45%, #c8a450 100%);
+    --app-on-accent: #160e00;
+    --app-glow-1: 205 169 86;
+    --app-glow-2: 47 107 255;
+    --app-danger: #f87171;
+  }
+
+  @font-face {
+    font-family: 'Glacial Indifference';
+    src: url('/fuentes/glacial-indifference-400.woff2') format('woff2');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: 'Glacial Indifference';
+    src: url('/fuentes/glacial-indifference-700.woff2') format('woff2');
+    font-weight: 500 900;
+    font-style: normal;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: 'League Spartan';
+    src: url('/fuentes/league-spartan-700.woff2') format('woff2');
+    font-weight: 400 900;
+    font-style: normal;
+    font-display: swap;
   }
 
   html {
+    background: rgb(var(--c-surface));
     -webkit-tap-highlight-color: transparent;
     /* Evita que iOS reajuste el tamaño del texto al girar el teléfono. */
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     /* Sin rebote ni "deslizar para recargar" en medio de una reunión. */
     overscroll-behavior-y: none;
+    text-rendering: optimizeLegibility;
   }
   body {
-    background: var(--app-bg-gradient);
-    background-attachment: fixed;
+    position: relative;
     color: var(--app-strong);
     min-height: 100dvh;
     overscroll-behavior-y: none;
     /* manipulation = permite desplazar, pero desactiva el zoom por doble
        toque, que es lo que hacía que la app "se ampliara" sola. */
     touch-action: manipulation;
+    font-family: 'Glacial Indifference', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    letter-spacing: 0.005em;
     @apply antialiased;
+  }
+  /* El fondo con luces, en una capa fija detrás de todo. (Con
+     background-attachment: fixed no funciona en el iPhone y en Android
+     va a saltos al desplazar.) */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: var(--app-bg-gradient);
+  }
+  ::selection {
+    background: rgb(var(--c-p-500) / 0.4);
+    color: var(--app-strong);
+  }
+  :focus-visible {
+    outline: 2px solid var(--app-accent);
+    outline-offset: 3px;
+    border-radius: 8px;
   }
   /* font-size 16px evita el zoom automático de iOS al enfocar campos. */
   input,
   select,
   textarea {
     font-size: 16px;
+  }
+  select option {
+    background: var(--app-panel-solid);
+    color: var(--app-strong);
   }
   /* En los controles no queremos que se seleccione texto ni salga el menú
      de copiar al mantener pulsado: en celular se siente "roto". */
@@ -184,56 +153,92 @@
   h2,
   h3 {
     color: var(--app-strong);
+    font-family: 'League Spartan', system-ui, sans-serif;
+    letter-spacing: -0.02em;
   }
 }
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl font-semibold
+    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-2xl font-semibold
       transition active:scale-[.98] disabled:opacity-50 disabled:pointer-events-none
-      focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2;
+      focus:outline-none;
   }
+  /* El botón principal: el acento con un destello que pasa al tocarlo. */
   .btn-primary {
-    @apply btn px-4 py-3;
+    @apply btn px-5 py-3;
     background: var(--app-accent-gradient);
     color: var(--app-on-accent);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    box-shadow:
+      0 10px 28px -12px rgb(var(--app-glow-1) / 0.75),
+      inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  }
+  .btn-primary::after {
+    content: '';
+    position: absolute;
+    top: -40%;
+    bottom: -40%;
+    left: -60%;
+    width: 40%;
+    transform: skewX(-20deg);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+    pointer-events: none;
+  }
+  .btn-primary:hover::after,
+  .btn-primary:active::after,
+  .btn-primary:focus-visible::after {
+    animation: destello 0.9s ease-out;
   }
   .btn-primary:hover {
     filter: brightness(1.05);
+    box-shadow:
+      0 14px 34px -12px rgb(var(--app-glow-1) / 0.9),
+      inset 0 1px 0 rgba(255, 255, 255, 0.5);
   }
   .btn-secondary {
     @apply btn px-4 py-3;
-    background: var(--app-panel-solid);
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
     color: var(--app-accent);
-    border: 1px solid var(--app-border);
+    border: 1px solid var(--app-border-strong);
+    backdrop-filter: blur(10px);
   }
   .btn-secondary:hover {
-    background: var(--app-soft-solid);
+    background: rgb(var(--c-p-500) / 0.1);
+    box-shadow: 0 0 22px -8px rgb(var(--app-glow-1) / 0.6);
   }
   .btn-ghost {
     @apply btn px-3 py-2;
     color: var(--app-accent);
   }
   .btn-ghost:hover {
-    background: var(--app-soft-solid);
+    background: rgb(var(--c-p-500) / 0.08);
   }
   .btn-danger {
     @apply btn px-4 py-3;
     background: var(--app-danger);
-    color: #ffffff;
+    color: #1a0a0a;
   }
+  /* Tarjeta de vidrio con un filo de luz arriba. */
   .card {
-    @apply rounded-2xl;
-    background: var(--app-panel);
+    @apply relative rounded-3xl;
+    background: linear-gradient(165deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.018)),
+      var(--app-panel);
     border: 1px solid var(--app-border);
-    box-shadow: 0 1px 3px rgba(8, 15, 30, 0.08), 0 1px 2px rgba(8, 15, 30, 0.04);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 18px 40px -26px rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
   }
   .input {
-    @apply w-full rounded-xl px-4 py-3;
-    background: var(--app-panel-solid);
+    @apply w-full rounded-2xl px-4 py-3;
+    background: rgba(255, 255, 255, 0.045);
     border: 1px solid var(--app-border);
     color: var(--app-strong);
+    transition:
+      border-color 0.2s ease,
+      box-shadow 0.2s ease,
+      background 0.2s ease;
   }
   .input::placeholder {
     color: var(--app-faint);
@@ -241,14 +246,15 @@
   .input:focus {
     outline: none;
     border-color: var(--app-accent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 25%, transparent);
+    background: rgba(255, 255, 255, 0.07);
+    box-shadow: 0 0 0 4px rgb(var(--c-p-500) / 0.18);
   }
   .label {
-    @apply block text-sm font-medium mb-1;
+    @apply mb-1.5 block text-sm font-semibold;
     color: var(--app-muted);
   }
   .chip {
-    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-3 py-1 text-[13px] font-medium;
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-3 py-1 text-[13px] font-semibold;
   }
   /* Área táctil mínima recomendada por Apple/Google: 44x44 px.
      Se usa en los botones pequeños de icono para no fallar el toque. */
@@ -261,6 +267,154 @@
   .btn-lg {
     @apply w-full text-base;
     min-height: 56px;
+  }
+
+  /* ---------- La marca ---------- */
+  /* "Coordinación" en oro, como "KITS" y "Budget" en sus íconos. */
+  .marca-titulo {
+    font-family: 'League Spartan', system-ui, sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    background: linear-gradient(100deg, #9c7a35 0%, #e2c17d 22%, #fff3cf 38%, #e2c17d 52%, #b48a3e 75%, #f5d58a 100%);
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: brillo-oro 7s ease-in-out infinite;
+  }
+  /* "GEMB" pequeño y espaciado debajo. */
+  .marca-gemb {
+    font-family: 'Glacial Indifference', system-ui, sans-serif;
+    font-weight: 400;
+    letter-spacing: 0.55em;
+    padding-left: 0.55em;
+    color: rgba(245, 213, 138, 0.78);
+    text-transform: uppercase;
+  }
+  /* Título de cada pantalla. */
+  .titulo-pantalla {
+    font-family: 'League Spartan', system-ui, sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    font-size: 1.6rem;
+    line-height: 1.05;
+    color: var(--app-strong);
+  }
+  .regla-oro {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(226, 189, 106, 0.55) 15%, rgba(226, 189, 106, 0.55) 85%, transparent);
+  }
+
+  /* Pantalla de arranque (index.html) y cargando (FullScreenSpinner). */
+  .arranque {
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+  }
+  .arranque .marca-titulo {
+    font-size: 2.1rem;
+    margin-top: 1.4rem;
+  }
+  .arranque .marca-gemb {
+    font-size: 0.62rem;
+  }
+  .arranque-icono {
+    position: relative;
+    width: 112px;
+    height: 112px;
+    display: grid;
+    place-items: center;
+  }
+  .arranque-icono img {
+    width: 84px;
+    height: 84px;
+    border-radius: 22px;
+    box-shadow: 0 18px 40px -16px rgba(47, 107, 255, 0.7);
+    animation: respirar 2.4s ease-in-out infinite;
+  }
+  /* Una luz que gira alrededor del ícono. */
+  .arranque-orbita {
+    position: absolute;
+    inset: 0;
+    border-radius: 32px;
+    background: conic-gradient(from 0deg, transparent 0deg, transparent 260deg, rgba(245, 213, 138, 0.95) 330deg, transparent 360deg);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));
+    animation: girar 1.6s linear infinite;
+    filter: drop-shadow(0 0 6px rgba(245, 213, 138, 0.8));
+  }
+
+  /* Cada pantalla entra suave. */
+  .entrar {
+    /* backwards: al terminar no queda nada aplicado (si quedara, la caja
+       encerraría a las ventanas emergentes y avisos fijos). */
+    animation: entrar 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  }
+  /* Esqueletos mientras llegan los datos. */
+  .esqueleto {
+    position: relative;
+    overflow: hidden;
+    border-radius: 1.5rem;
+    background: rgba(255, 255, 255, 0.045);
+  }
+  .esqueleto::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), transparent);
+    animation: barrido 1.4s ease-in-out infinite;
+  }
+}
+
+@keyframes destello {
+  from {
+    left: -60%;
+  }
+  to {
+    left: 130%;
+  }
+}
+@keyframes brillo-oro {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+@keyframes girar {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes respirar {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+@keyframes entrar {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes barrido {
+  to {
+    transform: translateX(100%);
   }
 }
 
@@ -308,4 +462,75 @@
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* ---------- Pantalla de entrada ---------- */
+@layer components {
+  /* Botón de Google: blanco, como pide Google para su marca, con un brillo
+     suave para que combine con lo dorado. */
+  .boton-google {
+    @apply relative inline-flex w-full items-center justify-center gap-3 overflow-hidden rounded-full
+      px-6 text-[16px] font-bold transition active:scale-[.98] disabled:opacity-70;
+    min-height: 58px;
+    color: #1f2433;
+    background: linear-gradient(180deg, #ffffff, #eef1f7);
+    box-shadow:
+      0 16px 40px -18px rgba(47, 107, 255, 0.75),
+      0 0 0 1px rgba(255, 255, 255, 0.6),
+      inset 0 -2px 0 rgba(15, 23, 42, 0.08);
+  }
+  .boton-google::after {
+    content: '';
+    position: absolute;
+    top: -40%;
+    bottom: -40%;
+    left: -60%;
+    width: 35%;
+    transform: skewX(-20deg);
+    background: linear-gradient(90deg, transparent, rgba(226, 189, 106, 0.45), transparent);
+    animation: destello-pausa 5s ease-in-out 1.2s infinite;
+  }
+  .aurora-luz {
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(70px);
+    animation: flotar 18s ease-in-out infinite;
+  }
+}
+@keyframes destello-pausa {
+  0%,
+  70% {
+    left: -60%;
+  }
+  100% {
+    left: 130%;
+  }
+}
+@keyframes flotar {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  33% {
+    transform: translate3d(6%, -4%, 0) scale(1.08);
+  }
+  66% {
+    transform: translate3d(-5%, 5%, 0) scale(0.95);
+  }
+}
+
+/* Avisos (toasts): vidrio oscuro que entra desde abajo. */
+@layer components {
+  .aviso {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.9);
+    animation: aviso 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  }
+}
+@keyframes aviso {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { XIcon } from './Icons';
 
 /* ------------------------------------------------------------------ */
@@ -136,7 +137,10 @@ export function Modal({
 
   if (!open) return null;
 
-  return (
+  // Se dibuja directo en <body>: si quedara dentro de una tarjeta de vidrio
+  // o de la animación de entrada, esas cajas la encierran y la barra de
+  // abajo le tapa el botón de guardar.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
       role="dialog"
@@ -144,7 +148,7 @@ export function Modal({
       aria-label={title}
     >
       <div
-        className="absolute inset-0 bg-black/50"
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -156,13 +160,13 @@ export function Modal({
           maxHeight: `calc(90dvh - ${keyboard}px)`,
         }}
       >
-        <div className="sticky top-0 z-10 border-b border-primary-100 bg-[var(--app-panel-solid)]">
+        <div className="sticky top-0 z-10 border-b border-[color:var(--app-border)] bg-[var(--app-panel-solid)]">
           {/* Agarradera (solo móvil): deja claro que es una hoja deslizable */}
           <div className="pt-2 sm:hidden">
             <div className="mx-auto h-1.5 w-10 rounded-full bg-slate-300" />
           </div>
           <div className="flex items-center justify-between gap-2 px-4 py-2.5">
-            <h2 className="min-w-0 flex-1 truncate text-base font-bold text-primary-800">
+            <h2 className="min-w-0 flex-1 truncate text-lg font-bold text-slate-900">
               {title}
             </h2>
             <button
@@ -182,6 +186,7 @@ export function Modal({
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

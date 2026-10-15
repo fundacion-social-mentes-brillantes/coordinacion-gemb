@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { esFallaInterna, sanarFirestore } from '../lib/sanarFirestore';
 
 /**
  * Si una pantalla falla al pintarse, muestra un aviso con "Recargar" en vez
@@ -21,6 +22,8 @@ export class ErrorBoundary extends Component<
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('Error al pintar la pantalla', error, info.componentStack);
+    // Firestore se trabó (ver sanarFirestore): se arregla solo.
+    if (esFallaInterna(error)) void sanarFirestore();
   }
 
   componentDidUpdate(prev: { resetKey?: string }) {
@@ -33,7 +36,7 @@ export class ErrorBoundary extends Component<
     if (!this.state.error) return this.props.children;
     return (
       <div className="card mx-auto mt-8 max-w-sm space-y-3 p-6 text-center">
-        <p className="text-lg font-bold text-primary-900">Algo falló en esta pantalla</p>
+        <p className="text-xl font-bold text-slate-900">Algo falló en esta pantalla</p>
         <p className="text-sm text-slate-600">
           Lo que ya marcaste está guardado. Recarga la app para seguir; si vuelve a
           pasar, avisa a la administración.

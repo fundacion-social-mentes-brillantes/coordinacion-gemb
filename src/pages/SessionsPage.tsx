@@ -286,7 +286,7 @@ export function SessionsPage() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-bold text-primary-900">Sesiones</h2>
+      <h2 className="titulo-pantalla">Sesiones</h2>
 
       {pendientesHoy.map((t) => (
         <div key={t} className="card border-2 border-primary-300 p-4">

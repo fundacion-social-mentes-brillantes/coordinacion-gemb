@@ -108,10 +108,15 @@ service cloud.firestore {
       allow create: if isGoogle()
         && request.auth.uid == userId
         && request.resource.data.email == request.auth.token.email
-        // Solo los campos del alta: nadie se da a sí mismo permisos de más
-        // (por ejemplo "puedeProgramar") al crear su propia cuenta.
+        // Solo los campos del alta: nadie se da a sí mismo permisos de más.
+        // "puedeProgramar" solo si su invitación lo trae (la pone el principal).
         && request.resource.data.keys().hasOnly(
-             ['email', 'displayName', 'photoURL', 'role', 'active', 'createdAt'])
+             ['email', 'displayName', 'photoURL', 'role', 'active', 'createdAt', 'puedeProgramar'])
+        && (request.resource.data.get('puedeProgramar', false) == false
+            || (request.resource.data.role == 'coordinador'
+                && exists(/databases/$(database)/documents/invites/$(myEmail()))
+                && get(/databases/$(database)/documents/invites/$(myEmail())).data
+                     .get('puedeProgramar', false) == true))
         && (
           // El super admin se crea a sí mismo como super_admin.
           (isSuperEmail(request.auth.token.email)
@@ -142,10 +147,13 @@ service cloud.firestore {
             // El super gestiona a cualquiera (incluidos admins).
             isSuper()
             ||
-            // El admin normal solo gestiona coordinadores/pendientes y NO
-            // puede crear/editar administradores.
+            // El admin normal solo gestiona coordinadores/pendientes, NO
+            // puede crear/editar administradores ni dar el permiso de
+            // agendar el calendario: los roles los pone el principal.
             (resource.data.role in ['coordinador', 'pending']
-              && request.resource.data.role in ['coordinador', 'pending'])
+              && request.resource.data.role in ['coordinador', 'pending']
+              && request.resource.data.get('puedeProgramar', false)
+                   == resource.data.get('puedeProgramar', false))
           ))
       );
 
@@ -164,7 +172,8 @@ service cloud.firestore {
       // El super invita coordinadores y admins; el admin solo coordinadores.
       allow create, update: if isActive() && (
         (isSuper() && request.resource.data.role in ['admin', 'coordinador'])
-        || (isAdmin() && request.resource.data.role == 'coordinador')
+        || (isAdmin() && request.resource.data.role == 'coordinador'
+            && request.resource.data.get('puedeProgramar', false) == false)
       );
       // La administración las borra; la propia invitada, una vez usada (ya
       // tiene su documento): así no vuelve a dar el rol si la cuenta se recrea.

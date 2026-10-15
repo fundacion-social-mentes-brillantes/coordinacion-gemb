@@ -35,7 +35,7 @@ export function NotFoundPage() {
   }, []);
 
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-surface px-6 text-center">
+    <div className="safe-top safe-bottom flex min-h-[100dvh] flex-col items-center justify-center px-6 text-center">
       <Logo className="h-16 w-16" />
       <h1 className="mt-6 text-2xl font-bold text-primary-800">
         Página no encontrada

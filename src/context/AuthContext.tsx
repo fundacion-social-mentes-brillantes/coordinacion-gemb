@@ -167,13 +167,16 @@ async function ensureUserDoc(u: User) {
     return;
   }
 
-  // ¿Existe una invitación para este correo?
+  // ¿Está en la lista de "entrada directa" (invitación)?
   let invitedRole: Role | null = null;
+  let invitedProgramar = false;
   try {
     const inv = await getDoc(doc(db, 'invites', emailLower));
     if (inv.exists()) {
       const r = inv.data().role;
       if (r === 'admin' || r === 'coordinador') invitedRole = r;
+      // "Coordinador de coordinadores" = coordinador que agenda el calendario.
+      invitedProgramar = r === 'coordinador' && inv.data().puedeProgramar === true;
     }
   } catch {
     /* sin invitación o sin permiso: se ignora */
@@ -181,7 +184,11 @@ async function ensureUserDoc(u: User) {
 
   if (invitedRole) {
     try {
-      await setDoc(ref, { ...base, role: invitedRole });
+      await setDoc(ref, {
+        ...base,
+        role: invitedRole,
+        ...(invitedProgramar ? { puedeProgramar: true } : {}),
+      });
       // La invitación ya cumplió: se borra para que no vuelva a dar el rol
       // si algún día se recrea la cuenta (y para que la lista de Usuarios
       // muestre solo las que siguen pendientes).

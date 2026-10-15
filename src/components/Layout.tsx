@@ -3,10 +3,11 @@ import { NavLink, Outlet, useLocation, useNavigate, Link } from 'react-router-do
 import { useAuth } from '../context/AuthContext';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { Logo } from './Logo';
-import { ThemeToggle } from './ThemeToggle';
 import { ErrorBoundary } from './ErrorBoundary';
 import { isUpdateReady } from '../lib/swUpdate';
 import { listenPendingReviewCount } from '../services/members';
+import { listenPendingUsersCount } from '../services/users';
+import { nombreDeRol } from '../lib/constants';
 import {
   CalendarIcon,
   ListCheckIcon,
@@ -61,14 +62,25 @@ export function Layout() {
   const items = NAV.filter((n) => n.roles.includes(role));
   const esAdmin = role === 'admin' || role === 'super_admin';
 
-  // Aviso de personas nuevas por revisar (solo le interesa a la admin).
+  // Avisos para la administración: personas nuevas por revisar y gente que
+  // entró con Google y espera que le den acceso.
   const [porRevisar, setPorRevisar] = useState(0);
+  const [porAprobar, setPorAprobar] = useState(0);
   useEffect(() => {
     if (!esAdmin) return;
-    return listenPendingReviewCount(setPorRevisar, (e) =>
+    const u1 = listenPendingReviewCount(setPorRevisar, (e) =>
       console.warn('No se pudo contar las personas por revisar', e),
     );
+    const u2 = listenPendingUsersCount(setPorAprobar, (e) =>
+      console.warn('No se pudo contar las solicitudes de acceso', e),
+    );
+    return () => {
+      u1();
+      u2();
+    };
   }, [esAdmin]);
+  const avisoDe = (to: string) =>
+    to === '/personas' ? porRevisar : to === '/usuarios' ? porAprobar : 0;
 
   /**
    * Publica la altura real de la cabecera en --header-h para que los
@@ -100,11 +112,11 @@ export function Layout() {
   };
 
   return (
-    <div className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col">
+    <div className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col md:max-w-4xl">
       {/* Cabecera */}
       <header
         ref={headerRef}
-        className="safe-top sticky top-0 z-40 border-b border-primary-100 bg-white/90 backdrop-blur"
+        className="safe-top sticky top-0 z-40 border-b border-[color:var(--app-border)] bg-surface/70 backdrop-blur-xl"
       >
         {/* Con el iPhone en horizontal, el logo y "Salir" no pueden quedar
             bajo la muesca: el margen lateral respeta el área segura. */}
@@ -115,15 +127,43 @@ export function Layout() {
             paddingRight: 'max(0.75rem, env(safe-area-inset-right))',
           }}
         >
-          <Logo className="h-9 w-9 shrink-0" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold leading-tight text-primary-800">
+          <Logo className="h-10 w-10 shrink-0" />
+          <div className="min-w-0 flex-1 md:mr-2">
+            <p className="truncate text-[15px] font-bold leading-tight text-slate-900">
               {profile?.displayName || profile?.email}
             </p>
-            <p className="truncate text-[11px] leading-tight text-slate-500">
-              {role === 'coordinador' ? 'Coordinadora' : 'Administradora'}
+            <p className="truncate text-[12px] font-semibold leading-tight text-primary-500">
+              {nombreDeRol(profile)}
             </p>
           </div>
+          {items.length > 1 && (
+            <nav className="hidden items-center gap-1 md:flex" aria-label="Secciones">
+              {items.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    className={({ isActive }) =>
+                      `relative flex min-h-[40px] items-center gap-2 rounded-full px-3.5 text-sm font-bold transition ${
+                        isActive
+                          ? 'bg-primary-500/15 text-primary-500 shadow-[0_0_18px_-6px_rgb(var(--app-glow-1)/0.7)]'
+                          : 'text-slate-500 hover:bg-white/5 hover:text-slate-800'
+                      }`
+                    }
+                  >
+                    <Icon className="text-lg" />
+                    {item.label}
+                    {avisoDe(item.to) > 0 && (
+                      <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+                        {avisoDe(item.to) > 9 ? '9+' : avisoDe(item.to)}
+                      </span>
+                    )}
+                  </NavLink>
+                );
+              })}
+            </nav>
+          )}
           {!online && (
             // En celulares de 360-390 px el texto no cabía junto a los demás
             // botones y empujaba "Salir" fuera de la pantalla: ahí va solo el
@@ -138,12 +178,11 @@ export function Layout() {
               <span className="hidden sm:inline">Sin conexión</span>
             </span>
           )}
-          <ThemeToggle className="shrink-0" />
           {/* Ajustes: aquí dentro vive "Conectar con Claude", que antes
               estorbaba en Sesiones. Discreto, pero siempre a mano. */}
           <Link
             to="/ajustes"
-            className="tap rounded-full text-slate-400 active:bg-slate-100"
+            className="tap rounded-full text-slate-500 transition hover:text-primary-500 active:bg-slate-100"
             title="Ajustes"
             aria-label="Ajustes"
           >
@@ -152,7 +191,7 @@ export function Layout() {
           <button
             type="button"
             onClick={handleLogout}
-            className="tap rounded-full text-slate-400 active:bg-slate-100"
+            className="tap rounded-full text-slate-500 transition hover:text-primary-500 active:bg-slate-100"
             title="Salir de la app"
             aria-label="Salir de la app"
           >
@@ -163,7 +202,7 @@ export function Layout() {
 
       {/* Aviso de versión nueva */}
       {updateReady && (
-        <div className="safe-x flex items-center gap-3 bg-primary-600 px-4 py-2 text-sm text-white">
+        <div className="safe-x flex items-center gap-3 bg-primary-500 px-4 py-2 text-sm font-semibold text-white">
           <span className="flex-1">Hay una versión nueva de la app.</span>
           <button
             type="button"
@@ -180,7 +219,10 @@ export function Layout() {
           no había forma de salir). */}
       <main className="safe-x flex-1 pb-6 pt-4">
         <ErrorBoundary resetKey={location.pathname}>
-          <Outlet />
+          {/* Cada pantalla entra suave (la clave reinicia la animación). */}
+          <div key={location.pathname} className="entrar">
+            <Outlet />
+          </div>
         </ErrorBoundary>
       </main>
 
@@ -188,7 +230,7 @@ export function Layout() {
           no quede flotando encima de la lista con el teclado abierto.
           Con un solo apartado (coordinadoras) no se muestra: no aporta. */}
       {items.length > 1 && (
-      <nav className="safe-bottom sticky bottom-0 z-40 border-t border-primary-100 bg-white/95 backdrop-blur">
+      <nav className="safe-bottom sticky bottom-0 z-40 border-t border-[color:var(--app-border)] bg-surface/75 backdrop-blur-xl md:hidden">
         <div
           className="flex items-stretch justify-around"
           style={{
@@ -203,33 +245,30 @@ export function Layout() {
                 key={item.to}
                 to={item.to}
                 className={({ isActive }) =>
-                  `flex flex-1 flex-col items-center justify-center gap-0.5 px-2 pb-2 pt-2.5 text-[11px] font-semibold transition ${
-                    isActive ? 'text-primary-600' : 'text-slate-400'
+                  `flex flex-1 flex-col items-center justify-center gap-1 px-1 pb-2 pt-2.5 text-[11px] font-bold transition ${
+                    isActive ? 'text-primary-500' : 'text-slate-500'
                   }`
                 }
                 style={{ minHeight: 56 }}
               >
                 {({ isActive }) => (
                   <>
-                    <span className="relative">
-                      <Icon
-                        className={`text-2xl transition-transform ${
-                          isActive ? 'scale-110' : ''
-                        }`}
-                      />
-                      {/* Aviso: hay personas nuevas esperando revisión. */}
-                      {item.to === '/personas' && porRevisar > 0 && (
-                        <span className="absolute -right-2.5 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
-                          {porRevisar > 9 ? '9+' : porRevisar}
+                    <span
+                      className={`relative flex h-8 w-14 items-center justify-center rounded-full transition ${
+                        isActive
+                          ? 'bg-primary-500/15 shadow-[0_0_18px_-4px_rgb(var(--app-glow-1)/0.6)]'
+                          : ''
+                      }`}
+                    >
+                      <Icon className={`text-[22px] transition-transform ${isActive ? 'scale-110' : ''}`} />
+                      {/* Aviso: hay algo esperando (personas o accesos). */}
+                      {avisoDe(item.to) > 0 && (
+                        <span className="absolute -top-1 right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+                          {avisoDe(item.to) > 9 ? '9+' : avisoDe(item.to)}
                         </span>
                       )}
                     </span>
                     {item.label}
-                    <span
-                      className={`mt-0.5 h-0.5 w-6 rounded-full transition ${
-                        isActive ? 'bg-primary-500' : 'bg-transparent'
-                      }`}
-                    />
                   </>
                 )}
               </NavLink>

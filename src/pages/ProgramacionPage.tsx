@@ -188,7 +188,7 @@ export function ProgramacionView({ publico }: { publico: boolean }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h2 className="text-lg font-bold text-primary-900">Calendario</h2>
+          <h2 className="titulo-pantalla">Calendario</h2>
           <p className="text-sm text-slate-500">Quién coordina cada reunión.</p>
         </div>
         {puede && (
@@ -331,7 +331,7 @@ export function ProgramacionView({ publico }: { publico: boolean }) {
                 >
                   <div
                     className={`flex w-14 shrink-0 flex-col items-center rounded-xl py-2 ${
-                      activa ? 'bg-primary-800 text-white' : 'bg-slate-300 text-white'
+                      activa ? 'bg-primary-500 text-white shadow-[0_8px_20px_-10px_rgb(var(--app-glow-1)/0.8)]' : 'bg-slate-200 text-slate-500'
                     }`}
                   >
                     <span className="text-[11px] font-bold tracking-wide opacity-80">

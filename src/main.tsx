@@ -7,6 +7,7 @@ import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { markUpdateReady } from './lib/swUpdate';
+import { vigilarFirestore } from './lib/sanarFirestore';
 // Atrapa desde el arranque el aviso de "se puede instalar" (llega una sola vez).
 import './lib/instalar';
 import './index.css';
@@ -80,6 +81,9 @@ window.addEventListener('vite:preloadError', (event) => {
   event.preventDefault();
   window.location.reload();
 });
+
+// Si Firestore se traba, se arregla solo (ver lib/sanarFirestore.ts).
+vigilarFirestore();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

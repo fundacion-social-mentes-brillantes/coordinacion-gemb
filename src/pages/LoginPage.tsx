@@ -1,10 +1,9 @@
-import { Navigate, useLocation } from 'react-router-dom';
+import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useAuth, iosInstaladaSinIngreso } from '../context/AuthContext';
-import { Logo } from '../components/Logo';
+import { Logo, Marca } from '../components/Logo';
 import { Spinner, FullScreenSpinner } from '../components/Spinner';
 import { InstallButton, IosInstallHelp } from '../components/InstallPrompt';
 import { AuthStuck } from '../components/AuthStuck';
-import { ThemeToggle } from '../components/ThemeToggle';
 import { isUpdateReady } from '../lib/swUpdate';
 import { useEffect, useState } from 'react';
 
@@ -98,18 +97,19 @@ export function LoginPage() {
   const sinIngresoAqui = iosInstaladaSinIngreso();
 
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-gradient-to-b from-primary-50 to-surface px-6">
-      <div className="card w-full max-w-sm p-8 text-center">
-        <div className="mx-auto mb-5 flex justify-center">
-          <Logo className="h-20 w-20" />
+    <div className="safe-top safe-bottom relative flex min-h-[100dvh] flex-col items-center justify-center overflow-hidden px-6">
+      <Aurora />
+      <div className="entrar relative flex w-full max-w-sm flex-col items-center text-center">
+        <div className="relative mb-7">
+          <span className="absolute inset-0 -z-10 scale-125 rounded-full bg-[radial-gradient(circle,rgba(47,107,255,0.45),transparent_65%)] blur-2xl" />
+          <Logo className="h-24 w-24" />
         </div>
-        <h1 className="text-xl font-bold text-primary-800">Asistencia GEMB</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Gimnasio Emocional Mentes Brillantes
-        </p>
-        <p className="mt-6 text-sm text-slate-600">
-          Ingresa con tu cuenta de Google para registrar la asistencia de las
-          reuniones.
+        <Marca tamano="lg" />
+        <div className="regla-oro mt-6 w-40" />
+        <p className="mt-5 text-[15px] leading-relaxed text-slate-600">
+          Asistencia y calendario de las reuniones del
+          <br />
+          Gimnasio Emocional Mentes Brillantes.
         </p>
 
         {sinIngresoAqui ? (
@@ -119,46 +119,54 @@ export function LoginPage() {
             type="button"
             onClick={handleSignIn}
             disabled={busy}
-            className="btn-primary btn-lg mt-6"
+            className="boton-google mt-8"
           >
-            {busy ? (
-              <Spinner className="h-5 w-5 text-white" />
-            ) : (
-              <GoogleGlyph />
-            )}
-            {busy ? 'Conectando…' : 'Ingresar con Google'}
+            {busy ? <Spinner className="h-5 w-5 !text-slate-500" /> : <GoogleGlyph />}
+            {busy ? 'Conectando…' : 'Continuar con Google'}
           </button>
         )}
 
         {authError && !sinIngresoAqui && (
-          <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">
+          <p className="mt-4 w-full rounded-2xl border border-rose-300/40 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             {authError}
           </p>
         )}
 
         {isInAppBrowser() && (
-          <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-left text-sm text-amber-800">
+          <p className="mt-4 w-full rounded-2xl border border-amber-300/40 bg-amber-50 px-4 py-3 text-left text-sm text-amber-800">
             Estás abriendo la app <strong>dentro de otra aplicación</strong> y
             Google no permite ingresar así. Toca el menú (··· o ⇗) y elige{' '}
             <strong>«Abrir en Safari»</strong> o <strong>«Abrir en Chrome»</strong>.
           </p>
         )}
 
-        <div className="mt-6 space-y-3">
-          <InstallButton className="btn-secondary mx-auto min-h-[48px] text-sm" />
+        <p className="mt-6 max-w-xs text-xs leading-relaxed text-slate-500">
+          Si eres del equipo, entras directo. Si es tu primera vez, tu solicitud
+          le llega a la coordinación y se abre sola cuando te aprueben.
+        </p>
+
+        <div className="mt-6 w-full space-y-3">
+          <InstallButton className="btn-secondary mx-auto min-h-[48px] w-full text-sm" />
           <IosInstallHelp />
         </div>
 
-        <div className="mt-6 flex items-center justify-center gap-3 border-t border-primary-100 pt-5">
-          <span className="text-xs text-slate-500">Tema:</span>
-          <ThemeToggle />
-        </div>
+        <Link to="/calendario" className="btn-ghost mt-4 min-h-[44px] text-sm">
+          Ver el calendario sin entrar →
+        </Link>
       </div>
+    </div>
+  );
+}
 
-      <p className="mt-6 max-w-xs text-center text-xs text-slate-400">
-        La primera vez que ingresas, tu acceso queda pendiente hasta que la
-        coordinación lo apruebe.
-      </p>
+/** Dos luces que respiran detrás (azul y oro), como en el ícono. */
+function Aurora() {
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
+      <span className="aurora-luz left-[-20%] top-[-10%] h-[55vmax] w-[55vmax] bg-[rgb(var(--app-glow-2)/0.35)]" />
+      <span
+        className="aurora-luz bottom-[-25%] right-[-25%] h-[50vmax] w-[50vmax] bg-[rgb(var(--app-glow-1)/0.18)]"
+        style={{ animationDelay: '-6s' }}
+      />
     </div>
   );
 }

@@ -1,3 +1,4 @@
+/** Círculo que gira, en el color del acento. */
 export function Spinner({ className = 'h-6 w-6' }: { className?: string }) {
   return (
     <svg
@@ -7,28 +8,33 @@ export function Spinner({ className = 'h-6 w-6' }: { className?: string }) {
       role="status"
       aria-label="Cargando"
     >
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
+      <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
       <path
-        className="opacity-90"
-        fill="currentColor"
-        d="M4 12a8 8 0 0 1 8-8V0C5.4 0 0 5.4 0 12h4z"
+        className="opacity-95"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+        d="M12 2a10 10 0 0 1 10 10"
       />
     </svg>
   );
 }
 
-export function FullScreenSpinner({ label = 'Cargando…' }: { label?: string }) {
+/**
+ * La pantalla de carga: el ícono con una luz dorada que gira alrededor y
+ * "Coordinación · GEMB" en oro. Es la misma que se ve al abrir la app
+ * (index.html), así el arranque no salta de un dibujo a otro.
+ */
+export function FullScreenSpinner({ label }: { label?: string }) {
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-3 bg-surface">
-      <Spinner className="h-9 w-9" />
-      <p className="text-sm text-slate-500">{label}</p>
+    <div className="arranque" role="status" aria-label={label ?? 'Cargando'}>
+      <div className="arranque-icono">
+        <span className="arranque-orbita" />
+        <img src="/pwa-192x192.png" alt="" width={84} height={84} />
+      </div>
+      <p className="marca-titulo">Coordinación</p>
+      <p className="marca-gemb">GEMB</p>
+      {label && <p className="mt-3 text-sm text-slate-500">{label}</p>}
     </div>
   );
 }

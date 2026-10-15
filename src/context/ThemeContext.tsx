@@ -1,64 +1,75 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
-  useCallback,
   type ReactNode,
 } from 'react';
+import {
+  aplicarColores,
+  coloresDe,
+  guardarApariencia,
+  leerApariencia,
+  type Apariencia,
+  type ColoresTema,
+} from '../lib/tema';
 
-export type Theme = 'light' | 'pink' | 'dark';
+// Los colores que cada quien eligió en Ajustes (como en Budget). Se guardan
+// en este celular o computador: así funcionan incluso antes de entrar.
 
-const STORAGE_KEY = 'gemb-theme';
-
-// Color de la barra del navegador (móvil) por tema.
-const META_COLOR: Record<Theme, string> = {
-  light: '#2b9678',
-  pink: '#c83ab8',
-  dark: '#0c1222',
-};
-
-interface ThemeContextValue {
-  theme: Theme;
-  setTheme: (t: Theme) => void;
+interface AparienciaValue {
+  apariencia: Apariencia;
+  /** Elige un tema listo (id) o el propio ('propio'). */
+  elegirTema: (tema: string) => void;
+  /** Guarda los tres colores del tema propio y lo deja puesto. */
+  guardarPropio: (c: ColoresTema) => void;
+  /** Muestra unos colores sin guardarlos (null = volver a los guardados). */
+  vistaPrevia: (c: ColoresTema | null) => void;
 }
 
-const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
+const AparienciaContext = createContext<AparienciaValue | undefined>(undefined);
 
 // eslint-disable-next-line react-refresh/only-export-components
-export function useTheme() {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) throw new Error('useTheme debe usarse dentro de <ThemeProvider>');
+export function useApariencia() {
+  const ctx = useContext(AparienciaContext);
+  if (!ctx) throw new Error('useApariencia debe usarse dentro de <ThemeProvider>');
   return ctx;
 }
 
-function getInitial(): Theme {
-  if (typeof document !== 'undefined') {
-    const d = document.documentElement.getAttribute('data-theme');
-    if (d === 'pink' || d === 'dark' || d === 'light') return d;
-  }
-  return 'light';
-}
-
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(getInitial);
+  const [apariencia, setApariencia] = useState<Apariencia>(leerApariencia);
 
-  const setTheme = useCallback((t: Theme) => setThemeState(t), []);
-
+  // Al arrancar y cada vez que cambia: aplica y recuerda.
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    try {
-      localStorage.setItem(STORAGE_KEY, theme);
-    } catch {
-      /* modo privado: se ignora */
-    }
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', META_COLOR[theme]);
-  }, [theme]);
+    guardarApariencia(apariencia);
+  }, [apariencia]);
 
-  return (
-    <ThemeContext.Provider value={{ theme, setTheme }}>
-      {children}
-    </ThemeContext.Provider>
+  // Otra pestaña cambió los colores: se ven también aquí.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'gemb-apariencia') setApariencia(leerApariencia());
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  const elegirTema = useCallback((tema: string) => setApariencia((a) => ({ ...a, tema })), []);
+  const guardarPropio = useCallback(
+    (c: ColoresTema) => setApariencia({ tema: 'propio', propio: c }),
+    [],
   );
+  const vistaPrevia = useCallback(
+    (c: ColoresTema | null) => {
+      aplicarColores(c ?? coloresDe(apariencia));
+    },
+    [apariencia],
+  );
+
+  const value = useMemo(
+    () => ({ apariencia, elegirTema, guardarPropio, vistaPrevia }),
+    [apariencia, elegirTema, guardarPropio, vistaPrevia],
+  );
+  return <AparienciaContext.Provider value={value}>{children}</AparienciaContext.Provider>;
 }

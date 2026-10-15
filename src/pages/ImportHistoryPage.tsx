@@ -344,7 +344,7 @@ export function ImportHistoryPage() {
       >
         <ArrowLeftIcon className="text-lg" /> Personas
       </button>
-      <h2 className="text-lg font-bold text-primary-900">
+      <h2 className="titulo-pantalla">
         Importar historial de reuniones
       </h2>
       <p className="text-sm text-slate-500">

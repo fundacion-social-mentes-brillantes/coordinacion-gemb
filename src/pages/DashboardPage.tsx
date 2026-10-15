@@ -205,7 +205,7 @@ export function DashboardPage() {
   return (
     <div className="space-y-4">
       {/* "Conectar con Claude" se movió a Ajustes (rueda dentada, arriba). */}
-      <h2 className="text-lg font-bold text-primary-900">Panel de asistencia</h2>
+      <h2 className="titulo-pantalla">Panel de asistencia</h2>
 
       {/* Cuatro apartados: en el celular van en dos filas para que ninguna
           etiqueta se corte. */}

@@ -5442,9 +5442,9 @@ var HERRAMIENTAS = [
   }
 ];
 var ROL_LEGIBLE = {
-  super_admin: "Super administrador(a) \u2014 lectura y escritura",
-  admin: "Administrador(a) \u2014 lectura y escritura",
-  coordinador: "Coordinador(a) \u2014 SOLO LECTURA"
+  super_admin: "Principal \u2014 lectura y escritura",
+  admin: "Administrador \u2014 lectura y escritura",
+  coordinador: "Coordinador \u2014 SOLO LECTURA"
 };
 function catalogoPara(c) {
   return HERRAMIENTAS.filter((h) => h.alcance === "todos" || c.esAdmin).map(

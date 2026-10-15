@@ -45,7 +45,7 @@ export function ConnectPage() {
       </Link>
 
       <div>
-        <h2 className="text-lg font-bold text-primary-900">Conectar con Claude</h2>
+        <h2 className="titulo-pantalla">Conectar con Claude</h2>
         <p className="mt-1 text-sm text-slate-500">
           Para poder preguntarle por la asistencia sin entrar a la app: “¿cuántas
           personas están haciendo Pasos últimamente?”, “¿quién dejó de venir?”.

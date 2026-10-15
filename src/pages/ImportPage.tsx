@@ -194,7 +194,7 @@ export function ImportPage() {
       >
         <ArrowLeftIcon className="text-lg" /> Personas
       </button>
-      <h2 className="text-lg font-bold text-primary-900">Importar personas</h2>
+      <h2 className="titulo-pantalla">Importar personas</h2>
 
       <button
         type="button"

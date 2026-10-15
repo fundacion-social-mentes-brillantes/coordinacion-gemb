@@ -25,10 +25,11 @@ export const useToast = () => useContext(Ctx);
 let counter = 0;
 
 // Colores fijos (legibles en cualquier tema): los toasts no cambian con el modo.
-const STYLES: Record<ToastType, string> = {
-  success: 'linear-gradient(135deg, #16a34a, #15803d)',
-  error: '#dc2626',
-  info: '#1f2937',
+/** El color del filo y del punto de cada aviso (sobre vidrio oscuro). */
+const COLOR: Record<ToastType, string> = {
+  success: '#45cf9d',
+  error: '#f87171',
+  info: 'var(--app-accent)',
 };
 
 /**
@@ -94,10 +95,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             type="button"
             role="status"
             onClick={() => dismiss(t.id)}
-            className="pointer-events-auto max-w-sm rounded-xl px-4 py-3 text-left text-sm font-medium shadow-lifted"
-            style={{ background: STYLES[t.type], color: '#ffffff' }}
+            className="aviso pointer-events-auto flex max-w-sm items-start gap-3 rounded-2xl border px-4 py-3 text-left text-[15px] font-semibold"
+            style={{
+              borderColor: COLOR[t.type],
+              color: 'var(--app-strong)',
+              background: 'color-mix(in srgb, var(--app-panel-solid) 92%, transparent)',
+            }}
           >
-            {t.message}
+            <span
+              className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
+              style={{ background: COLOR[t.type], boxShadow: `0 0 10px ${COLOR[t.type]}` }}
+            />
+            <span>{t.message}</span>
           </button>
         ))}
       </div>

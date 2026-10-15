@@ -166,6 +166,11 @@ beforeEach(async () => {
 
     await setDoc(doc(db, 'members/ana'), { fullName: 'Ana', searchName: 'ana', active: true });
     await setDoc(doc(db, 'invites/nueva@x.com'), { role: 'admin', email: 'nueva@x.com' });
+    await setDoc(doc(db, 'invites/agenda@x.com'), {
+      role: 'coordinador',
+      email: 'agenda@x.com',
+      puedeProgramar: true,
+    });
   });
 });
 
@@ -485,5 +490,60 @@ describe('Programación (el antiguo Calendario)', () => {
       setDoc(doc(como.admin(), 'programacion/config'), { ...base, desde: 'febrero', updatedBy: 'admin' }),
     );
     await assertFails(setDoc(doc(como.admin(), 'programacion/otra'), { ...base, updatedBy: 'admin' }));
+  });
+});
+
+describe('Roles: Coordinador, Coordinador de coordinadores y Administrador', () => {
+  const alta = (email, extra = {}) => ({
+    email,
+    displayName: email,
+    photoURL: '',
+    role: 'coordinador',
+    active: true,
+    ...extra,
+  });
+
+  test('una administradora da acceso como Coordinador, pero no el permiso de agendar', async () => {
+    await assertSucceeds(
+      updateDoc(doc(como.admin(), 'users/pendiente'), { role: 'coordinador', active: true }),
+    );
+    await assertFails(updateDoc(doc(como.admin(), 'users/coord'), { puedeProgramar: true }));
+    await assertFails(
+      updateDoc(doc(como.admin(), 'users/progra'), { puedeProgramar: false }),
+      'tampoco quitárselo',
+    );
+  });
+
+  test('el principal sí cambia el permiso de agendar', async () => {
+    await assertSucceeds(updateDoc(doc(como.super(), 'users/coord'), { puedeProgramar: true }));
+    await assertSucceeds(updateDoc(doc(como.super(), 'users/progra'), { puedeProgramar: false }));
+  });
+
+  test('solo el principal deja anotado a alguien como Coordinador de coordinadores', async () => {
+    const inv = { email: 'x@x.com', role: 'coordinador', puedeProgramar: true };
+    await assertFails(setDoc(doc(como.admin(), 'invites/x@x.com'), inv));
+    await assertSucceeds(setDoc(doc(como.super(), 'invites/x@x.com'), inv));
+    await assertSucceeds(
+      setDoc(doc(como.admin(), 'invites/y@x.com'), { email: 'y@x.com', role: 'coordinador' }),
+    );
+  });
+
+  test('quien está en la entrada directa entra con su rol (y su permiso si lo trae)', async () => {
+    const agenda = env.authenticatedContext('u-agenda', google('agenda@x.com')).firestore();
+    await assertSucceeds(
+      setDoc(doc(agenda, 'users/u-agenda'), alta('agenda@x.com', { puedeProgramar: true })),
+    );
+  });
+
+  test('sin invitación que lo traiga, nadie entra con el permiso de agendar', async () => {
+    const nueva = env.authenticatedContext('u-nueva2', google('nueva@x.com')).firestore();
+    await assertFails(
+      setDoc(doc(nueva, 'users/u-nueva2'), alta('nueva@x.com', { role: 'admin', puedeProgramar: true })),
+    );
+  });
+
+  test('el principal borra la solicitud de alguien que no es del equipo', async () => {
+    await assertFails(deleteDoc(doc(como.admin(), 'users/pendiente')));
+    await assertSucceeds(deleteDoc(doc(como.super(), 'users/pendiente')));
   });
 });

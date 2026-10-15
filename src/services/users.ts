@@ -1,5 +1,6 @@
 import {
   collection,
+  where,
   query,
   onSnapshot,
   doc,
@@ -10,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { UserProfile, Role } from '../types';
+import type { RolVisible } from '../lib/constants';
 
 const usersCol = collection(db, 'users');
 const invitesCol = collection(db, 'invites');
@@ -28,6 +30,18 @@ export function listenUsers(
       list.sort((a, b) => (a.displayName || a.email).localeCompare(b.displayName || b.email, 'es'));
       onData(list);
     },
+    onError,
+  );
+}
+
+/** Cuántas personas entraron con Google y esperan acceso (aviso de la barra). */
+export function listenPendingUsersCount(
+  onData: (n: number) => void,
+  onError: (e: Error) => void,
+) {
+  return onSnapshot(
+    query(usersCol, where('role', '==', 'pending')),
+    (snap) => onData(snap.size),
     onError,
   );
 }
@@ -56,7 +70,25 @@ export interface Invite {
   id: string; // correo en minúsculas
   email: string;
   role: Role;
+  /** true = entra como Coordinador de coordinadores. */
+  puedeProgramar?: boolean;
   createdByName?: string;
+}
+
+/** Los datos de un rol visible: rol de la app + permiso de agendar. */
+export function datosDeRol(r: RolVisible): { role: Role; puedeProgramar: boolean } {
+  if (r === 'admin') return { role: 'admin', puedeProgramar: false };
+  return { role: 'coordinador', puedeProgramar: r === 'coordinador_coordinadores' };
+}
+
+/** Da acceso (o cambia el rol) en un solo paso. */
+export async function asignarRol(uid: string, r: RolVisible) {
+  await updateDoc(doc(db, 'users', uid), { ...datosDeRol(r), active: true });
+}
+
+/** Quien no es del equipo: se borra su solicitud (puede volver a pedirla). */
+export async function borrarSolicitud(uid: string) {
+  await deleteDoc(doc(db, 'users', uid));
 }
 
 export function listenInvites(
@@ -78,13 +110,15 @@ export function listenInvites(
 
 export async function createInvite(
   email: string,
-  role: Role,
+  rol: RolVisible,
   createdBy: UserProfile,
 ) {
   const id = email.trim().toLowerCase();
+  const { role, puedeProgramar } = datosDeRol(rol);
   await setDoc(doc(db, 'invites', id), {
     email: id,
     role,
+    ...(puedeProgramar ? { puedeProgramar: true } : {}),
     createdBy: createdBy.uid,
     createdByName: createdBy.displayName || createdBy.email,
     createdAt: serverTimestamp(),

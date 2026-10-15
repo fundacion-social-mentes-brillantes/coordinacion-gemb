@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Logo } from '../components/Logo';
-import { ThemeToggle } from '../components/ThemeToggle';
 import { Spinner } from '../components/Spinner';
 import { ProgramacionView } from './ProgramacionPage';
 
@@ -18,7 +17,7 @@ export function CalendarioPublicoPage() {
   useEffect(() => {
     document.title = 'Calendario — Mentes Brillantes';
     return () => {
-      document.title = 'Asistencia GEMB';
+      document.title = 'Coordinación GEMB';
     };
   }, []);
 
@@ -35,7 +34,7 @@ export function CalendarioPublicoPage() {
 
   return (
     <div className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col">
-      <header className="safe-top sticky top-0 z-40 border-b border-primary-100 bg-white/90 backdrop-blur">
+      <header className="safe-top sticky top-0 z-40 border-b border-[color:var(--app-border)] bg-surface/70 backdrop-blur-xl">
         <div
           className="flex items-center gap-2 py-2"
           style={{
@@ -50,7 +49,6 @@ export function CalendarioPublicoPage() {
               Gimnasio Emocional Mentes Brillantes
             </p>
           </div>
-          <ThemeToggle className="shrink-0" />
           <Link
             to="/login"
             state={{ from: { pathname: '/programacion' } }}

@@ -160,7 +160,7 @@ export function ReviewPage() {
       </button>
 
       <div>
-        <h2 className="text-lg font-bold text-primary-900">
+        <h2 className="titulo-pantalla">
           Personas nuevas por revisar
         </h2>
         <p className="mt-1 text-sm text-slate-600">

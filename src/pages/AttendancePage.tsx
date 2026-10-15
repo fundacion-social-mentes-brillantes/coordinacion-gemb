@@ -697,7 +697,7 @@ export function AttendancePage() {
         >
           <ArrowLeftIcon className="text-lg" /> Sesiones
         </button>
-        <h2 className="text-lg font-bold text-primary-900">
+        <h2 className="titulo-pantalla">
           {capitalizeFirst(fmtDateLong(session.date))}
         </h2>
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -817,7 +817,7 @@ export function AttendancePage() {
           type="button"
           onClick={shareList}
           disabled={sharing}
-          className="btn-secondary min-h-[48px] flex-1 py-3"
+          className="btn-secondary min-h-[48px] flex-1 whitespace-nowrap px-3 py-3 text-[15px]"
         >
           {sharing ? <Spinner className="h-5 w-5" /> : <ShareIcon className="text-lg" />}
           Compartir lista
@@ -826,7 +826,7 @@ export function AttendancePage() {
           <button
             type="button"
             onClick={() => setFinishOpen(true)}
-            className="btn-primary min-h-[48px] flex-1 py-3"
+            className="btn-primary min-h-[48px] flex-1 whitespace-nowrap px-3 py-3 text-[15px]"
           >
             <FlagIcon className="text-lg" /> Finalizar
           </button>
@@ -835,7 +835,7 @@ export function AttendancePage() {
 
       {/* Buscador */}
       <div
-        className="sticky z-30 -mx-4 bg-surface px-4 pb-2 pt-1"
+        className="sticky z-30 -mx-4 bg-surface/85 px-4 pb-2 pt-1 backdrop-blur-xl"
         style={{ top: 'var(--header-h, 57px)' }}
       >
         <div className="relative" ref={searchBoxRef}>
