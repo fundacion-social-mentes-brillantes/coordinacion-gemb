@@ -429,7 +429,8 @@ export async function shareOrDownloadImage(
     share?: (d: unknown) => Promise<void>;
   };
   try {
-    const file = new File([blob], filename, { type: 'image/png' });
+    // Sirve también para el PDF de la carpeta: el tipo sale del archivo.
+    const file = new File([blob], filename, { type: blob.type || 'image/png' });
     if (nav.share && nav.canShare?.({ files: [file] })) {
       await nav.share({ files: [file], text });
       return 'shared';

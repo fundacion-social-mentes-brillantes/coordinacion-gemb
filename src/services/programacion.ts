@@ -12,6 +12,7 @@ import { db } from '../lib/firebase';
 import {
   completarConfig,
   type DiaProgramado,
+  type EnlacesMeet,
   type ProgramacionConfig,
   type SolicitudApartado,
 } from '../lib/programacion';
@@ -25,6 +26,8 @@ import type { UserProfile } from '../types';
 // Las tres se leen sin iniciar sesión: el calendario es público, como antes.
 
 const configRef = doc(db, 'programacion', 'config');
+/** Los enlaces de Meet: aparte de la configuración porque NO son públicos. */
+const enlacesRef = doc(db, 'programacion', 'enlaces');
 const diasCol = collection(db, 'programacion_dias');
 const solicitudesCol = collection(db, 'programacion_solicitudes');
 
@@ -80,6 +83,19 @@ const firma = (user: UserProfile) => ({
 
 export function guardarConfig(c: ProgramacionConfig, user: UserProfile) {
   return setDoc(configRef, { ...c, ...firma(user) });
+}
+
+/** Los enlaces fijos de Meet de cada reunión (solo con sesión iniciada). */
+export function listenEnlaces(onData: (e: EnlacesMeet) => void, onError: (e: Error) => void) {
+  return onSnapshot(
+    enlacesRef,
+    (snap) => onData(((snap.data() ?? {}).meet ?? {}) as EnlacesMeet),
+    onError,
+  );
+}
+
+export function guardarEnlaces(meet: EnlacesMeet, user: UserProfile) {
+  return setDoc(enlacesRef, { meet, ...firma(user) });
 }
 
 /**

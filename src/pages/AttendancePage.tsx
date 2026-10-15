@@ -47,6 +47,7 @@ import {
 import { Spinner } from '../components/Spinner';
 import { EmptyState } from '../components/EmptyState';
 import { Modal } from '../components/Modal';
+import { RecursosReunionCompacto } from '../components/RecursosReunion';
 import { CoordinatorPicker } from '../components/CoordinatorPicker';
 import { TypeBadge, ModalityBadge, StatusBadge } from '../components/badges';
 import {
@@ -736,6 +737,9 @@ export function AttendancePage() {
           )
         )}
       </div>
+
+      {/* A mano en plena reunión: la carpeta y el enlace de Meet. */}
+      <RecursosReunionCompacto tipo={session.type} />
 
       {/* Avisos de conexión / cierre */}
       {!online && (

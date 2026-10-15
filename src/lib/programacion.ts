@@ -394,3 +394,14 @@ export function mensajeCoordino(p: FechaPlan, nombre: string): string {
     `👤 *Coordina:* ${nombre}`,
   ].join('\n');
 }
+
+/* ------------------------------------------------------------------ */
+/* Enlaces de las reuniones                                            */
+/* ------------------------------------------------------------------ */
+
+/** El enlace fijo de Meet de cada reunión (solo lo ve el equipo). */
+export type EnlacesMeet = Partial<Record<SessionType, string>>;
+
+/** ¿Es un enlace de Google Meet? (https://meet.google.com/abc-defg-hij) */
+export const esEnlaceMeet = (u: string) =>
+  /^https:\/\/meet\.google\.com\/[a-z0-9-]{3,60}(\?[^\s]*)?$/i.test(u.trim());

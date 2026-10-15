@@ -323,7 +323,17 @@ service cloud.firestore {
     }
 
     match /programacion/{docId} {
-      allow read: if true;
+      // La configuración es pública (la usa /calendario). Los enlaces de
+      // Meet NO: con ellos cualquiera entraría a las reuniones.
+      allow read: if docId == 'config' || canRead();
+      allow create, update: if puedeProgramar()
+        && docId == 'enlaces'
+        && request.resource.data.keys().hasOnly(['meet', 'updatedAt', 'updatedBy', 'updatedByName'])
+        && request.resource.data.meet is map
+        && request.resource.data.meet.keys().hasOnly(['entrega_pasos', 'reduccion_ego'])
+        && textoCorto(request.resource.data.meet.get('entrega_pasos', ''), 200)
+        && textoCorto(request.resource.data.meet.get('reduccion_ego', ''), 200)
+        && request.resource.data.updatedBy == request.auth.uid;
       allow create, update: if puedeProgramar()
         && docId == 'config'
         && request.resource.data.keys().hasOnly([
@@ -406,6 +416,18 @@ service cloud.firestore {
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(camposDeTomar()))
         || (sueltaLaSuya() && noEsPasada(dia)));
       allow delete: if puedeProgramar();
+    }
+
+    // ==================== Carpeta de coordinación ====================
+    // El guion de cada reunión (páginas como imágenes y el PDF por partes).
+    // Solo lo ve el equipo; se sube con la llave de servicio, no desde la app.
+    match /carpeta/{docId} {
+      allow read: if canRead();
+      allow write: if false;
+      match /{parte=**} {
+        allow read: if canRead();
+        allow write: if false;
+      }
     }
 
     // "Apartar" sin iniciar sesión (como en el Calendario viejo) ya no se

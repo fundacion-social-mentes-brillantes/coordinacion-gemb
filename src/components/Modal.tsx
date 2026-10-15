@@ -38,11 +38,14 @@ export function Modal({
   onClose,
   title,
   children,
+  completa = false,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
+  /** Ocupa toda la pantalla en el celular (para leer la carpeta). */
+  completa?: boolean;
 }) {
   // Alto del teclado en pantalla: en el iPhone tapaba el botón de guardar.
   const [keyboard, setKeyboard] = useState(0);
@@ -155,16 +158,20 @@ export function Modal({
       {/* La hoja, como las de iOS: vidrio casi opaco (para leer bien) con
           esquinas grandes y el reflejo de luz en el filo. */}
       <div
-        className="hoja vidrio-barra relative w-full max-w-md overflow-y-auto overscroll-contain rounded-t-[30px] sm:rounded-[30px]"
+        className={`hoja vidrio-barra relative w-full overflow-y-auto overscroll-contain ${
+          completa
+            ? 'h-[100dvh] max-w-3xl rounded-none sm:h-[94dvh] sm:rounded-[30px]'
+            : 'max-w-md rounded-t-[30px] sm:rounded-[30px]'
+        }`}
         style={{
           // Se levanta lo justo para que el teclado no tape los botones.
           marginBottom: keyboard ? `${keyboard}px` : undefined,
-          maxHeight: `calc(90dvh - ${keyboard}px)`,
+          maxHeight: completa ? undefined : `calc(90dvh - ${keyboard}px)`,
         }}
       >
-        <div className="hoja-cabecera sticky top-0 z-10">
+        <div className={`hoja-cabecera sticky top-0 z-10 ${completa ? 'safe-top' : ''}`}>
           {/* Agarradera (solo móvil): deja claro que es una hoja deslizable */}
-          <div className="pt-2 sm:hidden">
+          <div className={`pt-2 sm:hidden ${completa ? '!hidden' : ''}`}>
             <div className="mx-auto h-[5px] w-9 rounded-full bg-[rgba(255,255,255,0.3)]" />
           </div>
           <div className="flex items-center justify-between gap-2 px-5 pb-2 pt-2.5">

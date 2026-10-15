@@ -197,3 +197,21 @@ export const LeafIcon = (p: P) => (
     <path d="M2 21c0-3 1.85-5.36 5.08-6" />
   </Svg>
 );
+export const FolderIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+    <path d="M8 13h8M8 16h5" />
+  </Svg>
+);
+export const VideoIcon = (p: P) => (
+  <Svg {...p}>
+    <rect x="2.5" y="6" width="13" height="12" rx="2.5" />
+    <path d="m15.5 10.5 6-3.5v10l-6-3.5" />
+  </Svg>
+);
+export const CopyIcon = (p: P) => (
+  <Svg {...p}>
+    <rect x="8" y="8" width="12" height="12" rx="2.5" />
+    <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+  </Svg>
+);

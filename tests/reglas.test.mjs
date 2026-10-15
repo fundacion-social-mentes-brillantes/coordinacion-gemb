@@ -656,3 +656,57 @@ describe('Yo la coordino: cada coordinadora se toma una fecha libre', () => {
     );
   });
 });
+
+describe('Recursos de la reunión: enlaces de Meet y carpeta', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, 'programacion/enlaces'), {
+        meet: { entrega_pasos: 'https://meet.google.com/aaa-bbbb-ccc' },
+      });
+      await setDoc(doc(db, 'carpeta/actual'), { version: 'v1', nombre: 'Carpeta', paginas: 1, partesPdf: 1 });
+      await setDoc(doc(db, 'carpeta/actual/paginas/0'), { n: 0, version: 'v1', datos: 'abc' });
+      await setDoc(doc(db, 'carpeta/actual/pdf/0'), { n: 0, version: 'v1', datos: 'abc' });
+    });
+  });
+  const enlaces = (uid, extra = {}) => ({
+    meet: { entrega_pasos: 'https://meet.google.com/zzz-yyyy-xxx', reduccion_ego: 'https://meet.google.com/qqq-wwww-eee' },
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+    updatedByName: uid,
+    ...extra,
+  });
+
+  test('los enlaces de Meet no son públicos: solo los lee el equipo', async () => {
+    await assertFails(getDoc(doc(como.anonimo(), 'programacion/enlaces')));
+    await assertFails(getDoc(doc(como.pendiente(), 'programacion/enlaces')));
+    await assertFails(getDoc(doc(como.inactiva(), 'programacion/enlaces')));
+    await assertSucceeds(getDoc(doc(como.coord(), 'programacion/enlaces')));
+    // La configuración del calendario sigue siendo pública.
+    await assertSucceeds(getDoc(doc(como.anonimo(), 'programacion/config')));
+  });
+
+  test('los enlaces los cambia quien programa, y con forma válida', async () => {
+    await assertFails(setDoc(doc(como.coord(), 'programacion/enlaces'), enlaces('coord')));
+    await assertSucceeds(setDoc(doc(como.progra(), 'programacion/enlaces'), enlaces('progra')));
+    await assertSucceeds(setDoc(doc(como.admin(), 'programacion/enlaces'), enlaces('admin')));
+    await assertFails(setDoc(doc(como.admin(), 'programacion/enlaces'), enlaces('admin', { colado: 1 })));
+    await assertFails(
+      setDoc(doc(como.admin(), 'programacion/enlaces'), enlaces('admin', { meet: { otra_reunion: 'https://x.y' } })),
+    );
+    await assertFails(setDoc(doc(como.admin(), 'programacion/enlaces'), enlaces('otra-persona')));
+    await assertFails(setDoc(doc(como.admin(), 'programacion/otra-cosa'), enlaces('admin')));
+  });
+
+  test('la carpeta solo la ve el equipo, y nadie la cambia desde la app', async () => {
+    for (const ruta of ['carpeta/actual', 'carpeta/actual/paginas/0', 'carpeta/actual/pdf/0']) {
+      await assertFails(getDoc(doc(como.anonimo(), ruta)), `anónimo lee ${ruta}`);
+      await assertFails(getDoc(doc(como.pendiente(), ruta)), `pendiente lee ${ruta}`);
+      await assertSucceeds(getDoc(doc(como.coord(), ruta)), `coordinadora lee ${ruta}`);
+    }
+    await assertSucceeds(getDocs(collection(como.coord(), 'carpeta/actual/paginas')));
+    await assertFails(setDoc(doc(como.super(), 'carpeta/actual'), { version: 'v2' }));
+    await assertFails(setDoc(doc(como.admin(), 'carpeta/actual/paginas/1'), { n: 1, version: 'v1', datos: 'x' }));
+    await assertFails(deleteDoc(doc(como.admin(), 'carpeta/actual/pdf/0')));
+  });
+});

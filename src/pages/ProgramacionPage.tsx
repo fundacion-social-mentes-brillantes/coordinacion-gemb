@@ -5,11 +5,13 @@ import { useToast } from '../context/ToastContext';
 import { useProgramacion } from '../hooks/useProgramacion';
 import { useMiNombre } from '../hooks/useMiNombre';
 import { useAbrirReunion } from '../hooks/useAbrirReunion';
+import { useRecursosReunion } from '../hooks/useRecursosReunion';
 import { listenSessions } from '../services/sessions';
 import {
   atenderSolicitud,
   guardarConfig,
   guardarDia,
+  guardarEnlaces,
   rechazarSolicitud,
   restaurarDia,
   soltarFecha,
@@ -20,6 +22,7 @@ import {
   NOMBRES_DIA,
   festivosColombia,
   NOMBRES_MES,
+  esEnlaceMeet,
   estadoDeFecha,
   hayReunion,
   mensajeCoordino,
@@ -29,6 +32,7 @@ import {
   planDelMes,
   planNuevo,
   textoWhatsApp,
+  type EnlacesMeet,
   type EstadoFecha,
   type FechaPlan,
   type ProgramacionConfig,
@@ -1226,6 +1230,14 @@ function Ajustes({ config, onClose }: { config: ProgramacionConfig; onClose: () 
   const [guardando, setGuardando] = useState(false);
   const hoyKey = dayKey(new Date());
   const estaSemana = modalidadPorRegla(hoyKey, undefined, c);
+  // Los enlaces de Meet llegan aparte (no son públicos): se copian al
+  // borrador mientras la persona no haya empezado a cambiarlos.
+  const { meet } = useRecursosReunion();
+  const [enlaces, setEnlaces] = useState<EnlacesMeet>({});
+  const tocoEnlaces = useRef(false);
+  useEffect(() => {
+    if (!tocoEnlaces.current) setEnlaces(meet);
+  }, [meet]);
 
   const setDia = (k: string, cambios: Partial<ProgramacionConfig['dias'][string]>) =>
     setC((x) => ({ ...x, dias: { ...x.dias, [k]: { ...x.dias[k], ...cambios } } }));
@@ -1251,9 +1263,25 @@ function Ajustes({ config, onClose }: { config: ProgramacionConfig; onClose: () 
       toast('El enlace del grupo debe empezar por https://chat.whatsapp.com/', 'error');
       return;
     }
+    const enlacesLimpios: EnlacesMeet = {};
+    for (const t of SESSION_TYPES) {
+      const u = (enlaces[t] ?? '').trim();
+      if (!u) continue;
+      if (!esEnlaceMeet(u)) {
+        toast(`El enlace de ${SESSION_TYPE_LABELS[t]} debe ser de Meet: https://meet.google.com/…`, 'error');
+        return;
+      }
+      enlacesLimpios[t] = u;
+    }
+    const cambiaronEnlaces = SESSION_TYPES.some((t) => (enlacesLimpios[t] ?? '') !== (meet[t] ?? ''));
     setGuardando(true);
     try {
-      const ok = await esperarConLimite(guardarConfig(c, profile));
+      const ok = await esperarConLimite(
+        Promise.all([
+          guardarConfig(c, profile),
+          ...(cambiaronEnlaces ? [guardarEnlaces(enlacesLimpios, profile)] : []),
+        ]),
+      );
       toast(ok ? 'Calendario actualizado.' : 'Sin conexión: se guardará al volver la señal.', ok ? 'success' : 'info');
       onClose();
     } catch (e) {
@@ -1410,6 +1438,34 @@ function Ajustes({ config, onClose }: { config: ProgramacionConfig; onClose: () 
             value={c.grupoWhatsapp}
             onChange={(e) => setC({ ...c, grupoWhatsapp: e.target.value.trim() })}
           />
+        </section>
+
+        <section className="space-y-2">
+          <h4 className="text-sm font-bold text-primary-900">Enlaces de Meet</h4>
+          <p className="text-xs text-slate-500">
+            Las coordinadoras los ven en Asistencia para entrar o copiarlos al grupo. No salen en el
+            calendario público.
+          </p>
+          {SESSION_TYPES.map((t) => (
+            <div key={t}>
+              <label className="label" htmlFor={`meet-${t}`}>
+                {SESSION_TYPE_LABELS[t]}
+              </label>
+              <input
+                id={`meet-${t}`}
+                className="input"
+                type="url"
+                inputMode="url"
+                placeholder="https://meet.google.com/…"
+                value={enlaces[t] ?? ''}
+                onChange={(e) => {
+                  tocoEnlaces.current = true;
+                  const v = e.target.value.trim();
+                  setEnlaces((x) => ({ ...x, [t]: v }));
+                }}
+              />
+            </div>
+          ))}
         </section>
 
         <button type="button" onClick={guardar} disabled={guardando} className="btn-primary btn-lg">
