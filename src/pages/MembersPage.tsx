@@ -443,7 +443,7 @@ export function MembersPage() {
             disabled={saving}
             className="btn-primary w-full"
           >
-            {saving ? <Spinner className="h-5 w-5 text-white" /> : null}
+            {saving ? <Spinner className="h-5 w-5 text-[#fff]" /> : null}
             {editing ? 'Guardar cambios' : 'Agregar persona'}
           </button>
           {editing && (

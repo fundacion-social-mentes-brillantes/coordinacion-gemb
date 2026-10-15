@@ -11,49 +11,54 @@
    luz 2), igual que en Budget. Aquí solo va el tema de partida.
    ================================================================== */
 @layer base {
-  /* Azul GEMB, el tema de siempre. Generado con tokensDeTema() de
+  /* Azul GEMB (el del ícono), el tema de siempre. Generado con tokensDeTema() de
      src/lib/tema.ts: es lo que se ve antes de que cargue la app. Al abrirla,
      ThemeContext pone encima los colores que cada quien eligió en Ajustes. */
   :root {
     color-scheme: dark;
-    --c-surface: 5 10 28;
-    --c-white: 17 25 50;
-    --c-p-50: 29 36 56;
-    --c-p-100: 43 49 67;
-    --c-p-200: 64 67 75;
-    --c-p-300: 118 109 90;
-    --c-p-400: 164 143 99;
-    --c-p-500: 226 189 106;
-    --c-p-600: 230 202 143;
-    --c-p-700: 237 217 173;
-    --c-p-800: 243 231 203;
-    --c-p-900: 248 241 225;
-    --c-sl-50: 14 23 47;
-    --c-sl-100: 23 33 58;
-    --c-sl-200: 35 45 71;
-    --c-sl-300: 52 63 91;
-    --c-sl-400: 138 146 165;
-    --c-sl-500: 156 164 184;
-    --c-sl-600: 181 190 210;
+    --c-surface: 3 5 15;
+    --c-white: 13 18 36;
+    --c-p-50: 20 27 49;
+    --c-p-100: 32 40 64;
+    --c-p-200: 45 55 86;
+    --c-p-300: 76 92 143;
+    --c-p-400: 103 124 191;
+    --c-p-500: 138 166 255;
+    --c-p-600: 187 204 255;
+    --c-p-700: 205 218 255;
+    --c-p-800: 223 231 255;
+    --c-p-900: 237 242 255;
+    --c-sl-50: 11 16 33;
+    --c-sl-100: 19 25 43;
+    --c-sl-200: 31 37 56;
+    --c-sl-300: 48 55 75;
+    --c-sl-400: 139 146 165;
+    --c-sl-500: 157 164 184;
+    --c-sl-600: 182 189 210;
     --c-sl-700: 202 209 226;
     --c-sl-800: 223 228 242;
-    --c-sl-900: 247 238 218;
-    --app-bg-gradient: radial-gradient(110% 65% at 92% -8%, rgba(47, 107, 255, 0.32), transparent 58%), radial-gradient(80% 55% at -12% 12%, rgba(226, 189, 106, 0.12), transparent 55%), radial-gradient(90% 60% at 50% 112%, rgba(47, 107, 255, 0.18), transparent 62%), linear-gradient(165deg, #050a1c 0%, #081028 100%);
-    --app-panel: rgba(17, 25, 50, 0.72);
-    --app-panel-solid: #111932;
-    --app-soft-solid: #1a233c;
-    --app-border: rgba(226, 189, 106, 0.18);
-    --app-border-strong: rgba(226, 189, 106, 0.38);
-    --app-strong: #f7eeda;
-    --app-muted: #b5bed2;
-    --app-faint: #8a92a5;
-    --app-accent: #e2bd6a;
-    --app-accent-strong: #ecd6a7;
-    --app-accent-gradient: linear-gradient(135deg, #f3d9a1 0%, #e2bd6a 45%, #c8a450 100%);
-    --app-on-accent: #160e00;
-    --app-glow-1: 205 169 86;
-    --app-glow-2: 47 107 255;
+    --c-sl-900: 232 238 255;
+    --app-bg-gradient: radial-gradient(42% 28% at 100% 0%, transparent 55%, rgba(43, 89, 255, 0.12) 61%, transparent 67%), radial-gradient(62% 42% at 100% 0%, rgba(43, 89, 255, 0.34), transparent 70%), radial-gradient(90% 55% at 0% 100%, rgba(43, 89, 255, 0.48), transparent 70%), radial-gradient(70% 45% at 30% 45%, rgba(127, 156, 255, 0.05), transparent 70%), linear-gradient(165deg, #03050f 0%, #060a1a 100%);
+    --app-panel: rgba(13, 18, 36, 0.72);
+    --app-panel-solid: #0d1224;
+    --app-soft-solid: #161c2e;
+    --app-border: rgba(138, 166, 255, 0.18);
+    --app-border-strong: rgba(138, 166, 255, 0.38);
+    --app-strong: #e8eeff;
+    --app-muted: #b6bdd2;
+    --app-faint: #8b92a5;
+    --app-accent: #8aa6ff;
+    --app-accent-strong: #abbffc;
+    --app-accent-gradient: linear-gradient(135deg, #aec2ff 0%, #8aa6ff 45%, #7591f3 100%);
+    --app-on-accent: #070d25;
+    --app-glow-1: 127 156 255;
+    --app-glow-2: 43 89 255;
     --app-danger: #f87171;
+    --app-meta: #03050f;
+    --app-cta: #2e5bf9;
+    --app-cta-gradient: linear-gradient(180deg, #5381ff 0%, #2e5bf9 55%, #1f46e4 100%);
+    --app-on-cta: #ffffff;
+    --app-cta-glow: 78 125 255;
   }
 
   @font-face {
@@ -96,8 +101,10 @@
     /* manipulation = permite desplazar, pero desactiva el zoom por doble
        toque, que es lo que hacía que la app "se ampliara" sola. */
     touch-action: manipulation;
-    font-family: 'Glacial Indifference', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-    letter-spacing: 0.005em;
+    /* La letra del sistema: en el iPhone y el Mac es la de Apple (SF Pro);
+       en Android, Roboto; en Windows, Segoe UI. */
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    letter-spacing: -0.005em;
     @apply antialiased;
   }
   /* El fondo con luces, en una capa fija detrás de todo. (Con
@@ -153,25 +160,108 @@
   h2,
   h3 {
     color: var(--app-strong);
-    font-family: 'League Spartan', system-ui, sans-serif;
-    letter-spacing: -0.02em;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    letter-spacing: -0.022em;
   }
 }
 
 @layer components {
-  .btn {
-    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-2xl font-semibold
-      transition active:scale-[.98] disabled:opacity-50 disabled:pointer-events-none
-      focus:outline-none;
+  /* ------------------------------------------------------------------
+     Vidrio líquido (como el "Liquid Glass" de Apple): una capa que deja
+     ver, borrosas y más saturadas, las luces azules del fondo; un filo de
+     luz arriba a la izquierda (el reflejo) y una sombra suave debajo.
+     ------------------------------------------------------------------ */
+  .vidrio,
+  .card {
+    position: relative;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.025) 42%, rgba(255, 255, 255, 0.015) 100%),
+      rgb(var(--c-white) / 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow:
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.2),
+      inset 0 -1px 0.5px rgba(255, 255, 255, 0.04),
+      0 22px 46px -26px rgba(0, 0, 0, 0.95),
+      0 2px 8px -3px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(28px) saturate(175%);
+    -webkit-backdrop-filter: blur(28px) saturate(175%);
   }
-  /* El botón principal: el acento con un destello que pasa al tocarlo. */
+  /* El filo de luz: más claro en la esquina de arriba, se apaga en medio y
+     toma un poco de azul abajo, como el vidrio de verdad. */
+  .vidrio::before,
+  .card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    pointer-events: none;
+    background: linear-gradient(
+      140deg,
+      rgba(255, 255, 255, 0.42) 0%,
+      rgba(255, 255, 255, 0.08) 26%,
+      rgba(255, 255, 255, 0) 52%,
+      rgb(var(--app-glow-2) / 0.32) 100%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+  }
+  /* Barras (arriba y la de pestañas): el mismo vidrio, un poco más denso
+     para que lo de atrás no distraiga al leer. */
+  .vidrio-barra {
+    position: relative;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)),
+      rgb(var(--c-white) / 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow:
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.22),
+      0 18px 40px -16px rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(30px) saturate(190%);
+    -webkit-backdrop-filter: blur(30px) saturate(190%);
+  }
+  .vidrio-barra::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    pointer-events: none;
+    background: linear-gradient(140deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0) 45%, rgb(var(--app-glow-2) / 0.35));
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+  }
+  /* La burbuja de lo elegido (pestaña activa, día elegido). */
+  .burbuja {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.07));
+    box-shadow:
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.45),
+      inset 0 -1px 1px rgba(255, 255, 255, 0.06),
+      0 6px 18px -8px rgb(var(--app-cta-glow) / 0.9);
+  }
+
+  .btn {
+    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-full font-semibold
+      transition active:scale-[.97] disabled:opacity-50 disabled:pointer-events-none
+      focus:outline-none;
+    letter-spacing: -0.01em;
+  }
+  /* El botón principal: azul eléctrico con letra blanca, como en Apple, con
+     el reflejo arriba y un destello que pasa al tocarlo. */
   .btn-primary {
     @apply btn px-5 py-3;
-    background: var(--app-accent-gradient);
-    color: var(--app-on-accent);
+    background: var(--app-cta-gradient);
+    color: var(--app-on-cta);
     box-shadow:
-      0 10px 28px -12px rgb(var(--app-glow-1) / 0.75),
-      inset 0 1px 0 rgba(255, 255, 255, 0.45);
+      0 12px 30px -12px rgb(var(--app-cta-glow) / 0.95),
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.55),
+      inset 0 -2px 4px rgba(0, 0, 0, 0.18);
   }
   .btn-primary::after {
     content: '';
@@ -181,7 +271,7 @@
     left: -60%;
     width: 40%;
     transform: skewX(-20deg);
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
     pointer-events: none;
   }
   .btn-primary:hover::after,
@@ -190,50 +280,52 @@
     animation: destello 0.9s ease-out;
   }
   .btn-primary:hover {
-    filter: brightness(1.05);
+    filter: brightness(1.08);
     box-shadow:
-      0 14px 34px -12px rgb(var(--app-glow-1) / 0.9),
-      inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      0 16px 36px -12px rgb(var(--app-cta-glow) / 1),
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.6),
+      inset 0 -2px 4px rgba(0, 0, 0, 0.18);
   }
+  /* Secundario: una cápsula de vidrio. */
   .btn-secondary {
     @apply btn px-4 py-3;
-    background: linear-gradient(160deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
-    color: var(--app-accent);
-    border: 1px solid var(--app-border-strong);
-    backdrop-filter: blur(10px);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.04));
+    color: var(--app-strong);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow:
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.28),
+      0 8px 22px -14px rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(20px) saturate(170%);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
   }
   .btn-secondary:hover {
-    background: rgb(var(--c-p-500) / 0.1);
-    box-shadow: 0 0 22px -8px rgb(var(--app-glow-1) / 0.6);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.17), rgba(255, 255, 255, 0.06));
   }
   .btn-ghost {
     @apply btn px-3 py-2;
     color: var(--app-accent);
   }
   .btn-ghost:hover {
-    background: rgb(var(--c-p-500) / 0.08);
+    background: rgba(255, 255, 255, 0.06);
   }
   .btn-danger {
     @apply btn px-4 py-3;
-    background: var(--app-danger);
-    color: #1a0a0a;
-  }
-  /* Tarjeta de vidrio con un filo de luz arriba. */
-  .card {
-    @apply relative rounded-3xl;
-    background: linear-gradient(165deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.018)),
-      var(--app-panel);
-    border: 1px solid var(--app-border);
+    background: linear-gradient(180deg, #ff6b61, #e5362c);
+    color: #ffffff;
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.06),
-      0 18px 40px -26px rgba(0, 0, 0, 0.85);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+      0 12px 28px -14px rgba(255, 69, 58, 0.9),
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.45);
   }
+  /* Tarjeta = vidrio con esquinas grandes, como las de iOS. */
+  .card {
+    border-radius: 28px;
+  }
+  /* Campos como los de iOS: relleno gris translúcido, sin borde marcado. */
   .input {
-    @apply w-full rounded-2xl px-4 py-3;
-    background: rgba(255, 255, 255, 0.045);
-    border: 1px solid var(--app-border);
+    @apply w-full px-4 py-3;
+    border-radius: 14px;
+    background: rgba(118, 128, 160, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.06);
     color: var(--app-strong);
     transition:
       border-color 0.2s ease,
@@ -246,15 +338,17 @@
   .input:focus {
     outline: none;
     border-color: var(--app-accent);
-    background: rgba(255, 255, 255, 0.07);
-    box-shadow: 0 0 0 4px rgb(var(--c-p-500) / 0.18);
+    background: rgba(118, 128, 160, 0.22);
+    box-shadow: 0 0 0 4px rgb(var(--app-glow-2) / 0.25);
   }
   .label {
-    @apply mb-1.5 block text-sm font-semibold;
-    color: var(--app-muted);
+    @apply mb-1.5 block text-[13px] font-semibold uppercase;
+    letter-spacing: 0.04em;
+    color: var(--app-faint);
   }
   .chip {
     @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-3 py-1 text-[13px] font-semibold;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
   /* Área táctil mínima recomendada por Apple/Google: 44x44 px.
      Se usa en los botones pequeños de icono para no fallar el toque. */
@@ -263,20 +357,43 @@
     min-width: 44px;
     min-height: 44px;
   }
+  /* Botón redondo de vidrio (flechas del mes, cerrar). */
+  .boton-redondo {
+    @apply inline-flex shrink-0 items-center justify-center rounded-full transition active:scale-95;
+    width: 40px;
+    height: 40px;
+    color: var(--app-strong);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.3);
+  }
   /* Botón grande de acción principal en celular. */
   .btn-lg {
-    @apply w-full text-base;
+    @apply w-full text-[17px];
     min-height: 56px;
+  }
+  /* Las hojas (ventanas que suben desde abajo): el mismo vidrio, casi
+     opaco para leer bien lo que se escribe. */
+  .hoja {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+      rgb(var(--c-white) / 0.9);
+  }
+  .hoja-cabecera {
+    background: rgb(var(--c-white) / 0.7);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
   }
 
   /* ---------- La marca ---------- */
-  /* "Coordinación" en oro, como "KITS" y "Budget" en sus íconos. */
+  /* "Coordinación" con la letra de la familia GEMB, en blanco y azul que
+     brilla, como los trazos del ícono. */
   .marca-titulo {
     font-family: 'League Spartan', system-ui, sans-serif;
     font-weight: 700;
     letter-spacing: -0.04em;
     line-height: 1;
-    background: linear-gradient(100deg, #9c7a35 0%, #e2c17d 22%, #fff3cf 38%, #e2c17d 52%, #b48a3e 75%, #f5d58a 100%);
+    background: linear-gradient(100deg, #6f8fff 0%, #c9d6ff 22%, #ffffff 38%, #c9d6ff 52%, #5b7dff 75%, #e3eaff 100%);
     background-size: 220% 100%;
     -webkit-background-clip: text;
     background-clip: text;
@@ -289,21 +406,23 @@
     font-weight: 400;
     letter-spacing: 0.55em;
     padding-left: 0.55em;
-    color: rgba(245, 213, 138, 0.78);
+    color: rgba(201, 214, 255, 0.78);
     text-transform: uppercase;
   }
   /* Título de cada pantalla. */
+  /* Título grande de cada pantalla, como los de iOS. */
   .titulo-pantalla {
-    font-family: 'League Spartan', system-ui, sans-serif;
-    font-weight: 700;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-weight: 800;
     letter-spacing: -0.03em;
-    font-size: 1.6rem;
+    font-size: 2.05rem;
     line-height: 1.05;
     color: var(--app-strong);
   }
+  /* Una línea de luz azul (en la entrada, bajo la marca). */
   .regla-oro {
     height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(226, 189, 106, 0.55) 15%, rgba(226, 189, 106, 0.55) 85%, transparent);
+    background: linear-gradient(90deg, transparent, rgb(var(--app-glow-1) / 0.6) 15%, rgb(var(--app-glow-1) / 0.6) 85%, transparent);
   }
 
   /* Pantalla de arranque (index.html) y cargando (FullScreenSpinner). */
@@ -341,11 +460,11 @@
     position: absolute;
     inset: 0;
     border-radius: 32px;
-    background: conic-gradient(from 0deg, transparent 0deg, transparent 260deg, rgba(245, 213, 138, 0.95) 330deg, transparent 360deg);
+    background: conic-gradient(from 0deg, transparent 0deg, transparent 260deg, rgba(160, 185, 255, 0.95) 330deg, transparent 360deg);
     -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));
     mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));
     animation: girar 1.6s linear infinite;
-    filter: drop-shadow(0 0 6px rgba(245, 213, 138, 0.8));
+    filter: drop-shadow(0 0 6px rgba(120, 150, 255, 0.9));
   }
 
   /* Cada pantalla entra suave. */
@@ -487,7 +606,7 @@
     left: -60%;
     width: 35%;
     transform: skewX(-20deg);
-    background: linear-gradient(90deg, transparent, rgba(226, 189, 106, 0.45), transparent);
+    background: linear-gradient(90deg, transparent, rgba(91, 125, 255, 0.35), transparent);
     animation: destello-pausa 5s ease-in-out 1.2s infinite;
   }
   .aurora-luz {

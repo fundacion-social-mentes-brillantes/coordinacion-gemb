@@ -323,7 +323,7 @@ export function SessionsPage() {
               <span
                 aria-hidden
                 className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full opacity-40 blur-3xl"
-                style={{ background: 'rgb(var(--app-glow-1) / 0.55)' }}
+                style={{ background: 'rgb(var(--app-cta-glow) / 0.6)' }}
               />
               <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-500">
                 Hoy{planHoy.horario ? ` · ${planHoy.horario}` : ''}
@@ -339,14 +339,15 @@ export function SessionsPage() {
                 {planHoy.coordinadora ? (
                   <>
                     Coordina{' '}
-                    <strong className={tuya ? 'text-primary-500' : 'text-slate-900'}>
+                    {/* Dorado = te toca a ti (como en el calendario). */}
+                    <strong className={tuya ? 'text-[#f5c451]' : 'text-slate-900'}>
                       {planHoy.coordinadora}
                       {tuya ? ' (tú)' : ''}
                     </strong>
                   </>
                 ) : (
                   <>
-                    Sin coordinadora.{' '}
+                    <span className="font-semibold text-[#ff6961]">Sin coordinadora.</span>{' '}
                     <Link to="/programacion" className="font-bold text-primary-500 underline">
                       Tómala en Coordinación
                     </Link>

@@ -140,18 +140,11 @@ export default {
         },
       },
       fontFamily: {
-        // Las letras de la familia GEMB (las mismas de Kits).
-        display: ['"League Spartan"', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
-        sans: [
-          '"Glacial Indifference"',
-          'system-ui',
-          '-apple-system',
-          'Segoe UI',
-          'Roboto',
-          'Helvetica',
-          'Arial',
-          'sans-serif',
-        ],
+        // La letra del sistema (SF Pro en el iPhone y el Mac), como las apps de
+        // Apple. La de la familia GEMB queda solo en la marca ("Coordinación").
+        display: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
+        sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
+        marca: ['"League Spartan"', 'system-ui', 'sans-serif'],
       },
       boxShadow: {
         card: '0 1px 3px rgba(8, 15, 30, 0.08), 0 1px 2px rgba(8, 15, 30, 0.04)',
@@ -160,6 +153,7 @@ export default {
       borderRadius: {
         xl: '0.9rem',
         '2xl': '1.25rem',
+        '3xl': '1.75rem',
       },
     },
   },

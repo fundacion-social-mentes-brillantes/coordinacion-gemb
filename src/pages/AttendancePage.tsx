@@ -1012,21 +1012,20 @@ export function AttendancePage() {
       </div>
 
       {/* Hoja de asistencia — en orden de llegada */}
-      <section
-        className="overflow-hidden rounded-2xl border shadow-card"
-        style={{ borderColor: 'var(--app-border)', background: 'var(--app-panel)' }}
-      >
+      <section className="card overflow-hidden">
+        {/* La cabecera de la hoja, en el azul del botón principal. */}
         <div
           className="flex items-center justify-between px-4 py-3"
           style={{
-            background: 'var(--app-accent-gradient)',
-            color: 'var(--app-on-accent)',
+            background: 'var(--app-cta-gradient)',
+            color: 'var(--app-on-cta)',
+            boxShadow: 'inset 0 1px 0.5px rgba(255,255,255,0.45)',
           }}
         >
           <span className="flex items-center gap-2 font-semibold">
             <LeafIcon className="text-lg" /> Hoja de asistencia
           </span>
-          <span className="rounded-full bg-black/15 px-2.5 py-0.5 text-sm font-bold">
+          <span className="rounded-full bg-[rgba(255,255,255,0.22)] px-2.5 py-0.5 text-sm font-bold">
             {rows.length}
           </span>
         </div>
@@ -1189,7 +1188,7 @@ export function AttendancePage() {
             className="btn-primary btn-lg"
           >
             {sharing ? (
-              <Spinner className="h-5 w-5 text-white" />
+              <Spinner className="h-5 w-5 text-[#fff]" />
             ) : (
               <ShareIcon className="text-xl" />
             )}
@@ -1365,7 +1364,7 @@ export function AttendancePage() {
             disabled={coordSaving}
             className="btn-primary w-full"
           >
-            {coordSaving ? <Spinner className="h-5 w-5 text-white" /> : null}
+            {coordSaving ? <Spinner className="h-5 w-5 text-[#fff]" /> : null}
             Guardar
           </button>
         </div>
@@ -1638,7 +1637,7 @@ function ResolveNameContent({
                 disabled={busy}
                 className="btn-primary w-full"
               >
-                {busy ? <Spinner className="h-5 w-5 text-white" /> : null}
+                {busy ? <Spinner className="h-5 w-5 text-[#fff]" /> : null}
                 Confirmar: es {pick.fullName}
               </button>
             )}

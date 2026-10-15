@@ -155,10 +155,11 @@ export async function buildProgramacionImage(y: number, m: number, plan: FechaPl
       const base = `${p.horario} · ${MODALITY_LABELS[p.modalidad]} · `;
       ctx.fillText(base, tx, yRow + 94);
       const bw = ctx.measureText(base).width;
-      ctx.fillStyle = p.coordinadora ? NAVY : '#16a34a';
+      // Rojo = falta coordinadora (como en el calendario de la app).
+      ctx.fillStyle = p.coordinadora ? NAVY : '#dc2626';
       ctx.font = font(24, '700');
       ctx.fillText(
-        ellipsize(ctx, p.coordinadora || 'Disponible', maxTx - bw),
+        ellipsize(ctx, p.coordinadora || 'Sin coordinadora', maxTx - bw),
         tx + bw,
         yRow + 94,
       );

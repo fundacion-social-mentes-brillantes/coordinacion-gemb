@@ -148,40 +148,42 @@ export function Modal({
       aria-label={title}
     >
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
         onClick={onClose}
         aria-hidden="true"
       />
+      {/* La hoja, como las de iOS: vidrio casi opaco (para leer bien) con
+          esquinas grandes y el reflejo de luz en el filo. */}
       <div
-        className="card relative w-full max-w-md overflow-y-auto overscroll-contain rounded-b-none !bg-[var(--app-panel-solid)] sm:rounded-2xl"
+        className="hoja vidrio-barra relative w-full max-w-md overflow-y-auto overscroll-contain rounded-t-[30px] sm:rounded-[30px]"
         style={{
           // Se levanta lo justo para que el teclado no tape los botones.
           marginBottom: keyboard ? `${keyboard}px` : undefined,
           maxHeight: `calc(90dvh - ${keyboard}px)`,
         }}
       >
-        <div className="sticky top-0 z-10 border-b border-[color:var(--app-border)] bg-[var(--app-panel-solid)]">
+        <div className="hoja-cabecera sticky top-0 z-10">
           {/* Agarradera (solo móvil): deja claro que es una hoja deslizable */}
           <div className="pt-2 sm:hidden">
-            <div className="mx-auto h-1.5 w-10 rounded-full bg-slate-300" />
+            <div className="mx-auto h-[5px] w-9 rounded-full bg-[rgba(255,255,255,0.3)]" />
           </div>
-          <div className="flex items-center justify-between gap-2 px-4 py-2.5">
-            <h2 className="min-w-0 flex-1 truncate text-lg font-bold text-slate-900">
+          <div className="flex items-center justify-between gap-2 px-5 pb-2 pt-2.5">
+            <h2 className="min-w-0 flex-1 truncate text-[19px] font-bold text-slate-900">
               {title}
             </h2>
             <button
               type="button"
               onClick={onClose}
-              className="tap -mr-1 shrink-0 rounded-full text-slate-400 active:bg-slate-100"
+              className="boton-redondo -mr-1 h-[34px] w-[34px] text-slate-500"
               aria-label="Cerrar"
             >
-              <XIcon className="text-xl" />
+              <XIcon className="text-lg" />
             </button>
           </div>
         </div>
         <div
-          className="p-4"
-          style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+          className="px-5 pb-5 pt-2"
+          style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom))' }}
         >
           {children}
         </div>

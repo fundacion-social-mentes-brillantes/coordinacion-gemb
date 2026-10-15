@@ -61,9 +61,9 @@ import {
 //
 //  Un calendario de mes, como el de la Agenda: debajo de cada día con
 //  reunión hay una rayita de color.
-//    verde   libre: nadie la coordina todavía
-//    rojo    ya la coordina otra persona
-//    dorado  te toca a ti
+//    rojo    no hay coordinadora: falta alguien
+//    verde   ya tiene coordinadora
+//    dorado  te toca a ti (tu espacio)
 //  Al tocar un día se ve la reunión y, según el caso, "Yo la coordino" (queda
 //  tuya al instante), "Tomar asistencia" o, para quien programa, "Cambiar".
 //  La misma vista sirve para la página pública /calendario, sin iniciar sesión.
@@ -81,22 +81,26 @@ const fechaLarga = (p: { diaSemana: number; fecha: Date }) =>
 
 const minus = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
 
-/** Los colores de la rayita: fijos, no cambian con el tema elegido. */
+/**
+ * Los colores de la rayita (los de Apple): fijos, no cambian con el tema.
+ * Rojo = falta coordinadora, verde = ya tiene, dorado = te toca a ti.
+ */
 const COLOR: Record<EstadoFecha, string> = {
-  libre: '#34d399',
-  ocupada: '#f87171',
-  tuya: '#e9c46a',
-  sin: 'rgb(148 163 184 / 0.45)',
+  libre: '#ff453a',
+  ocupada: '#30d158',
+  tuya: '#f5c451',
+  sin: 'rgba(142, 142, 147, 0.5)',
 };
 const LEYENDA: [EstadoFecha, string][] = [
-  ['libre', 'Libre'],
-  ['ocupada', 'Ocupada'],
-  ['tuya', 'Tuya'],
+  ['libre', 'Sin coordinadora'],
+  ['ocupada', 'Con coordinadora'],
+  ['tuya', 'Te toca'],
   ['sin', 'Sin reunión'],
 ];
 
-/** Lunes primero, como en Colombia. */
+/** Lunes primero, como en Colombia; las letras, como en el iPhone. */
 const SEMANA = [1, 2, 3, 4, 5, 6, 0];
+const LETRA_DIA = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
 
 export function ProgramacionView({ publico }: { publico: boolean }) {
   const { profile, puedeProgramar, isAdmin, isCoordinador } = useAuth();
@@ -281,23 +285,21 @@ export function ProgramacionView({ publico }: { publico: boolean }) {
           <button
             type="button"
             onClick={() => setVerCompartir(true)}
-            className="btn-secondary min-h-[44px] px-3 text-sm"
+            className="boton-redondo h-11 w-11"
             aria-label="Compartir el mes"
             title="Compartir el mes"
           >
             <ShareIcon className="text-lg" />
-            <span className="hidden sm:inline">Compartir</span>
           </button>
           {puede && (
             <button
               type="button"
               onClick={() => setVerAjustes(true)}
-              className="btn-secondary min-h-[44px] px-3 text-sm"
+              className="boton-redondo h-11 w-11"
               aria-label="Ajustes del calendario"
               title="Ajustes del calendario"
             >
               <SettingsIcon className="text-lg" />
-              <span className="hidden sm:inline">Ajustar</span>
             </button>
           )}
         </div>
@@ -335,54 +337,46 @@ export function ProgramacionView({ publico }: { publico: boolean }) {
             alSoltar(t.clientX, t.clientY);
           }}
         >
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => cambiarMes(-1)}
-              className="tap rounded-full text-slate-600 active:bg-white/10"
-              aria-label="Mes anterior"
-            >
-              <ChevronRightIcon className="rotate-180 text-2xl" />
+          <div className="flex items-center gap-2 px-1">
+            <p className="min-w-0 flex-1 truncate text-[26px] font-extrabold leading-none tracking-tight text-slate-900">
+              {NOMBRES_MES[mes]} <span className="font-semibold text-primary-500">{anio}</span>
+            </p>
+            <button type="button" onClick={() => cambiarMes(-1)} className="boton-redondo" aria-label="Mes anterior">
+              <ChevronRightIcon className="rotate-180 text-xl" />
             </button>
-            <div className="min-w-0 flex-1 text-center">
-              <p className="font-display text-[22px] font-bold leading-tight text-slate-900">
-                {NOMBRES_MES[mes]} <span className="text-primary-500">{anio}</span>
-              </p>
-              {enEsteMes ? (
-                <p className="text-xs text-slate-500">
-                  {prog.cargando
-                    ? 'Cargando…'
-                    : reuniones.length === 0
-                      ? 'Sin reuniones'
-                      : `${reuniones.length} reuniones · ${libres} libre${libres === 1 ? '' : 's'}${
-                          conCuenta ? ` · ${tuyas} tuya${tuyas === 1 ? '' : 's'}` : ''
-                        }`}
-                </p>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => irAMes(Number(hoyKey.slice(0, 4)), Number(hoyKey.slice(5, 7)) - 1)}
-                  className="text-xs font-bold text-primary-500"
-                >
-                  Volver a hoy
-                </button>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => cambiarMes(1)}
-              className="tap rounded-full text-slate-600 active:bg-white/10"
-              aria-label="Mes siguiente"
-            >
-              <ChevronRightIcon className="text-2xl" />
+            <button type="button" onClick={() => cambiarMes(1)} className="boton-redondo" aria-label="Mes siguiente">
+              <ChevronRightIcon className="text-xl" />
             </button>
           </div>
+          {enEsteMes ? (
+            <p className="mt-1.5 px-1 text-[13px] text-slate-500">
+              {prog.cargando
+                ? 'Cargando…'
+                : reuniones.length === 0
+                  ? 'Sin reuniones'
+                  : `${reuniones.length} reuniones · ${libres} sin coordinadora${
+                      conCuenta ? ` · ${tuyas} tuya${tuyas === 1 ? '' : 's'}` : ''
+                    }`}
+            </p>
+          ) : (
+            <button
+              type="button"
+              onClick={() => irAMes(Number(hoyKey.slice(0, 4)), Number(hoyKey.slice(5, 7)) - 1)}
+              className="mt-1.5 px-1 text-[13px] font-semibold text-primary-500"
+            >
+              Volver a hoy
+            </button>
+          )}
 
-          <div className="mt-3 grid grid-cols-7 text-center">
+          <div className="mt-4 grid grid-cols-7 text-center">
             {SEMANA.map((d) => (
-              <span key={d} className="pb-1 text-[11px] font-bold tracking-wide text-slate-500">
-                {DIA_CORTO[d]}
-              </span>
+              <abbr
+                key={d}
+                title={NOMBRES_DIA[d]}
+                className="pb-1.5 text-[12px] font-semibold text-slate-500 no-underline"
+              >
+                {LETRA_DIA[d]}
+              </abbr>
             ))}
           </div>
 
@@ -408,7 +402,7 @@ export function ProgramacionView({ publico }: { publico: boolean }) {
                     aria-selected={sel}
                     aria-label={`${n}${
                       estado === 'libre'
-                        ? ', libre'
+                        ? ', sin coordinadora'
                         : estado === 'tuya'
                           ? ', te toca a ti'
                           : estado === 'ocupada'
@@ -418,30 +412,37 @@ export function ProgramacionView({ publico }: { publico: boolean }) {
                               : ''
                     }`}
                     onClick={() => elegirDia(key)}
-                    className={`relative mx-auto flex h-[54px] w-full max-w-[56px] flex-col items-center justify-start gap-1 rounded-2xl pt-1.5 transition active:scale-95 ${
-                      sel
-                        ? 'bg-primary-500/15 shadow-[inset_0_0_0_1.5px_rgb(var(--app-glow-1)/0.55)]'
-                        : 'hover:bg-white/5'
-                    }`}
+                    className="relative mx-auto flex h-[58px] w-full max-w-[56px] flex-col items-center justify-start gap-1.5 rounded-[18px] pt-0.5 transition active:scale-90"
                   >
+                    {/* Hoy: el círculo azul (como el rojo del Calendario de
+                        Apple); el día elegido: una burbuja de vidrio. */}
                     <span
-                      className={`flex h-7 w-7 items-center justify-center rounded-full text-[15px] leading-none ${
+                      className={`flex h-9 w-9 items-center justify-center rounded-full text-[17px] leading-none transition ${
                         esHoy
-                          ? 'bg-primary-500 font-bold text-white'
-                          : p
-                            ? 'font-bold text-slate-900'
-                            : 'text-slate-500'
-                      } ${pasada && !esHoy ? 'opacity-45' : ''}`}
+                          ? `font-bold text-[#fff] ${sel ? 'ring-2 ring-[rgba(255,255,255,0.8)] ring-offset-0' : ''}`
+                          : sel
+                            ? 'burbuja font-bold text-slate-900'
+                            : p
+                              ? 'font-semibold text-slate-900'
+                              : 'text-slate-500'
+                      } ${pasada && !esHoy && !sel ? 'opacity-45' : ''}`}
+                      style={
+                        esHoy
+                          ? {
+                              background: 'var(--app-cta-gradient)',
+                              boxShadow: '0 6px 18px -6px rgb(var(--app-cta-glow) / 0.95), inset 0 1px 0.5px rgba(255,255,255,0.5)',
+                            }
+                          : undefined
+                      }
                     >
                       {n}
                     </span>
                     {estado && (
                       <span
-                        className={`h-[5px] w-7 rounded-full ${pasada ? 'opacity-40' : ''}`}
+                        className={`h-1 w-[22px] rounded-full ${pasada ? 'opacity-35' : ''}`}
                         style={{
                           background: COLOR[estado],
-                          boxShadow:
-                            estado === 'tuya' && !pasada ? `0 0 10px ${COLOR.tuya}` : undefined,
+                          boxShadow: !pasada && estado !== 'sin' ? `0 0 9px ${COLOR[estado]}` : undefined,
                         }}
                       />
                     )}
@@ -452,10 +453,10 @@ export function ProgramacionView({ publico }: { publico: boolean }) {
           )}
 
           {/* Leyenda */}
-          <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-[color:var(--app-border)] pt-3 text-xs text-slate-500">
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5 border-t border-[rgba(255,255,255,0.07)] pt-3 text-[12px] font-medium text-slate-600">
             {LEYENDA.filter(([e]) => conCuenta || e !== 'tuya').map(([e, t]) => (
-              <span key={e} className="inline-flex items-center gap-1.5">
-                <span className="h-[5px] w-4 rounded-full" style={{ background: COLOR[e] }} />
+              <span key={e} className="inline-flex items-center gap-1.5 rounded-full bg-[rgba(255,255,255,0.06)] px-2.5 py-1">
+                <span className="h-1 w-3.5 rounded-full" style={{ background: COLOR[e] }} />
                 {t}
               </span>
             ))}
@@ -630,7 +631,11 @@ function DetalleDia({
         <h3 className="min-w-0 flex-1 font-display text-lg font-bold leading-tight text-slate-900">
           {titulo}
         </h3>
-        {esHoy && <span className="chip bg-primary-100 text-primary-700">Hoy</span>}
+        {esHoy && (
+          <span className="chip text-[#fff]" style={{ background: 'var(--app-cta-gradient)' }}>
+            Hoy
+          </span>
+        )}
       </div>
 
       {!p ? (
@@ -676,14 +681,18 @@ function DetalleDia({
           >
             <span
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-base font-bold"
-              style={{ background: COLOR[estado ?? 'sin'], color: '#0b1226' }}
+              style={{
+                background: COLOR[estado ?? 'sin'],
+                color: estado === 'libre' ? '#ffffff' : '#08101f',
+                boxShadow: `0 0 16px -2px ${COLOR[estado ?? 'sin']}`,
+              }}
               aria-hidden
             >
-              {estado === 'libre' ? '+' : estado === 'tuya' ? '★' : p.coordinadora.charAt(0).toUpperCase()}
+              {estado === 'libre' ? (pasada ? '–' : '!') : estado === 'tuya' ? '★' : p.coordinadora.charAt(0).toUpperCase()}
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                {estado === 'libre' ? (pasada ? 'Sin coordinadora' : 'Libre') : estado === 'tuya' ? 'Te toca a ti' : 'Coordina'}
+                {estado === 'libre' ? 'Sin coordinadora' : estado === 'tuya' ? 'Te toca a ti' : 'Coordina'}
               </p>
               <p className="truncate font-bold text-slate-900">
                 {estado === 'libre' ? (pasada ? 'Nadie la tomó' : 'Nadie la coordina todavía') : p.coordinadora}
@@ -694,7 +703,7 @@ function DetalleDia({
           {/* Yo la coordino */}
           {esStaff && estado === 'libre' && !pasada && (
             <button type="button" onClick={onTomar} disabled={ocupado} className="btn-primary btn-lg">
-              {ocupado ? <Spinner className="h-5 w-5 text-white" /> : <CheckIcon className="text-lg" />}
+              {ocupado ? <Spinner className="h-5 w-5 text-[#fff]" /> : <CheckIcon className="text-lg" />}
               Yo la coordino
             </button>
           )}
@@ -887,7 +896,7 @@ function CompartirMes({
           ? `Festivo: ${p.festivo}`
           : p.cancelada
             ? `No hay reunión${p.motivo ? ` (${p.motivo})` : ''}`
-            : p.coordinadora || 'Disponible',
+            : p.coordinadora || 'Sin coordinadora',
       ]),
       filename: `programacion-${NOMBRES_MES[mes].toLowerCase()}-${anio}`,
     }).catch((e) => {
@@ -1185,7 +1194,7 @@ function EditarFecha({
         )}
 
         <button type="button" onClick={guardar} disabled={guardando} className="btn-primary btn-lg">
-          {guardando ? <Spinner className="h-5 w-5 text-white" /> : 'Guardar'}
+          {guardando ? <Spinner className="h-5 w-5 text-[#fff]" /> : 'Guardar'}
         </button>
         {!nueva && (
           <button
@@ -1404,7 +1413,7 @@ function Ajustes({ config, onClose }: { config: ProgramacionConfig; onClose: () 
         </section>
 
         <button type="button" onClick={guardar} disabled={guardando} className="btn-primary btn-lg">
-          {guardando ? <Spinner className="h-5 w-5 text-white" /> : 'Guardar ajustes'}
+          {guardando ? <Spinner className="h-5 w-5 text-[#fff]" /> : 'Guardar ajustes'}
         </button>
       </div>
     </Modal>

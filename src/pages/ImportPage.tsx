@@ -374,7 +374,7 @@ export function ImportPage() {
             disabled={importing || !membersReady || stats.toImport.length === 0}
             className="btn-primary w-full"
           >
-            {importing ? <Spinner className="h-5 w-5 text-white" /> : null}
+            {importing ? <Spinner className="h-5 w-5 text-[#fff]" /> : null}
             Importar {stats.toImport.length} personas
           </button>
           {!membersReady && (

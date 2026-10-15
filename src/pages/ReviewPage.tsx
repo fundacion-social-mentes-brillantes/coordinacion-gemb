@@ -236,7 +236,7 @@ export function ReviewPage() {
                     className="btn-primary min-h-[48px]"
                   >
                     {busy ? (
-                      <Spinner className="h-5 w-5 text-white" />
+                      <Spinner className="h-5 w-5 text-[#fff]" />
                     ) : (
                       <CheckIcon className="text-lg" />
                     )}

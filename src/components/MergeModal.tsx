@@ -165,7 +165,7 @@ function MergeContent({
         )}
         {pick && (
           <button type="button" onClick={doMerge} disabled={busy} className="btn-primary btn-lg">
-            {busy ? <Spinner className="h-5 w-5 text-white" /> : null}
+            {busy ? <Spinner className="h-5 w-5 text-[#fff]" /> : null}
             Confirmar: es {pick.fullName}
           </button>
         )}

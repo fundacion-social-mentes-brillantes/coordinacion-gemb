@@ -117,7 +117,7 @@ export function Layout() {
       {/* Cabecera */}
       <header
         ref={headerRef}
-        className="safe-top sticky top-0 z-40 border-b border-[color:var(--app-border)] bg-surface/70 backdrop-blur-xl"
+        className="safe-top sticky top-0 z-40 border-b border-[rgba(255,255,255,0.07)] bg-surface/55 backdrop-blur-2xl backdrop-saturate-150"
       >
         {/* Con el iPhone en horizontal, el logo y "Salir" no pueden quedar
             bajo la muesca: el margen lateral respeta el área segura. */}
@@ -138,7 +138,7 @@ export function Layout() {
             </p>
           </div>
           {items.length > 1 && (
-            <nav className="hidden items-center gap-1 md:flex" aria-label="Secciones">
+            <nav className="vidrio-barra hidden items-center gap-1 rounded-full p-1 md:flex" aria-label="Secciones">
               {items.map((item) => {
                 const Icon = item.icon;
                 return (
@@ -146,17 +146,15 @@ export function Layout() {
                     key={item.to}
                     to={item.to}
                     className={({ isActive }) =>
-                      `relative flex min-h-[40px] items-center gap-2 rounded-full px-3.5 text-sm font-bold transition ${
-                        isActive
-                          ? 'bg-primary-500/15 text-primary-500 shadow-[0_0_18px_-6px_rgb(var(--app-glow-1)/0.7)]'
-                          : 'text-slate-500 hover:bg-white/5 hover:text-slate-800'
+                      `relative flex min-h-[36px] items-center gap-2 rounded-full px-3.5 text-sm font-semibold transition ${
+                        isActive ? 'burbuja text-slate-900' : 'text-slate-500 hover:bg-[rgba(255,255,255,0.06)] hover:text-slate-800'
                       }`
                     }
                   >
                     <Icon className="text-lg" />
                     {item.label}
                     {avisoDe(item.to) > 0 && (
-                      <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+                      <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#ff453a] px-1 text-[10px] font-bold text-[#fff]">
                         {avisoDe(item.to) > 9 ? '9+' : avisoDe(item.to)}
                       </span>
                     )}
@@ -203,7 +201,7 @@ export function Layout() {
 
       {/* Aviso de versión nueva */}
       {updateReady && (
-        <div className="safe-x flex items-center gap-3 bg-primary-500 px-4 py-2 text-sm font-semibold text-white">
+        <div className="safe-x flex items-center gap-3 px-4 py-2 text-sm font-semibold text-[#fff]" style={{ background: 'var(--app-cta-gradient)' }}>
           <span className="flex-1">Hay una versión nueva de la app.</span>
           <button
             type="button"
@@ -227,56 +225,60 @@ export function Layout() {
         </ErrorBoundary>
       </main>
 
-      {/* Navegación inferior. Es `sticky` (no `fixed`) para que en el iPhone
-          no quede flotando encima de la lista con el teclado abierto.
-          Con un solo apartado (coordinadoras) no se muestra: no aporta. */}
+      {/* Navegación inferior: una cápsula de vidrio que flota sobre el
+          contenido, como la barra de pestañas de iOS. Es `sticky` (no
+          `fixed`) para que en el iPhone no quede flotando encima de la lista
+          con el teclado abierto. Con un solo apartado no se muestra. */}
       {items.length > 1 && (
-      <nav className="safe-bottom sticky bottom-0 z-40 border-t border-[color:var(--app-border)] bg-surface/75 backdrop-blur-xl md:hidden">
-        <div
-          className="flex items-stretch justify-around"
+        <nav
+          className="pointer-events-none sticky bottom-0 z-40 px-4 pt-2 md:hidden"
           style={{
-            paddingLeft: 'env(safe-area-inset-left)',
-            paddingRight: 'env(safe-area-inset-right)',
+            paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+            paddingLeft: 'max(1rem, env(safe-area-inset-left))',
+            paddingRight: 'max(1rem, env(safe-area-inset-right))',
           }}
+          aria-label="Secciones"
         >
-          {items.map((item) => {
-            const Icon = item.icon;
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={({ isActive }) =>
-                  `flex flex-1 flex-col items-center justify-center gap-1 px-1 pb-2 pt-2.5 text-[11px] font-bold transition ${
-                    isActive ? 'text-primary-500' : 'text-slate-500'
-                  }`
-                }
-                style={{ minHeight: 56 }}
-              >
-                {({ isActive }) => (
-                  <>
-                    <span
-                      className={`relative flex h-8 w-14 items-center justify-center rounded-full transition ${
-                        isActive
-                          ? 'bg-primary-500/15 shadow-[0_0_18px_-4px_rgb(var(--app-glow-1)/0.6)]'
-                          : ''
-                      }`}
-                    >
-                      <Icon className={`text-[22px] transition-transform ${isActive ? 'scale-110' : ''}`} />
-                      {/* Aviso: hay algo esperando (personas o accesos). */}
-                      {avisoDe(item.to) > 0 && (
-                        <span className="absolute -top-1 right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
-                          {avisoDe(item.to) > 9 ? '9+' : avisoDe(item.to)}
-                        </span>
-                      )}
-                    </span>
-                    {item.label}
-                  </>
-                )}
-              </NavLink>
-            );
-          })}
-        </div>
-      </nav>
+          <div
+            className={`vidrio-barra pointer-events-auto mx-auto flex items-stretch gap-1 rounded-full p-1.5 ${
+              items.length <= 2 ? 'max-w-[320px]' : 'max-w-md'
+            }`}
+          >
+            {items.map((item) => {
+              const Icon = item.icon;
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    `relative flex min-h-[54px] flex-1 flex-col items-center justify-center gap-0.5 rounded-full px-1 text-[11px] font-semibold tracking-tight transition active:scale-95 ${
+                      isActive ? 'burbuja text-slate-900' : 'text-slate-500'
+                    }`
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <span className="relative">
+                        <Icon
+                          className={`text-[22px] transition ${
+                            isActive ? 'text-primary-500 drop-shadow-[0_0_8px_rgb(var(--app-cta-glow)/0.9)]' : ''
+                          }`}
+                        />
+                        {/* Aviso: hay algo esperando (personas o accesos). */}
+                        {avisoDe(item.to) > 0 && (
+                          <span className="absolute -right-2.5 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#ff453a] px-1 text-[10px] font-bold text-[#fff] shadow-[0_0_10px_rgba(255,69,58,0.7)]">
+                            {avisoDe(item.to) > 9 ? '9+' : avisoDe(item.to)}
+                          </span>
+                        )}
+                      </span>
+                      {item.label}
+                    </>
+                  )}
+                </NavLink>
+              );
+            })}
+          </div>
+        </nav>
       )}
     </div>
   );

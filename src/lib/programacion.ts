@@ -276,7 +276,7 @@ export function textoWhatsApp(y: number, m: number, plan: FechaPlan[]): string {
         ? `❌ No hay reunión${p.motivo ? ` (${p.motivo})` : ''}`
         : p.coordinadora
           ? `👤 ${p.coordinadora}`
-          : '✅ Disponible';
+          : '🔴 Sin coordinadora';
     const modo = hayReunion(p) ? ` (${MODALITY_LABELS[p.modalidad]})` : '';
     return `*${dia} ${p.fecha.getUTCDate()}* [${p.horario}]: ${nombreActividades(p.actividades)}${modo} — ${estado}`;
   });

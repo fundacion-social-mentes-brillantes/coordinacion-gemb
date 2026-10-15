@@ -148,9 +148,10 @@ export interface TemaListo extends ColoresTema {
   detalle: string;
 }
 
-/** El primero es el de siempre: el azul noche del ícono, con el oro de GEMB. */
+/** El primero es el de siempre: el del ícono de la app. */
 export const TEMAS_LISTOS: TemaListo[] = [
-  { id: 'azul', nombre: 'Azul GEMB', detalle: 'Azul noche y oro', fondo: '#050a1c', luz1: '#e2bd6a', luz2: '#2f6bff' },
+  // Como el ícono de la app: negro, azul eléctrico y trazos que brillan.
+  { id: 'azul', nombre: 'Azul GEMB', detalle: 'Negro y azul eléctrico, como el ícono', fondo: '#03050f', luz1: '#7f9cff', luz2: '#2b59ff' },
   { id: 'dorado', nombre: 'Noche dorada', detalle: 'Negro y oro', fondo: '#07060a', luz1: '#e6c27a', luz2: '#b8862f' },
   { id: 'esmeralda', nombre: 'Esmeralda', detalle: 'Verde bosque y oro', fondo: '#03110c', luz1: '#e2c17d', luz2: '#17b37a' },
   { id: 'lila', nombre: 'Lila', detalle: 'Negro y morado', fondo: '#07040f', luz1: '#cdb4ff', luz2: '#8a3df0' },
@@ -252,10 +253,14 @@ export function tokensDeTema(entrada: ColoresTema): Record<string, string> {
 
   // Fondo con dos luces (como el ícono) y semánticas de los componentes.
   const fondo2 = oklchAHex({ l: Math.max(f.l, 0.05) + 0.03, c: cSup, h: hSup });
+  // Como el ícono: una luz fuerte abajo a la izquierda, un halo con anillo
+  // arriba a la derecha y el centro casi negro. El vidrio de las tarjetas
+  // necesita esas luces detrás para verse vidrio.
   v['--app-bg-gradient'] = [
-    `radial-gradient(110% 65% at 92% -8%, ${rgba(luz2, 0.32)}, transparent 58%)`,
-    `radial-gradient(80% 55% at -12% 12%, ${rgba(luz1, 0.12)}, transparent 55%)`,
-    `radial-gradient(90% 60% at 50% 112%, ${rgba(luz2, 0.18)}, transparent 62%)`,
+    `radial-gradient(42% 28% at 100% 0%, transparent 55%, ${rgba(luz2, 0.12)} 61%, transparent 67%)`,
+    `radial-gradient(62% 42% at 100% 0%, ${rgba(luz2, 0.34)}, transparent 70%)`,
+    `radial-gradient(90% 55% at 0% 100%, ${rgba(luz2, 0.48)}, transparent 70%)`,
+    `radial-gradient(70% 45% at 30% 45%, ${rgba(luz1, 0.05)}, transparent 70%)`,
     `linear-gradient(165deg, ${fondo} 0%, ${fondo2} 100%)`,
   ].join(', ');
   v['--app-panel'] = rgba(panel, 0.72);
@@ -278,6 +283,22 @@ export function tokensDeTema(entrada: ColoresTema): Record<string, string> {
   v['--app-glow-2'] = triple(oklchAHex({ l: Math.min(b.l, 0.68), c: b.c, h: h2 }));
   v['--app-danger'] = '#f87171';
   v['--app-meta'] = fondo;
+
+  // El botón principal ("Tomar asistencia", "Yo la coordino"): del color de
+  // la luz 2 con letra blanca, como los botones de Apple. Se oscurece lo justo
+  // para que la letra blanca se lea (contraste 4,5 o más).
+  let cta: Oklch = { l: clamp(b.l, 0.5, 0.62), c: Math.min(b.c, 0.24), h: h2 };
+  for (let i = 0; i < 40 && contraste('#ffffff', oklchAHex(cta)) < 4.5; i += 1) {
+    cta = { ...cta, l: cta.l - 0.01 };
+  }
+  const ctaHex = oklchAHex(cta);
+  v['--app-cta'] = ctaHex;
+  v['--app-cta-gradient'] = `linear-gradient(180deg, ${oklchAHex({ ...cta, l: cta.l + 0.09 })} 0%, ${ctaHex} 55%, ${oklchAHex({
+    ...cta,
+    l: cta.l - 0.06,
+  })} 100%)`;
+  v['--app-on-cta'] = '#ffffff';
+  v['--app-cta-glow'] = triple(oklchAHex({ ...cta, l: Math.min(cta.l + 0.08, 0.72) }));
   return v;
 }
 

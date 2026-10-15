@@ -2,7 +2,8 @@
 export function Spinner({ className = 'h-6 w-6' }: { className?: string }) {
   return (
     <svg
-      className={`animate-spin text-primary-500 ${className}`}
+      // Con un color propio (p. ej. blanco dentro de un botón azul) se usa ese.
+      className={`animate-spin ${className.includes('text-') ? '' : 'text-primary-500'} ${className}`}
       viewBox="0 0 24 24"
       fill="none"
       role="status"
@@ -21,8 +22,8 @@ export function Spinner({ className = 'h-6 w-6' }: { className?: string }) {
 }
 
 /**
- * La pantalla de carga: el ícono con una luz dorada que gira alrededor y
- * "Coordinación · GEMB" en oro. Es la misma que se ve al abrir la app
+ * La pantalla de carga: el ícono con una luz azul que gira alrededor y
+ * "Coordinación · GEMB" en blanco y azul. Es la misma que se ve al abrir la app
  * (index.html), así el arranque no salta de un dibujo a otro.
  */
 export function FullScreenSpinner({ label }: { label?: string }) {

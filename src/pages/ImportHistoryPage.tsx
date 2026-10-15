@@ -422,7 +422,7 @@ export function ImportHistoryPage() {
           >
             {importing ? (
               <>
-                <Spinner className="h-5 w-5 text-white" />
+                <Spinner className="h-5 w-5 text-[#fff]" />
                 Importando… {progress}/{porDia?.size ?? 0}
               </>
             ) : (
