@@ -407,7 +407,7 @@ export function attendanceImageName(type: SessionType, dateLabel: string) {
   return `asistencia-${kind}-${slug}.png`;
 }
 
-export type ShareOutcome = 'shared' | 'cancelled' | 'downloaded' | 'opened' | 'blocked';
+export type ShareOutcome = 'shared' | 'cancelled' | 'downloaded' | 'opened' | 'blocked' | 'error';
 
 /**
  * Comparte la imagen con el menú nativo del celular (WhatsApp, etc.).
@@ -431,8 +431,10 @@ export async function shareOrDownloadImage(
       await compartirArchivo(blob, filename, text);
       return 'shared';
     } catch (e) {
+      // En la app no existe una cancelación que llegue aquí (el teléfono
+      // responde apenas abre el menú): esto siempre es un error de verdad.
       console.error('No se pudo compartir desde la app', e);
-      return 'cancelled';
+      return 'error';
     }
   }
   const nav = navigator as Navigator & {

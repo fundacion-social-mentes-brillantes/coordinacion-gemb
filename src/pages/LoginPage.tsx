@@ -6,7 +6,7 @@ import { InstallButton, IosInstallHelp } from '../components/InstallPrompt';
 import { AuthStuck } from '../components/AuthStuck';
 import { isUpdateReady } from '../lib/swUpdate';
 import { useEffect, useState } from 'react';
-import { copiarTexto } from '../lib/nativo';
+import { copiarTexto, inicioDeLaVentana } from '../lib/nativo';
 
 /**
  * ¿La app se está abriendo DENTRO de otra app (Facebook, Instagram…)?
@@ -28,7 +28,7 @@ export function LoginPage() {
   const destino =
     pedida && pedida.startsWith('/') && !pedida.startsWith('//') && pedida !== '/login'
       ? pedida
-      : '/sesiones';
+      : inicioDeLaVentana();
 
   // OJO: los hooks van ANTES de cualquier `return`. Si se ponen después,
   // React se rompe ("Rendered more hooks than during the previous render").

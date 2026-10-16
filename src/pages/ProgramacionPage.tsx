@@ -868,6 +868,7 @@ function CompartirMes({
       if (r === 'downloaded') toast('Imagen descargada.', 'success');
       else if (r === 'opened') toast('Se abrió la imagen: mantenla pulsada para guardarla.', 'info');
       else if (r === 'blocked') toast('La imagen ya está lista: toca «Imagen» otra vez.', 'info');
+      else if (r === 'error') toast('No se pudo compartir la imagen.', 'error');
     } catch (e) {
       console.error(e);
       toast('No se pudo crear la imagen.', 'error');

@@ -13,6 +13,7 @@ import android.os.Build;
 import android.os.CancellationSignal;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.util.Base64;
 import android.util.Log;
 import android.webkit.WebView;
@@ -83,6 +84,14 @@ final class Puente implements WebViewCompat.WebMessageListener {
             trasPermiso = null;
             if (f != null) f.accept(concedido);
         });
+        conectar(web);
+    }
+
+    /**
+     * Pone {@code GembNativo} en un WebView. Se llama también con el WebView
+     * nuevo que reemplaza a uno cuyo proceso murió (ver BurbujaActivity).
+     */
+    void conectar(WebView web) {
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             WebViewCompat.addWebMessageListener(web, "GembNativo", Collections.singleton(ORIGEN), this);
         } else {
@@ -109,7 +118,10 @@ final class Puente implements WebViewCompat.WebMessageListener {
         try {
             m = new JSONObject(mensaje.getData());
             id = m.getString("id");
-        } catch (JSONException e) {
+        } catch (Throwable e) {
+            // JSON roto o un archivo tan grande que no cupo en memoria: se
+            // ignora sin cerrar la app (la página tiene su propio tiempo límite).
+            Log.w(TAG, "Mensaje ilegible", e);
             return;
         }
         String accion = m.optString("accion");
@@ -127,6 +139,10 @@ final class Puente implements WebViewCompat.WebMessageListener {
                     break;
                 case "abrir":
                     abrir(m.optString("url"));
+                    listo(respuesta, id, null);
+                    break;
+                case "agregarCuenta":
+                    agregarCuentaDeGoogle();
                     listo(respuesta, id, null);
                     break;
                 case "abrirApp":
@@ -212,7 +228,7 @@ final class Puente implements WebViewCompat.WebMessageListener {
         o.put("version", version);
         o.put("android", Build.VERSION.SDK_INT);
         o.put("burbuja", esBurbuja);
-        o.put("burbujasPosibles", Build.VERSION.SDK_INT >= 30);
+        o.put("burbujasPosibles", Burbuja.soportada(actividad));
         return o;
     }
 
@@ -260,7 +276,9 @@ final class Puente implements WebViewCompat.WebMessageListener {
                         fallo(r, id, "sin-app", "No hay ninguna app para compartir el archivo.");
                     }
                 });
-            } catch (Exception e) {
+            } catch (Throwable e) {
+                // Throwable: con un archivo enorme puede faltar memoria, y eso
+                // no debe cerrar la app en plena reunión.
                 Log.e(TAG, "No se pudo compartir", e);
                 fallo(r, id, "fallo", "No se pudo preparar el archivo para compartir.");
             }
@@ -282,6 +300,19 @@ final class Puente implements WebViewCompat.WebMessageListener {
 
     private void abrir(String url) {
         abrirFuera(Uri.parse(url));
+    }
+
+    /** Ajustes → Agregar cuenta de Google (cuando el teléfono no tiene ninguna). */
+    private void agregarCuentaDeGoogle() {
+        Intent i = new Intent(Settings.ACTION_ADD_ACCOUNT);
+        i.putExtra(Settings.EXTRA_ACCOUNT_TYPES, new String[] { "com.google" });
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            actividad.startActivity(i);
+        } catch (ActivityNotFoundException e) {
+            Intent ajustes = new Intent(Settings.ACTION_SYNC_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            actividad.startActivity(ajustes);
+        }
     }
 
     private void abrirApp() {
@@ -328,12 +359,19 @@ final class Puente implements WebViewCompat.WebMessageListener {
                 @Override
                 public void onError(@NonNull GetCredentialException e) {
                     Log.w(TAG, "No se pudo entrar con Google: " + e.getType(), e);
-                    if (e instanceof GetCredentialCancellationException) {
+                    String detalle = e.getMessage() != null ? e.getMessage() : e.getType();
+                    String minus = detalle.toLowerCase(java.util.Locale.ROOT);
+                    // Google también usa «cancelación» para errores de
+                    // configuración (p. ej. «[16] Account reauth failed» si la
+                    // huella de la firma no está registrada). Solo es «cancelado»
+                    // cuando la persona cerró el selector.
+                    boolean laPersonaCancelo = minus.contains("cancelled by the user") || minus.contains("canceled by the user");
+                    if (e instanceof GetCredentialCancellationException && laPersonaCancelo) {
                         fallo(r, id, "cancelado", "Se canceló el ingreso.");
-                    } else if (e instanceof NoCredentialException) {
+                    } else if (e instanceof NoCredentialException && !minus.startsWith("during get sign-in intent")) {
                         fallo(r, id, "sin-cuenta", "No hay cuentas de Google en este teléfono.");
                     } else {
-                        fallo(r, id, "fallo", e.getMessage() != null ? e.getMessage() : e.getType());
+                        fallo(r, id, "fallo", detalle);
                     }
                 }
             }

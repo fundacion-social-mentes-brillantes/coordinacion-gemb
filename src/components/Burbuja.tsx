@@ -19,9 +19,13 @@ import { AndroidIcon, BurbujaIcon, XIcon } from './Icons';
 //  de la reunión. Lo pidió la coordinación.
 // ---------------------------------------------------------------------------
 
-/** La última versión de la app de Android (se publica en GitHub). */
-export const URL_APK =
-  'https://github.com/fundacion-social-mentes-brillantes/coordinacion-gemb/releases/latest/download/coordinacion-gemb.apk';
+/**
+ * La app de Android se reparte por Google Play (prueba interna: solo las
+ * cuentas del equipo que estén en la lista de Play Console). Un solo canal:
+ * el APK de GitHub está firmado con otra llave y no se podría actualizar
+ * desde Play sin desinstalar.
+ */
+export const URL_APP_ANDROID = 'https://play.google.com/apps/internaltest/4701459342913607202';
 
 const NO_OFRECER_APP = 'gemb:no-ofrecer-app-android';
 
@@ -83,13 +87,34 @@ function AyudaBurbuja({
   estado: EstadoBurbuja | 'sin-permiso';
   onClose: () => void;
 }) {
-  const sinPermiso = estado === 'sin-permiso' || !estado.avisos;
-  const viejo = !sinPermiso && typeof estado === 'object' && !estado.soportada;
+  const e = typeof estado === 'object' ? estado : null;
+  const sinPermiso = !e || !e.avisos;
+  const canalApagado = !sinPermiso && !!e?.canalApagado;
+  const sinBurbujas = !sinPermiso && !canalApagado && !!e && !e.soportada;
+  const apagadasEnTodo = !sinPermiso && !canalApagado && !sinBurbujas && e?.general === false;
+  const titulo = sinPermiso
+    ? 'Falta un permiso'
+    : canalApagado
+      ? 'El aviso de la reunión está apagado'
+      : sinBurbujas
+        ? 'Este teléfono no muestra burbujas'
+        : '¿No ves la burbuja?';
 
   return (
-    <Modal open onClose={onClose} title={sinPermiso ? 'Falta un permiso' : viejo ? 'Sin burbujas en este Android' : '¿No ves la burbuja?'}>
+    <Modal open onClose={onClose} title={titulo}>
       <div className="space-y-3 text-[15px] leading-relaxed text-slate-700">
-        {sinPermiso ? (
+        {canalApagado ? (
+          <>
+            <p>
+              En los ajustes de avisos de la app está apagada la categoría{' '}
+              <strong>«Burbuja de la reunión»</strong>. Enciéndela y vuelve a tocar{' '}
+              <strong>«Activar»</strong>.
+            </p>
+            <button type="button" className="btn-primary w-full" onClick={() => void ajustesDeAvisos()}>
+              Abrir los ajustes de avisos
+            </button>
+          </>
+        ) : sinPermiso ? (
           <>
             <p>
               La burbuja es un aviso de la app, y los avisos están apagados. Actívalos y vuelve
@@ -99,14 +124,24 @@ function AyudaBurbuja({
               Abrir los ajustes de avisos
             </button>
           </>
-        ) : viejo ? (
+        ) : sinBurbujas ? (
           <p>
-            Las burbujas existen desde Android 11. En este teléfono te dejé un{' '}
-            <strong>aviso fijo arriba</strong>: baja la barra y tócalo para abrir la reunión.
+            Este teléfono no tiene burbujas (son de Android 11 en adelante, y los teléfonos
+            «Android Go» no las muestran). Te dejé un <strong>aviso fijo</strong>: baja la barra
+            de arriba y toca <strong>«Reunión de hoy»</strong> para abrir la reunión.
           </p>
         ) : (
           <>
-            <p>Android pide permiso la primera vez. Hazlo una sola vez:</p>
+            {apagadasEnTodo ? (
+              <p>
+                Las burbujas están <strong>apagadas en todo el teléfono</strong>. Primero
+                enciéndelas en Ajustes → Notificaciones → <strong>Burbujas</strong> (en Samsung:
+                Ajustes → Notificaciones → Ajustes avanzados → Notificaciones flotantes →{' '}
+                <strong>Burbujas</strong>). Después:
+              </p>
+            ) : (
+              <p>Android pide permiso la primera vez. Hazlo una sola vez:</p>
+            )}
             <ol className="list-decimal space-y-1.5 pl-5">
               <li>
                 Toca <strong>«Abrir ajustes de burbujas»</strong> y elige{' '}
@@ -119,13 +154,15 @@ function AyudaBurbuja({
             <button type="button" className="btn-primary w-full" onClick={() => void ajustesDeBurbujas()}>
               Abrir ajustes de burbujas
             </button>
-            <p className="rounded-2xl bg-slate-100 px-3 py-2.5 text-sm text-slate-600">
-              <strong>En Samsung:</strong> Ajustes → Notificaciones → Ajustes avanzados →
-              Notificaciones flotantes → <strong>Burbujas</strong>.
-            </p>
+            {!apagadasEnTodo && (
+              <p className="rounded-2xl bg-slate-100 px-3 py-2.5 text-sm text-slate-600">
+                <strong>En Samsung:</strong> Ajustes → Notificaciones → Ajustes avanzados →
+                Notificaciones flotantes → <strong>Burbujas</strong>.
+              </p>
+            )}
             <p className="text-sm text-slate-500">
-              También puedes bajar la barra de avisos y tocar el iconito de burbuja del aviso
-              «Reunión de hoy».
+              Si aun así no flota, baja la barra de avisos y toca «Reunión de hoy»: abre lo mismo
+              en pantalla completa.
             </p>
           </>
         )}
@@ -178,12 +215,12 @@ function OfrecerApp() {
           </p>
         </div>
       </div>
-      <a href={URL_APK} className="btn-secondary mt-3 min-h-[44px] w-full text-sm">
-        Descargar la app
+      <a href={URL_APP_ANDROID} className="btn-secondary mt-3 min-h-[44px] w-full text-sm">
+        Instalar desde Google Play
       </a>
       <p className="mt-2 text-xs leading-snug text-slate-500">
-        Al abrir el archivo, Android pide permiso para instalar: acéptalo una vez. Entras con la
-        misma cuenta de Google.
+        Toca «Aceptar invitación» y después «Descargar en Google Play». Funciona con la cuenta de
+        Google con la que entras aquí.
       </p>
     </section>
   );

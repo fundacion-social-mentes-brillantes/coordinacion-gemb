@@ -56,6 +56,33 @@ export const androidEnNavegador =
 /** ¿Es la pantalla de la burbuja? */
 export const esBurbuja = () => window.location.pathname.startsWith('/burbuja');
 
+const MARCA_BURBUJA = 'gemb:ventana-burbuja';
+
+/**
+ * ¿Esta ventana es la de la burbuja, aunque ahora muestre otra ruta (por
+ * ejemplo /login tras salir)? main.tsx la marca al arrancar en /burbuja; la
+ * marca vive en el sessionStorage de este WebView y sobrevive a recargas.
+ */
+export function esVentanaBurbuja(): boolean {
+  try {
+    return sessionStorage.getItem(MARCA_BURBUJA) === '1';
+  } catch {
+    return esBurbuja();
+  }
+}
+
+export function marcarVentanaBurbuja() {
+  if (!esBurbuja()) return;
+  try {
+    sessionStorage.setItem(MARCA_BURBUJA, '1');
+  } catch {
+    /* sin almacenamiento: se usa la ruta */
+  }
+}
+
+/** A dónde va «inicio» en esta ventana: la reunión de hoy en la burbuja. */
+export const inicioDeLaVentana = () => (esVentanaBurbuja() ? '/burbuja' : '/sesiones');
+
 let siguiente = 0;
 const pendientes = new Map<string, { ok: (v: unknown) => void; mal: (e: Error) => void }>();
 
@@ -75,12 +102,30 @@ if (puente) {
   };
 }
 
-function pedir<T = null>(accion: string, datos: Record<string, unknown> = {}): Promise<T> {
-  if (!puente) return Promise.reject(new ErrorNativo('Esto solo funciona en la app de Android.', 'sin-app'));
+function pedir<T = null>(
+  accion: string,
+  datos: Record<string, unknown> = {},
+  limiteMs = 0,
+): Promise<T> {
+  const p = puente;
+  if (!p) return Promise.reject(new ErrorNativo('Esto solo funciona en la app de Android.', 'sin-app'));
   const id = `m${++siguiente}`;
   return new Promise<T>((ok, mal) => {
     pendientes.set(id, { ok: ok as (v: unknown) => void, mal });
-    puente.postMessage(JSON.stringify({ ...datos, id, accion }));
+    // Un tiempo límite para lo que no espera a la persona (compartir): si el
+    // teléfono nunca responde, la ruedita no se queda girando para siempre.
+    if (limiteMs > 0) {
+      setTimeout(() => {
+        if (!pendientes.delete(id)) return;
+        mal(new ErrorNativo('El teléfono no respondió a tiempo.', 'tiempo'));
+      }, limiteMs);
+    }
+    try {
+      p.postMessage(JSON.stringify({ ...datos, id, accion }));
+    } catch (e) {
+      pendientes.delete(id);
+      mal(e instanceof Error ? e : new Error(String(e)));
+    }
   });
 }
 
@@ -107,10 +152,16 @@ function aBase64(blob: Blob): Promise<string> {
   });
 }
 
+/** Más que esto, en un teléfono modesto, no cabe en memoria de una vez. */
+const MAXIMO_PARA_COMPARTIR = 20 * 1024 * 1024;
+
 /** Comparte un archivo con el menú de Android (WhatsApp, Drive, Guardar…). */
 export async function compartirArchivo(blob: Blob, nombre: string, texto = ''): Promise<void> {
+  if (blob.size > MAXIMO_PARA_COMPARTIR) {
+    throw new ErrorNativo('El archivo es muy grande para compartirlo desde la app.', 'grande');
+  }
   const datos = await aBase64(blob);
-  await pedir('compartir', { datos, nombre, mime: blob.type || 'application/octet-stream', texto });
+  await pedir('compartir', { datos, nombre, mime: blob.type || 'application/octet-stream', texto }, 60_000);
 }
 
 // --------------------------------------------------------- entrar con Google
@@ -124,6 +175,9 @@ export async function tokenDeGoogle(): Promise<string> {
   return r.idToken;
 }
 
+/** Ajustes → Agregar cuenta de Google (cuando el teléfono no tiene ninguna). */
+export const agregarCuentaDeGoogle = () => pedir('agregarCuenta');
+
 /** Para que la próxima vez vuelva a preguntar con qué cuenta entrar. */
 export async function olvidarCuentaDeGoogle(): Promise<void> {
   if (!enAppAndroid) return;
@@ -133,8 +187,12 @@ export async function olvidarCuentaDeGoogle(): Promise<void> {
 // ------------------------------------------------------------------- burbuja
 
 export interface EstadoBurbuja {
-  /** Android 11 o más nuevo (antes no existen las burbujas). */
+  /** Android 11 o más nuevo y no «Android Go» (esos nunca muestran burbujas). */
   soportada: boolean;
+  /** El interruptor de burbujas de todo el teléfono (Samsung: «Notificaciones flotantes»). */
+  general?: boolean;
+  /** La categoría «Burbuja de la reunión» apagada desde el aviso. */
+  canalApagado?: boolean;
   /** ¿La app tiene permiso de mostrar avisos? */
   avisos: boolean;
   /** Lo que eligió la persona en Ajustes para las burbujas de esta app. */

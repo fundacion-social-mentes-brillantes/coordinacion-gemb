@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nada de la app va a la copia de seguridad de Google ni pasa a un teléfono
+     nuevo: ahí viven la sesión de Google y la caché con datos de las personas
+     (un celular prestado no debe dejarlos en la copia de otra cuenta). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+    </device-transfer>
+</data-extraction-rules>

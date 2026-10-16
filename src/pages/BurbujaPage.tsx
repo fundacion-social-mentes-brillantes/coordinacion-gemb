@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, Outlet } from 'react-router-dom';
+import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
 import { listenSessions } from '../services/sessions';
 import { useProgramacion } from '../hooks/useProgramacion';
@@ -24,6 +24,8 @@ import type { Session } from '../types';
 /** El marco de la burbuja: cabecera mínima con "abrir la app" y "cerrar". */
 export function LayoutBurbuja() {
   const headerRef = useRef<HTMLElement>(null);
+  // Como en Layout: al cambiar de pantalla se borra un error anterior.
+  const location = useLocation();
 
   // Igual que en Layout: los buscadores pegajosos se ponen bajo la cabecera.
   useEffect(() => {
@@ -77,7 +79,7 @@ export function LayoutBurbuja() {
         </div>
       </header>
       <main className="flex-1 px-4 pb-6 pt-3">
-        <ErrorBoundary>
+        <ErrorBoundary resetKey={location.pathname}>
           <Outlet />
         </ErrorBoundary>
       </main>

@@ -37,7 +37,16 @@ import {
   SUPER_ADMIN_EMAIL,
 } from '../lib/firebase';
 import { isAppleMobile, isStandalone } from '../lib/device';
-import { enAppAndroid, ErrorNativo, olvidarCuentaDeGoogle, tokenDeGoogle } from '../lib/nativo';
+import {
+  agregarCuentaDeGoogle,
+  cerrarBurbuja,
+  enAppAndroid,
+  enAppAndroidAunqueSinPuente,
+  ErrorNativo,
+  esVentanaBurbuja,
+  olvidarCuentaDeGoogle,
+  tokenDeGoogle,
+} from '../lib/nativo';
 import type { UserProfile, Role } from '../types';
 
 interface AuthContextValue {
@@ -205,6 +214,14 @@ async function ensureUserDoc(u: User) {
   await setDoc(ref, { ...base, role: 'pending' });
 }
 
+/**
+ * La salida la hizo ESTA ventana (ver `logout`). Si la hizo otra (la app
+ * mientras la burbuja está abierta, u otra pestaña), al borrar lo guardado
+ * en el teléfono deja el Firestore de esta ventana inservible sin avisar: al
+ * volver a entrar hay que recargar para arrancar uno nuevo.
+ */
+let salidaPropia = false;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -221,6 +238,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // en el iPhone se veía como "vuelve a la pantalla de ingreso".
     let redirectSettled = false;
     let signedOutSeen = false;
+    // ¿Había sesión en esta ventana y se cerró? (Ver `salidaPropia`.)
+    let huboSesion = false;
+    let salidaVista = false;
     // ¿Ya se le mostró algo a la usuaria (ingreso o su cuenta)? A partir de
     // ahí la red de seguridad de abajo no tiene nada que rescatar.
     let settled = false;
@@ -270,6 +290,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(u);
 
       if (!u) {
+        if (huboSesion) {
+          salidaVista = true;
+          // Sin sesión la burbuja no sirve: se quita sola.
+          if (enAppAndroid && esVentanaBurbuja()) void cerrarBurbuja().catch(() => null);
+        }
         setProfile(null);
         setStuck(false);
         signedOutSeen = true;
@@ -277,6 +302,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (redirectSettled) showLoginScreen();
         return;
       }
+
+      // Volvió a entrar alguien después de una salida hecha en otra ventana:
+      // el Firestore de esta pudo quedar terminado (borraron lo guardado en
+      // el teléfono). Se recarga para arrancar limpio.
+      if (salidaVista && !salidaPropia) {
+        window.location.reload();
+        return;
+      }
+      huboSesion = true;
 
       // Hay sesión: ya no hace falta la marca del viaje.
       clearRedirectFlag();
@@ -344,6 +378,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async () => {
     setAuthError(null);
 
+    // App de Android con un WebView tan viejo que no tiene el puente: el
+    // ingreso web tampoco funciona ahí (Google lo bloquea en un WebView).
+    if (!enAppAndroid && enAppAndroidAunqueSinPuente) {
+      setAuthError(
+        'Para entrar desde la app hay que actualizar «Android System WebView» y «Chrome» en Play Store. Mientras tanto, entra desde Chrome.',
+      );
+      return;
+    }
+
     // App de Android: Google no deja entrar desde su WebView. Se elige la
     // cuenta con el selector del teléfono y con ese token se entra a Firebase.
     if (enAppAndroid) {
@@ -354,10 +397,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (e) {
         if (e instanceof ErrorNativo) {
           if (e.codigo === 'cancelado') return;
+          if (e.codigo === 'sin-cuenta') {
+            // Se abre directo la pantalla de Android para agregarla.
+            void agregarCuentaDeGoogle().catch(() => null);
+            setAuthError(
+              'Este teléfono no tiene ninguna cuenta de Google. Agrégala en la pantalla que se abrió y vuelve a tocar «Continuar con Google».',
+            );
+            return;
+          }
           setAuthError(
-            e.codigo === 'sin-cuenta'
-              ? 'Este teléfono no tiene ninguna cuenta de Google. Agrégala en Ajustes → Cuentas y vuelve a intentarlo.'
-              : 'No se pudo entrar con Google desde la app. Inténtalo de nuevo; si sigue fallando, entra desde Chrome.',
+            'No se pudo entrar con Google desde la app. Inténtalo de nuevo; si sigue fallando, entra desde Chrome.',
           );
           console.error('Ingreso nativo con Google', e.codigo, e.message);
           return;
@@ -477,6 +526,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     clearRedirectFlag();
     setStuck(false);
+    salidaPropia = true;
+    // La burbuja comparte lo guardado en el teléfono con la app: si sigue
+    // abierta mientras se borra, queda inservible. Se quita antes de salir.
+    if (enAppAndroid) await cerrarBurbuja().catch(() => null);
     await signOut(auth);
     // En la app de Android: que la próxima vez pregunte con qué cuenta entrar.
     await olvidarCuentaDeGoogle();

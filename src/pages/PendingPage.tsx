@@ -2,6 +2,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Logo, Marca } from '../components/Logo';
 import { FullScreenSpinner } from '../components/Spinner';
+import { inicioDeLaVentana } from '../lib/nativo';
 
 /**
  * Entró con Google pero todavía no tiene acceso. La solicitud ya le aparece
@@ -15,7 +16,7 @@ export function PendingPage() {
   if (loading) return <FullScreenSpinner />;
   if (!user) return <Navigate to="/login" replace />;
   if (profile && profile.role !== 'pending' && profile.active) {
-    return <Navigate to="/sesiones" replace />;
+    return <Navigate to={inicioDeLaVentana()} replace />;
   }
 
   const deactivated = profile && profile.role !== 'pending' && !profile.active;

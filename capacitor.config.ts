@@ -20,6 +20,8 @@ const config: CapacitorConfig = {
     // Para que la página sepa que está dentro de la app aunque el puente
     // nativo (GembNativo) no estuviera (WebView muy viejo).
     appendUserAgent: 'GembAndroid',
+    // Acercar con dos dedos (la carpeta de coordinación lo necesita).
+    zoomEnabled: true,
   },
   plugins: {
     // Íconos claros en la barra de estado: el fondo de la app es oscuro.

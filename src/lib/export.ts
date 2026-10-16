@@ -9,12 +9,13 @@ import { compartirArchivo, enAppAndroid } from './nativo';
  * `download` no hace nada, así que allí se abre la hoja de Compartir
  * (permite "Guardar en Archivos" o enviarlo por WhatsApp).
  */
-export function downloadBlob(content: BlobPart, filename: string, type: string) {
+export async function downloadBlob(content: BlobPart, filename: string, type: string): Promise<void> {
   const blob = new Blob([content], { type });
   // App de Android: su WebView no descarga; el menú de Android deja
-  // guardarlo (Archivos, Drive) o enviarlo.
+  // guardarlo (Archivos, Drive) o enviarlo. Si falla, el error sube a quien
+  // exporta, que ya sabe avisar.
   if (enAppAndroid) {
-    void compartirArchivo(blob, filename).catch((e) => console.error('No se pudo compartir el archivo', e));
+    await compartirArchivo(blob, filename);
     return;
   }
   const nav = navigator as Navigator & {
@@ -94,7 +95,7 @@ export async function exportExcel(
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Asistencia');
   const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
-  downloadBlob(
+  await downloadBlob(
     out,
     ensureExt(filename, 'xlsx'),
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -156,5 +157,5 @@ export async function exportPDF({
 
   // No se usa doc.save(): en el iPhone con la app instalada no descarga nada.
   // downloadBlob sí ofrece la hoja de Compartir como alternativa.
-  downloadBlob(doc.output('blob'), ensureExt(filename, 'pdf'), 'application/pdf');
+  await downloadBlob(doc.output('blob'), ensureExt(filename, 'pdf'), 'application/pdf');
 }

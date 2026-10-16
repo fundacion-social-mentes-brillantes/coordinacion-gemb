@@ -470,6 +470,8 @@ export function AttendancePage() {
         // Para entonces la imagen ya quedó preparada: el segundo toque abre
         // el menú de compartir al instante.
         toast('La imagen ya está lista: toca «Compartir» otra vez.', 'info');
+      } else if (outcome === 'error') {
+        toast('No se pudo compartir la imagen.', 'error');
       }
     } catch (e) {
       console.error(e);

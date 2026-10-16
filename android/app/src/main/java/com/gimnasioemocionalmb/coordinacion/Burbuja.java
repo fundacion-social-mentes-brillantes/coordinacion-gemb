@@ -1,6 +1,7 @@
 package com.gimnasioemocionalmb.coordinacion;
 
 import android.annotation.SuppressLint;
+import android.app.ActivityManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -41,6 +42,16 @@ final class Burbuja {
 
     private Burbuja() {}
 
+    /**
+     * ¿Este teléfono puede mostrar burbujas? Android 11+ y no «Android Go»
+     * (los de poca memoria nunca las muestran, aunque la versión sí las tenga).
+     */
+    static boolean soportada(Context ctx) {
+        if (Build.VERSION.SDK_INT < 30) return false;
+        ActivityManager am = ctx.getSystemService(ActivityManager.class);
+        return am == null || !am.isLowRamDevice();
+    }
+
     private static void prepararCanal(Context ctx) {
         if (Build.VERSION.SDK_INT < 26) return;
         NotificationManager nm = ctx.getSystemService(NotificationManager.class);
@@ -79,7 +90,13 @@ final class Burbuja {
         // La burbuja exige un PendingIntent modificable (Android le añade datos).
         int modificable = Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0;
         PendingIntent paraBurbuja = PendingIntent.getActivity(ctx, 1, pantalla, PendingIntent.FLAG_UPDATE_CURRENT | modificable);
-        PendingIntent paraAviso = PendingIntent.getActivity(ctx, 2, pantalla, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        // Sin burbuja, tocar el aviso abre la misma pantalla, pero siempre la
+        // misma: tocarlo varias veces no debe apilar pantallas (y memoria)
+        // mientras Meet está abierto.
+        Intent unaSola = new Intent(ctx, BurbujaActivity.class)
+            .setAction(Intent.ACTION_VIEW)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent paraAviso = PendingIntent.getActivity(ctx, 2, unaSola, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
         NotificationCompat.BubbleMetadata meta = new NotificationCompat.BubbleMetadata.Builder(paraBurbuja, icono)
             .setDesiredHeight(640)
@@ -120,8 +137,23 @@ final class Burbuja {
         JSONObject e = new JSONObject();
         try {
             NotificationManager nm = ctx.getSystemService(NotificationManager.class);
-            e.put("soportada", Build.VERSION.SDK_INT >= 30);
+            e.put("soportada", soportada(ctx));
+            // El interruptor general de burbujas de todo el teléfono (en Samsung,
+            // «Notificaciones flotantes»).
+            e.put("general", Build.VERSION.SDK_INT < 31 || nm.areBubblesEnabled());
             e.put("avisos", NotificationManagerCompat.from(ctx).areNotificationsEnabled());
+            // La categoría «Burbuja de la reunión» (o su conversación) apagada
+            // desde el aviso: entonces no sale ni burbuja ni aviso.
+            boolean canalApagado = false;
+            if (Build.VERSION.SDK_INT >= 26) {
+                NotificationChannel canal = nm.getNotificationChannel(CANAL);
+                canalApagado = canal != null && canal.getImportance() == NotificationManager.IMPORTANCE_NONE;
+            }
+            if (Build.VERSION.SDK_INT >= 30) {
+                NotificationChannel conversacion = nm.getNotificationChannel(CANAL, ATAJO);
+                canalApagado = canalApagado || (conversacion != null && conversacion.getImportance() == NotificationManager.IMPORTANCE_NONE);
+            }
+            e.put("canalApagado", canalApagado);
             String preferencia = "desconocida";
             if (Build.VERSION.SDK_INT >= 31) {
                 int p = nm.getBubblePreference();

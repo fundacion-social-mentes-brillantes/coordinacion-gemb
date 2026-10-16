@@ -176,23 +176,28 @@ function VisorCarpeta({ meta, onClose }: { meta: CarpetaMeta; onClose: () => voi
 
   const compartir = async () => {
     if (preparando) return;
-    let blob = pdf.current;
-    if (!blob) {
-      setPreparando(true);
-      try {
-        blob = await cargarPdf(meta);
-        pdf.current = blob;
-      } catch (e) {
-        console.error(e);
-        toast((e as Error).message || 'No se pudo preparar el PDF.', 'error');
-        return;
-      } finally {
-        setPreparando(false);
+    // La ruedita sigue hasta que el menú de compartir abre: un segundo toque
+    // mientras tanto no prepara el PDF dos veces.
+    setPreparando(true);
+    try {
+      let blob = pdf.current;
+      if (!blob) {
+        try {
+          blob = await cargarPdf(meta);
+          pdf.current = blob;
+        } catch (e) {
+          console.error(e);
+          toast((e as Error).message || 'No se pudo preparar el PDF.', 'error');
+          return;
+        }
       }
+      const r = await shareOrDownloadImage(blob, nombrePdf(meta), meta.nombre || 'Carpeta de coordinación');
+      if (r === 'downloaded') toast('PDF descargado.', 'success');
+      else if (r === 'blocked') toast('El PDF ya está listo: toca «Compartir» otra vez.', 'info');
+      else if (r === 'error') toast('No se pudo compartir el PDF.', 'error');
+    } finally {
+      setPreparando(false);
     }
-    const r = await shareOrDownloadImage(blob, nombrePdf(meta), meta.nombre || 'Carpeta de coordinación');
-    if (r === 'downloaded') toast('PDF descargado.', 'success');
-    else if (r === 'blocked') toast('El PDF ya está listo: toca «Compartir» otra vez.', 'info');
   };
 
   return (
