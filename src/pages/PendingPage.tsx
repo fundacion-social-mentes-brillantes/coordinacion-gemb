@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { Logo, Marca } from '../components/Logo';
 import { FullScreenSpinner } from '../components/Spinner';
 import { inicioDeLaVentana } from '../lib/nativo';
+import { EliminarCuenta } from '../components/EliminarCuenta';
 
 /**
  * Entró con Google pero todavía no tiene acceso. La solicitud ya le aparece
@@ -70,6 +71,7 @@ export function PendingPage() {
           >
             Entrar con otra cuenta
           </button>
+          <EliminarCuenta />
         </div>
       </div>
     </div>

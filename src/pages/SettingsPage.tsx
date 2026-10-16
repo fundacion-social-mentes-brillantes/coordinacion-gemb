@@ -9,6 +9,7 @@ import {
 } from '../components/InstallPrompt';
 import { ColoresEditor } from '../components/ColoresEditor';
 import { ChevronRightIcon, RobotIcon } from '../components/Icons';
+import { EliminarCuenta } from '../components/EliminarCuenta';
 
 /**
  * Ajustes: el cajón de lo que casi nunca se toca (cuenta, colores, conectar
@@ -69,6 +70,14 @@ export function SettingsPage() {
           </span>
           <ChevronRightIcon className="shrink-0 text-xl text-slate-400" />
         </Link>
+      </section>
+
+      {/* Privacidad y borrar la cuenta (lo exige Google Play). */}
+      <section className="space-y-1 text-center">
+        <Link to="/privacidad" className="btn-ghost min-h-[44px] w-full text-sm">
+          Política de privacidad
+        </Link>
+        <EliminarCuenta />
       </section>
     </div>
   );

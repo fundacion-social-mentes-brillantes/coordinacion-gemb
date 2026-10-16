@@ -8,6 +8,7 @@ import {
 } from 'react';
 import {
   GoogleAuthProvider,
+  deleteUser,
   onAuthStateChanged,
   signInWithCredential,
   signInWithPopup,
@@ -59,12 +60,33 @@ interface AuthContextValue {
   signIn: () => Promise<void>;
   /** false = la persona decidió no salir (había cambios sin enviar). */
   logout: () => Promise<boolean>;
+  /** Borra la cuenta de quien está dentro (ver `eliminarCuenta`). */
+  eliminarCuenta: () => Promise<ResultadoEliminar>;
   isSuperAdmin: boolean;
   isAdmin: boolean; // admin o super_admin
   isCoordinador: boolean; // coordinador, admin o super_admin (puede marcar)
   /** Puede cambiar el calendario: la administración o quien tenga el permiso. */
   puedeProgramar: boolean;
 }
+
+/**
+ * - `listo`: se borró; la app ya va camino a la pantalla de ingreso.
+ * - `entra-de-nuevo`: Google exige haber entrado hace poco para borrar una
+ *   cuenta. Hay que salir, volver a entrar y repetir.
+ * - `sin-senal`: no hay internet; no se borró nada.
+ * - `principal`: la cuenta principal no se borra desde la app.
+ */
+export type ResultadoEliminar = 'listo' | 'entra-de-nuevo' | 'sin-senal' | 'principal';
+
+/** Minutos que da Google después de entrar para poder borrar la cuenta (son 5). */
+const MINUTOS_PARA_BORRAR = 4;
+
+/**
+ * Marca "salí para volver a entrar y borrar mi cuenta". Al volver, la app
+ * lleva directo a Ajustes y abre la confirmación (ver `EliminarCuenta`).
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export const MARCA_ELIMINAR = 'gemb:eliminar-cuenta';
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
@@ -558,6 +580,63 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return true;
   }, []);
 
+  /**
+   * Borra la cuenta: el perfil en `users` y el acceso en Firebase. Lo exige
+   * Google Play (toda app con cuentas debe dejar borrarlas desde la app).
+   *
+   * Las asistencias que tomó y el calendario NO se borran: son registros de
+   * la fundación. Si vuelve a entrar algún día, llega como solicitud nueva.
+   *
+   * Google solo deja borrar una cuenta que entró hace menos de 5 minutos. Se
+   * comprueba ANTES de tocar nada: si el perfil se borrara y luego Google
+   * negara el resto, la persona quedaría dentro sin perfil.
+   */
+  const eliminarCuenta = useCallback(async (): Promise<ResultadoEliminar> => {
+    const u = auth.currentUser;
+    if (!u) return 'listo';
+    if ((u.email ?? '').toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) return 'principal';
+    const entro = Date.parse(u.metadata.lastSignInTime ?? '');
+    if (!entro || Date.now() - entro > MINUTOS_PARA_BORRAR * 60_000) return 'entra-de-nuevo';
+    if (!navigator.onLine) return 'sin-senal';
+
+    salidaPropia = true;
+    if (enAppAndroid) await cerrarBurbuja().catch(() => null);
+    // Sin señal, Firestore dejaría el borrado en cola sin avisar: se exige
+    // la confirmación del servidor.
+    const borrado = await Promise.race([
+      deleteDoc(doc(db, 'users', u.uid)).then(() => true),
+      new Promise<boolean>((r) => setTimeout(() => r(false), 10_000)),
+    ]);
+    if (!borrado) {
+      salidaPropia = false;
+      return 'sin-senal';
+    }
+    try {
+      await deleteUser(u);
+    } catch (e) {
+      const code = (e as { code?: string })?.code ?? '';
+      salidaPropia = false;
+      if (code.includes('requires-recent-login')) return 'entra-de-nuevo';
+      if (code.includes('network')) return 'sin-senal';
+      throw e;
+    }
+    try {
+      localStorage.removeItem(MARCA_ELIMINAR);
+    } catch {
+      /* nada */
+    }
+    clearRedirectFlag();
+    await olvidarCuentaDeGoogle();
+    try {
+      await terminate(db);
+      await clearIndexedDbPersistence(db);
+    } catch (e) {
+      console.warn('No se pudo borrar lo guardado en el teléfono', e);
+    }
+    window.location.replace('/login?cuenta=eliminada');
+    return 'listo';
+  }, []);
+
   const role = profile?.role;
   const isSuperAdmin = role === 'super_admin';
   const isAdmin = role === 'super_admin' || role === 'admin';
@@ -576,6 +655,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         stuck,
         signIn,
         logout,
+        eliminarCuenta,
         isSuperAdmin,
         isAdmin,
         isCoordinador,

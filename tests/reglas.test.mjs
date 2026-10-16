@@ -542,6 +542,15 @@ describe('Roles: Coordinador, Coordinador de coordinadores y Administrador', () 
     await assertFails(deleteDoc(doc(como.admin(), 'users/pendiente')));
     await assertSucceeds(deleteDoc(doc(como.super(), 'users/pendiente')));
   });
+
+  test('«Eliminar mi cuenta»: cada quien borra solo la suya, nunca la del principal', async () => {
+    await assertFails(deleteDoc(doc(como.coord(), 'users/coord2')));
+    await assertFails(deleteDoc(doc(como.anonimo(), 'users/coord')));
+    await assertFails(deleteDoc(doc(como.super(), 'users/super')));
+    await assertSucceeds(deleteDoc(doc(como.coord(), 'users/coord')));
+    await assertSucceeds(deleteDoc(doc(como.pendiente(), 'users/pendiente')));
+    await assertSucceeds(deleteDoc(doc(como.inactiva(), 'users/inactiva')));
+  });
 });
 
 describe('Yo la coordino: cada coordinadora se toma una fecha libre', () => {

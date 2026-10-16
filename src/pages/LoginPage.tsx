@@ -7,6 +7,7 @@ import { AuthStuck } from '../components/AuthStuck';
 import { isUpdateReady } from '../lib/swUpdate';
 import { useEffect, useState } from 'react';
 import { copiarTexto, inicioDeLaVentana } from '../lib/nativo';
+import { hayMarcaEliminar } from '../components/EliminarCuenta';
 
 /**
  * ¿La app se está abriendo DENTRO de otra app (Facebook, Instagram…)?
@@ -25,10 +26,13 @@ export function LoginPage() {
   // la reunión de hoy). Solo rutas internas de la app.
   const location = useLocation();
   const pedida = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
-  const destino =
-    pedida && pedida.startsWith('/') && !pedida.startsWith('//') && pedida !== '/login'
+  // Salió para volver a entrar y terminar de borrar su cuenta: va a Ajustes.
+  const destino = hayMarcaEliminar()
+    ? '/ajustes'
+    : pedida && pedida.startsWith('/') && !pedida.startsWith('//') && pedida !== '/login'
       ? pedida
       : inicioDeLaVentana();
+  const cuentaEliminada = new URLSearchParams(location.search).get('cuenta') === 'eliminada';
 
   // OJO: los hooks van ANTES de cualquier `return`. Si se ponen después,
   // React se rompe ("Rendered more hooks than during the previous render").
@@ -113,6 +117,12 @@ export function LoginPage() {
           Gimnasio Emocional Mentes Brillantes.
         </p>
 
+        {cuentaEliminada && (
+          <p className="mt-6 w-full rounded-2xl border border-emerald-300/40 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            Tu cuenta se eliminó. Gracias por acompañar.
+          </p>
+        )}
+
         {sinIngresoAqui ? (
           <AbrirEnSafari />
         ) : (
@@ -153,6 +163,9 @@ export function LoginPage() {
 
         <Link to="/calendario" className="btn-ghost mt-4 min-h-[44px] text-sm">
           Ver el calendario sin entrar →
+        </Link>
+        <Link to="/privacidad" className="mt-2 text-xs text-slate-500 underline-offset-2 hover:underline">
+          Política de privacidad
         </Link>
       </div>
     </div>

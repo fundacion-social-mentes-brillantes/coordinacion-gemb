@@ -157,8 +157,12 @@ service cloud.firestore {
           ))
       );
 
-      // Nadie puede borrar el documento del super admin.
-      allow delete: if isSuper() && isActive() && !isSuperEmail(resource.data.email);
+      // Nadie puede borrar el documento del super admin. Cada quien puede
+      // borrar el suyo («Eliminar mi cuenta», lo exige Google Play).
+      allow delete: if !isSuperEmail(resource.data.email) && (
+        (isSuper() && isActive())
+        || (isSignedIn() && request.auth.uid == userId)
+      );
     }
 
     // -------------------- invites (pre-autorizaciones) --------------------

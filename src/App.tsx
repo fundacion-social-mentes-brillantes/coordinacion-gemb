@@ -14,6 +14,12 @@ const LoginPage = lazy(() =>
 const PendingPage = lazy(() =>
   import('./pages/PendingPage').then((m) => ({ default: m.PendingPage })),
 );
+const PrivacidadPage = lazy(() =>
+  import('./pages/LegalPages').then((m) => ({ default: m.PrivacidadPage })),
+);
+const EliminarCuentaPage = lazy(() =>
+  import('./pages/LegalPages').then((m) => ({ default: m.EliminarCuentaPage })),
+);
 const SessionsPage = lazy(() =>
   import('./pages/SessionsPage').then((m) => ({ default: m.SessionsPage })),
 );
@@ -82,6 +88,9 @@ export default function App() {
         <Route path="/autorizar" element={<AuthorizePage />} />
         {/* El calendario público (antes era la app "Calendario"). */}
         <Route path="/calendario" element={<CalendarioPublicoPage />} />
+        {/* Lo que exige Google Play: se ven sin entrar. */}
+        <Route path="/privacidad" element={<PrivacidadPage />} />
+        <Route path="/eliminar-cuenta" element={<EliminarCuentaPage />} />
 
         {/* Requieren sesión con rol activo */}
         <Route element={<RequireAuth allow={[...ALL]} />}>
