@@ -29,6 +29,7 @@ import androidx.credentials.ClearCredentialStateRequest;
 import androidx.credentials.Credential;
 import androidx.credentials.CredentialManager;
 import androidx.credentials.CredentialManagerCallback;
+import androidx.credentials.CredentialOption;
 import androidx.credentials.CustomCredential;
 import androidx.credentials.GetCredentialRequest;
 import androidx.credentials.GetCredentialResponse;
@@ -40,6 +41,7 @@ import androidx.webkit.JavaScriptReplyProxy;
 import androidx.webkit.WebMessageCompat;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption;
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
 import java.io.File;
@@ -329,10 +331,28 @@ final class Puente implements WebViewCompat.WebMessageListener {
      * Firebase (signInWithCredential).
      */
     private void entrarConGoogle(JavaScriptReplyProxy r, String id) {
-        CredentialManager cm = CredentialManager.create(actividad);
-        GetSignInWithGoogleOption opcion = new GetSignInWithGoogleOption.Builder(actividad.getString(R.string.default_web_client_id)).build();
+        String cliente = actividad.getString(R.string.default_web_client_id);
+        // Primero el botón «Acceder con Google» (selector con todas las cuentas).
+        pedirCuenta(r, id, new GetSignInWithGoogleOption.Builder(cliente).build(), () ->
+            // Los servicios de Google viejos (sin actualizar) no entienden esa
+            // forma y responden «no hay cuentas»: se reintenta con la clásica,
+            // que también muestra todas las cuentas del teléfono.
+            pedirCuenta(
+                r,
+                id,
+                new GetGoogleIdOption.Builder().setServerClientId(cliente).setFilterByAuthorizedAccounts(false).setAutoSelectEnabled(false).build(),
+                null
+            )
+        );
+    }
+
+    /**
+     * Pide la cuenta con una opción. Si responde «no hay cuentas» y hay un
+     * plan B, lo intenta antes de concluir que el teléfono no tiene ninguna.
+     */
+    private void pedirCuenta(JavaScriptReplyProxy r, String id, CredentialOption opcion, @Nullable Runnable planB) {
         GetCredentialRequest pedido = new GetCredentialRequest.Builder().addCredentialOption(opcion).build();
-        cm.getCredentialAsync(
+        CredentialManager.create(actividad).getCredentialAsync(
             actividad,
             pedido,
             new CancellationSignal(),
@@ -368,6 +388,8 @@ final class Puente implements WebViewCompat.WebMessageListener {
                     boolean laPersonaCancelo = minus.contains("cancelled by the user") || minus.contains("canceled by the user");
                     if (e instanceof GetCredentialCancellationException && laPersonaCancelo) {
                         fallo(r, id, "cancelado", "Se canceló el ingreso.");
+                    } else if (e instanceof NoCredentialException && planB != null) {
+                        planB.run();
                     } else if (e instanceof NoCredentialException && !minus.startsWith("during get sign-in intent")) {
                         fallo(r, id, "sin-cuenta", "No hay cuentas de Google en este teléfono.");
                     } else {

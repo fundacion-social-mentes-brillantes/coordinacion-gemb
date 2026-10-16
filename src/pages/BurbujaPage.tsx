@@ -14,6 +14,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { Logo } from '../components/Logo';
 import { HomeIcon, ListCheckIcon, XIcon } from '../components/Icons';
 import type { Session } from '../types';
+import { escucharConReintentos } from '../lib/reintentar';
 
 // ---------------------------------------------------------------------------
 //  Lo que se ve dentro de la burbuja flotante de la app de Android: la
@@ -98,11 +99,12 @@ export function BurbujaPage() {
 
   useEffect(
     () =>
-      listenSessions(
-        (list) => {
-          setSessions(list);
-          setLoading(false);
-        },
+      escucharConReintentos(
+        (onError) =>
+          listenSessions((list) => {
+            setSessions(list);
+            setLoading(false);
+          }, onError),
         (e) => {
           console.error(e);
           toast('No se pudieron cargar las reuniones.', 'error');

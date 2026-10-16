@@ -323,8 +323,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // falla, la pantalla no se queda esperando para siempre.
       unsubProfile = onSnapshot(
         doc(db, 'users', u.uid),
+        // Para enterarse de cuándo el servidor confirma el perfil recién creado.
+        { includeMetadataChanges: true },
         (snap) => {
           if (!alive) return;
+          // Cuenta nueva: el perfil existe en el teléfono antes que en el
+          // servidor. Si las pantallas arrancaran ya, sus lecturas llegarían al
+          // servidor sin perfil y las reglas las rechazarían (y no se
+          // reintentan): la carpeta, los enlaces y las reuniones salían vacíos
+          // hasta recargar. Se espera la confirmación del servidor.
+          if (snap.exists() && snap.metadata.hasPendingWrites) {
+            setProfile(null);
+            setLoading(false);
+            return;
+          }
           if (snap.exists()) {
             setProfile({
               uid: u.uid,

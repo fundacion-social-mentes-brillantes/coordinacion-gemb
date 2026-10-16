@@ -51,6 +51,7 @@ import {
   ListCheckIcon,
   TrashIcon,
 } from '../components/Icons';
+import { escucharConReintentos } from '../lib/reintentar';
 
 const fechaDePlan = (p: FechaPlan) => capitalizeFirst(fmtDateLong(p.fecha));
 
@@ -104,11 +105,12 @@ export function SessionsPage() {
   const [yaExiste, setYaExiste] = useState<Session | null>(null);
 
   useEffect(() => {
-    const unsub = listenSessions(
-      (list) => {
-        setSessions(list);
-        setLoading(false);
-      },
+    const unsub = escucharConReintentos(
+      (onError) =>
+        listenSessions((list) => {
+          setSessions(list);
+          setLoading(false);
+        }, onError),
       (e) => {
         console.error(e);
         toast('No se pudieron cargar las sesiones.', 'error');

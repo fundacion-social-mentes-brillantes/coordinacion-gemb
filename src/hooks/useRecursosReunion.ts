@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { listenEnlaces } from '../services/programacion';
 import { listenCarpeta, type CarpetaMeta } from '../services/carpeta';
 import type { EnlacesMeet } from '../lib/programacion';
+import { escucharConReintentos } from '../lib/reintentar';
 
 /**
  * Lo que la coordinadora necesita a mano en la reunión: los enlaces de Meet
@@ -14,8 +15,14 @@ export function useRecursosReunion(activo = true) {
 
   useEffect(() => {
     if (!activo) return;
-    const u1 = listenEnlaces(setMeet, (e) => console.warn('No se pudieron leer los enlaces', e));
-    const u2 = listenCarpeta(setCarpeta, (e) => console.warn('No se pudo leer la carpeta', e));
+    const u1 = escucharConReintentos(
+      (onError) => listenEnlaces(setMeet, onError),
+      (e) => console.warn('No se pudieron leer los enlaces', e),
+    );
+    const u2 = escucharConReintentos(
+      (onError) => listenCarpeta(setCarpeta, onError),
+      (e) => console.warn('No se pudo leer la carpeta', e),
+    );
     return () => {
       u1();
       u2();
