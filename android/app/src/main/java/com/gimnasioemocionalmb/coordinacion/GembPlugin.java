@@ -1,10 +1,6 @@
 package com.gimnasioemocionalmb.coordinacion;
 
-import android.util.Log;
-import android.webkit.RenderProcessGoneDetail;
-import android.webkit.WebView;
 import com.getcapacitor.Plugin;
-import com.getcapacitor.WebViewListener;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 /**
@@ -27,19 +23,5 @@ public class GembPlugin extends Plugin {
     @Override
     public void load() {
         puente = new Puente(getActivity(), getBridge().getWebView(), false);
-        // Si el proceso del WebView muere (poca memoria, sobre todo con la
-        // burbuja y Meet abiertos), Android cerraría toda la app y con ella la
-        // burbuja. En vez de eso se vuelve a armar la pantalla.
-        getBridge()
-            .addWebViewListener(
-                new WebViewListener() {
-                    @Override
-                    public boolean onRenderProcessGone(WebView webView, RenderProcessGoneDetail detail) {
-                        Log.w("GembPuente", "Se cayó el WebView de la app; se vuelve a abrir");
-                        getActivity().recreate();
-                        return true;
-                    }
-                }
-            );
     }
 }
