@@ -30,7 +30,7 @@ export const URL_APP_ANDROID = 'https://play.google.com/apps/internaltest/470145
 const NO_OFRECER_APP = 'gemb:no-ofrecer-app-android';
 
 /** Se ofrece bajar la app solo cuando ya hay una versión publicada y probada. */
-const APP_PUBLICADA = false;
+const APP_PUBLICADA = true;
 
 /** En la app: el botón para sacar la burbuja. En Android con Chrome: bajar la app. */
 export function BotonBurbuja() {
