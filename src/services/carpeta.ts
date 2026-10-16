@@ -18,9 +18,11 @@ import { db } from '../lib/firebase';
 //  partes:
 //    carpeta/actual              versión, nombre, cuántas páginas y partes
 //    carpeta/actual/paginas/{n}  cada página como imagen (para leerla)
-//    carpeta/actual/pdf/{n}      el PDF partido en trozos (para compartirlo)
 //  La sube la administración con la llave de servicio
-//  (scripts/subir-carpeta.py); desde la app solo se lee.
+//  (scripts/subir-carpeta.py); desde la app solo se lee, y solo las páginas:
+//  desde el 16 oct 2026 no se descarga ni se comparte (lo pidió la
+//  coordinación). Las partes viejas del PDF (carpeta/actual/pdf) ya no las
+//  puede leer nadie desde la app.
 // ---------------------------------------------------------------------------
 
 export interface CarpetaMeta {
@@ -28,6 +30,7 @@ export interface CarpetaMeta {
   version: string;
   nombre: string;
   paginas: number;
+  /** Partes del PDF guardadas (desde el 16 oct 2026, 0: ya no se sube). */
   partesPdf: number;
   actualizada?: Timestamp;
 }
@@ -52,7 +55,7 @@ type Parte = QueryDocumentSnapshot;
  * teléfono (sin gastar datos ni depender de la señal) y, si falta algo o es
  * de una versión vieja, del servidor.
  */
-async function partes(sub: 'paginas' | 'pdf', meta: CarpetaMeta, total: number): Promise<string[]> {
+async function partes(sub: 'paginas', meta: CarpetaMeta, total: number): Promise<string[]> {
   const col = collection(db, 'carpeta', 'actual', sub);
   const completas = (docs: Parte[]) =>
     docs.length === total && docs.every((d) => d.get('version') === meta.version);
@@ -81,16 +84,3 @@ export async function cargarPaginas(meta: CarpetaMeta): Promise<string[]> {
   const pags = await partes('paginas', meta, meta.paginas);
   return pags.map((b64) => `data:image/jpeg;base64,${b64}`);
 }
-
-/** El PDF completo, para compartirlo (WhatsApp) o descargarlo. */
-export async function cargarPdf(meta: CarpetaMeta): Promise<Blob> {
-  const b64 = (await partes('pdf', meta, meta.partesPdf)).join('');
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new Blob([bytes], { type: 'application/pdf' });
-}
-
-/** "Carpeta de coordinación.pdf" (sin caracteres raros para WhatsApp). */
-export const nombrePdf = (meta: CarpetaMeta) =>
-  `${(meta.nombre || 'Carpeta de coordinación').replace(/[\\/:*?"<>|]+/g, ' ').trim()}.pdf`;

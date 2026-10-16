@@ -4,9 +4,12 @@ La carpeta no va a un archivo público: se guarda en Firestore, donde las
 reglas solo dejan leerla a quien tiene acceso a la app. Firestore no admite
 documentos de más de 1 MB, así que se guarda por partes:
 
-  carpeta/actual              versión, nombre, cuántas páginas y partes
+  carpeta/actual              versión, nombre, cuántas páginas
   carpeta/actual/paginas/{n}  cada página como imagen JPEG (para leerla)
-  carpeta/actual/pdf/{n}      el PDF original por trozos (para compartirlo)
+
+El PDF original ya NO se sube (16 oct 2026): la carpeta es solo para leer en la
+app, sin descargarla ni compartirla. Si quedan partes viejas en
+carpeta/actual/pdf, este script las borra.
 
 Las partes se escriben primero y la ficha `actual` al final: así nadie ve una
 versión nueva a medio subir.
@@ -38,7 +41,6 @@ import pymupdf
 
 ANCHO_PX = 1100  # se lee bien en el celular y pesa poco
 CALIDAD_JPEG = 74
-TROZO_PDF = 900_000  # caracteres de base64 por documento (límite: 1 MB)
 MAX_LOTE = 7_000_000  # bytes por envío (Firestore admite hasta 10 MB)
 
 
@@ -102,10 +104,9 @@ def main():
         pix = p.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False)
         jpg = pix.tobytes('jpeg', jpg_quality=CALIDAD_JPEG)
         paginas.append(base64.b64encode(jpg).decode('ascii'))
-    pdf_b64 = base64.b64encode(bruto).decode('ascii')
-    trozos = [pdf_b64[i:i + TROZO_PDF] for i in range(0, len(pdf_b64), TROZO_PDF)]
+    trozos = []  # el PDF ya no se sube: solo se borran sus partes viejas
 
-    mayor = max(len(x) for x in paginas + trozos)
+    mayor = max(len(x) for x in paginas)
     if mayor > 1_000_000:
         raise SystemExit(f'Una parte quedó de {mayor} bytes: baja ANCHO_PX o CALIDAD_JPEG.')
 
@@ -156,8 +157,7 @@ def main():
         'writes': [{'update': {'name': f'{nombre_doc}/carpeta/actual', 'fields': campos(meta)}}]
     })
     kb = sum(len(x) for x in paginas) // 1024
-    print(f'Listo: versión {version}, {len(paginas)} páginas ({kb} KB en imágenes) y '
-          f'{len(trozos)} partes de PDF ({len(bruto) // 1024} KB).')
+    print(f'Listo: versión {version}, {len(paginas)} páginas ({kb} KB en imágenes).')
 
 
 if __name__ == '__main__':

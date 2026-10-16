@@ -16,6 +16,7 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.util.Base64;
 import android.util.Log;
+import android.view.WindowManager;
 import android.webkit.WebView;
 import androidx.activity.ComponentActivity;
 import androidx.activity.result.ActivityResultLauncher;
@@ -136,6 +137,10 @@ final class Puente implements WebViewCompat.WebMessageListener {
                     copiar(m.optString("texto"));
                     listo(respuesta, id, null);
                     break;
+                case "pantallaSegura":
+                    pantallaSegura(m.optBoolean("activa"));
+                    listo(respuesta, id, null);
+                    break;
                 case "compartir":
                     compartir(m, respuesta, id);
                     break;
@@ -239,7 +244,16 @@ final class Puente implements WebViewCompat.WebMessageListener {
         cm.setPrimaryClip(ClipData.newPlainText("Coordinación GEMB", texto));
     }
 
-    /** Comparte un archivo (la lista, el PDF de la carpeta, un Excel…) con el menú de Android. */
+    /**
+     * Con la carpeta abierta: Android no deja tomar pantallazos ni grabar la
+     * pantalla (salen en negro) y la vista previa de apps recientes va en blanco.
+     */
+    private void pantallaSegura(boolean activa) {
+        if (activa) actividad.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        else actividad.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+    }
+
+    /** Comparte un archivo (la lista, un Excel…) con el menú de Android. */
     private void compartir(JSONObject m, JavaScriptReplyProxy r, String id) {
         String datos = m.optString("datos");
         String mime = m.optString("mime", "application/octet-stream");

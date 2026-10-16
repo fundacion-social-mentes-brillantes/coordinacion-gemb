@@ -102,7 +102,7 @@ export function PrivacidadPage() {
       <Bloque titulo="Para qué los usamos">
         <p>
           Solo para organizar las reuniones: tomar asistencia, saber quién coordina cada fecha,
-          compartir la carpeta y los enlaces de Meet, y llevar las cifras internas de la
+          consultar la carpeta y compartir los enlaces de Meet, y llevar las cifras internas de la
           fundación. No vendemos ni cedemos datos a nadie.
         </p>
       </Bloque>

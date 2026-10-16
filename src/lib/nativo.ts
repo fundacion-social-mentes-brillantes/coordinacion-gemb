@@ -164,6 +164,17 @@ export async function compartirArchivo(blob: Blob, nombre: string, texto = ''): 
   await pedir('compartir', { datos, nombre, mime: blob.type || 'application/octet-stream', texto }, 60_000);
 }
 
+/**
+ * Pantalla segura: mientras está abierta la carpeta, Android no deja tomar
+ * pantallazos ni grabar la pantalla (salen en negro). Lo pidió la
+ * coordinación: la carpeta no debe salir de la app. Las versiones de la app
+ * anteriores a la 1.0.3 no conocen la acción y se ignora el error.
+ */
+export function pantallaSegura(activa: boolean) {
+  if (!puente) return;
+  pedir('pantallaSegura', { activa }).catch(() => null);
+}
+
 // --------------------------------------------------------- entrar con Google
 
 /**

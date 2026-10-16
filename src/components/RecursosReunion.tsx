@@ -1,14 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useToast } from '../context/ToastContext';
 import { useRecursosReunion } from '../hooks/useRecursosReunion';
-import { cargarPaginas, cargarPdf, nombrePdf, type CarpetaMeta } from '../services/carpeta';
-import { shareOrDownloadImage } from '../lib/shareImage';
+import { cargarPaginas, type CarpetaMeta } from '../services/carpeta';
 import { SESSION_TYPES, SESSION_TYPE_LABELS } from '../lib/constants';
 import type { SessionType } from '../types';
 import { Modal } from './Modal';
 import { Spinner } from './Spinner';
-import { CopyIcon, FolderIcon, ShareIcon, VideoIcon } from './Icons';
-import { copiarTexto } from '../lib/nativo';
+import { CopyIcon, FolderIcon, VideoIcon } from './Icons';
+import { copiarTexto, pantallaSegura } from '../lib/nativo';
 
 // ---------------------------------------------------------------------------
 //  Lo que la coordinadora necesita a mano en la reunión, sin buscarlo en
@@ -163,14 +162,22 @@ export function RecursosReunionCompacto({ tipo }: { tipo: SessionType }) {
 /**
  * La carpeta, página por página, dentro de la app: se lee igual en iPhone,
  * Android y computador (un PDF no siempre se abre dentro del navegador del
- * celular). Se puede acercar con dos dedos y compartir el PDF al grupo.
+ * celular). Se puede acercar con dos dedos.
+ *
+ * Solo para leer (lo pidió la coordinación, 16 oct 2026): no se descarga ni se
+ * comparte. Las páginas van debajo de una capa que no deja «guardar imagen»
+ * al dejarlas presionadas ni con el clic derecho, no se imprimen, y en la app
+ * de Android los pantallazos salen en negro. En iPhone y en el computador
+ * ninguna página web puede impedir un pantallazo.
  */
 function VisorCarpeta({ meta, onClose }: { meta: CarpetaMeta; onClose: () => void }) {
-  const { toast } = useToast();
   const [paginas, setPaginas] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [preparando, setPreparando] = useState(false);
-  const pdf = useRef<Blob | null>(null);
+
+  useEffect(() => {
+    pantallaSegura(true);
+    return () => pantallaSegura(false);
+  }, []);
 
   useEffect(() => {
     let vivo = true;
@@ -185,41 +192,11 @@ function VisorCarpeta({ meta, onClose }: { meta: CarpetaMeta; onClose: () => voi
     };
   }, [meta]);
 
-  const compartir = async () => {
-    if (preparando) return;
-    // La ruedita sigue hasta que el menú de compartir abre: un segundo toque
-    // mientras tanto no prepara el PDF dos veces.
-    setPreparando(true);
-    try {
-      let blob = pdf.current;
-      if (!blob) {
-        try {
-          blob = await cargarPdf(meta);
-          pdf.current = blob;
-        } catch (e) {
-          console.error(e);
-          toast((e as Error).message || 'No se pudo preparar el PDF.', 'error');
-          return;
-        }
-      }
-      const r = await shareOrDownloadImage(blob, nombrePdf(meta), meta.nombre || 'Carpeta de coordinación');
-      if (r === 'downloaded') toast('PDF descargado.', 'success');
-      else if (r === 'blocked') toast('El PDF ya está listo: toca «Compartir» otra vez.', 'info');
-      else if (r === 'error') toast('No se pudo compartir el PDF.', 'error');
-    } finally {
-      setPreparando(false);
-    }
-  };
-
   return (
     <Modal open onClose={onClose} title={meta.nombre || 'Carpeta de coordinación'} completa>
-      <div className="mb-3 flex items-center gap-2">
-        <button type="button" onClick={compartir} className="boton-oro">
-          {preparando ? <Spinner className="h-4 w-4 text-[#261a00]" /> : <ShareIcon className="text-lg" />}
-          Compartir PDF
-        </button>
-        <span className="text-xs text-slate-500">Acerca con dos dedos para leer mejor.</span>
-      </div>
+      <p className="mb-3 text-xs text-slate-500">
+        Solo para leer en la app. Acerca con dos dedos para leer mejor.
+      </p>
       {error ? (
         <p className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">{error}</p>
       ) : !paginas ? (
@@ -228,16 +205,21 @@ function VisorCarpeta({ meta, onClose }: { meta: CarpetaMeta; onClose: () => voi
           Abriendo la carpeta…
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="carpeta-protegida space-y-3" onContextMenu={(e) => e.preventDefault()}>
           {paginas.map((src, i) => (
-            <img
-              key={i}
-              src={src}
-              alt={`Página ${i + 1} de ${paginas.length}`}
-              className="w-full rounded-2xl bg-[#fff] shadow-[0_10px_30px_-18px_rgba(0,0,0,0.9)]"
-              decoding="async"
-              loading={i < 2 ? 'eager' : 'lazy'}
-            />
+            <div key={i} className="relative overflow-hidden rounded-2xl shadow-[0_10px_30px_-18px_rgba(0,0,0,0.9)]">
+              <img
+                src={src}
+                alt={`Página ${i + 1} de ${paginas.length}`}
+                className="block w-full bg-[#fff]"
+                draggable={false}
+                decoding="async"
+                loading={i < 2 ? 'eager' : 'lazy'}
+              />
+              {/* Encima de la imagen: al dejarla presionada el teléfono no
+                  ofrece «Guardar imagen», porque lo que se toca es esta capa. */}
+              <div className="absolute inset-0" aria-hidden />
+            </div>
           ))}
         </div>
       )}

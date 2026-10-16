@@ -708,12 +708,17 @@ describe('Recursos de la reunión: enlaces de Meet y carpeta', () => {
   });
 
   test('la carpeta solo la ve el equipo, y nadie la cambia desde la app', async () => {
-    for (const ruta of ['carpeta/actual', 'carpeta/actual/paginas/0', 'carpeta/actual/pdf/0']) {
+    for (const ruta of ['carpeta/actual', 'carpeta/actual/paginas/0']) {
       await assertFails(getDoc(doc(como.anonimo(), ruta)), `anónimo lee ${ruta}`);
       await assertFails(getDoc(doc(como.pendiente(), ruta)), `pendiente lee ${ruta}`);
       await assertSucceeds(getDoc(doc(como.coord(), ruta)), `coordinadora lee ${ruta}`);
     }
     await assertSucceeds(getDocs(collection(como.coord(), 'carpeta/actual/paginas')));
+    // Solo para leer en la app: el PDF (para descargarlo) no lo lee nadie.
+    for (const quien of ['coord', 'admin', 'super']) {
+      await assertFails(getDoc(doc(como[quien](), 'carpeta/actual/pdf/0')), `${quien} lee el PDF`);
+      await assertFails(getDocs(collection(como[quien](), 'carpeta/actual/pdf')), `${quien} lista el PDF`);
+    }
     await assertFails(setDoc(doc(como.super(), 'carpeta/actual'), { version: 'v2' }));
     await assertFails(setDoc(doc(como.admin(), 'carpeta/actual/paginas/1'), { n: 1, version: 'v1', datos: 'x' }));
     await assertFails(deleteDoc(doc(como.admin(), 'carpeta/actual/pdf/0')));

@@ -791,3 +791,17 @@
     transform: translateY(12px) scale(0.97);
   }
 }
+
+/* La carpeta es solo para leer en la app (16 oct 2026): sin seleccionar,
+   sin menú de «Guardar imagen» al dejarla presionada en el iPhone, y fuera
+   de la impresión. */
+.carpeta-protegida {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+@media print {
+  .carpeta-protegida {
+    display: none !important;
+  }
+}

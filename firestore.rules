@@ -423,12 +423,14 @@ service cloud.firestore {
     }
 
     // ==================== Carpeta de coordinación ====================
-    // El guion de cada reunión (páginas como imágenes y el PDF por partes).
-    // Solo lo ve el equipo; se sube con la llave de servicio, no desde la app.
+    // El guion de cada reunión (páginas como imágenes). Solo lo ve el equipo;
+    // se sube con la llave de servicio, no desde la app. Es solo para leer en
+    // la app (16 oct 2026): el PDF por partes que quedó de antes no lo lee
+    // nadie, para que no se pueda descargar.
     match /carpeta/{docId} {
       allow read: if canRead();
       allow write: if false;
-      match /{parte=**} {
+      match /paginas/{n} {
         allow read: if canRead();
         allow write: if false;
       }
