@@ -14,8 +14,16 @@ import { copiarTexto } from '../lib/nativo';
 //  Lo que la coordinadora necesita a mano en la reunión, sin buscarlo en
 //  otra pestaña (lo pidió la coordinación): la carpeta de coordinación y el
 //  enlace de Meet de cada reunión, para entrar o copiarlo al grupo de
-//  WhatsApp. Va en dorado para distinguirse del azul de la asistencia.
+//  WhatsApp. Cada cosa es su propio botón de vidrio con su color, para
+//  encontrarla de un vistazo: la carpeta en dorado y cada reunión con el
+//  suyo (ver `.tile-recurso` en index.css).
 // ---------------------------------------------------------------------------
+
+/** El color de cada reunión (lo eligió la coordinación). */
+const TONO: Record<SessionType, string> = {
+  entrega_pasos: 'tono-rojo',
+  reduccion_ego: 'tono-azul',
+};
 
 /** Copia un enlace; si el navegador no deja, lo muestra para copiarlo a mano. */
 async function copiarEnlace(url: string): Promise<boolean> {
@@ -41,36 +49,39 @@ export function RecursosReunion({ primero }: { primero?: SessionType }) {
   const tipos = primero ? [primero, ...SESSION_TYPES.filter((t) => t !== primero)] : SESSION_TYPES;
 
   return (
-    <section className="recursos p-4" aria-label="Para la reunión">
-      <p className="px-1 text-[11px] font-bold uppercase tracking-[0.16em] text-[#f5c451]">
+    <section className="recursos p-3" aria-label="Para la reunión">
+      <p className="px-2 pb-2 pt-1 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">
         Para la reunión
       </p>
-      <ul className="mt-1 divide-y divide-[rgba(245,196,81,0.16)]">
-        <li className="flex items-center gap-3 py-3">
-          <span className="icono-recurso" aria-hidden>
-            <FolderIcon />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold text-slate-900">Carpeta de coordinación</p>
-            <p className="truncate text-xs text-slate-500">
-              {carpeta ? 'El guion de la reunión · se abre sin señal' : 'Todavía no está cargada'}
-            </p>
-          </div>
+      <ul className="space-y-2.5">
+        <li>
+          {/* La carpeta entera es el botón. */}
           <button
             type="button"
-            className="boton-oro"
+            className="tile-recurso tono-oro flex items-center gap-3"
             disabled={!carpeta}
             onClick={() => setVerCarpeta(true)}
           >
-            Abrir
+            <span className="icono-tile" aria-hidden>
+              <FolderIcon />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold text-slate-900">Carpeta de coordinación</span>
+              <span className="block truncate text-xs text-slate-500">
+                {carpeta ? 'El guion de la reunión · se abre sin señal' : 'Todavía no está cargada'}
+              </span>
+            </span>
+            <span className="boton-tile" aria-hidden>
+              Abrir
+            </span>
           </button>
         </li>
         {tipos.map((t) => {
           const url = meet[t];
           return (
-            <li key={t} className="py-3">
+            <li key={t} className={`tile-recurso ${TONO[t]}`}>
               <div className="flex items-center gap-3">
-                <span className="icono-recurso" aria-hidden>
+                <span className="icono-tile" aria-hidden>
                   <VideoIcon />
                 </span>
                 <div className="min-w-0 flex-1">
@@ -84,7 +95,7 @@ export function RecursosReunion({ primero }: { primero?: SessionType }) {
                 <div className="mt-2.5 flex gap-2 pl-[52px]">
                   <button
                     type="button"
-                    className="boton-oro-suave flex-1 whitespace-nowrap px-3"
+                    className="boton-tile-suave flex-1 whitespace-nowrap px-3"
                     aria-label={`Copiar el enlace de ${SESSION_TYPE_LABELS[t]}`}
                     onClick={async () => {
                       if (await copiarEnlace(url)) toast('Enlace copiado: pégalo en el grupo.', 'success');
@@ -92,7 +103,7 @@ export function RecursosReunion({ primero }: { primero?: SessionType }) {
                   >
                     <CopyIcon className="text-lg" /> Copiar
                   </button>
-                  <a href={url} target="_blank" rel="noopener noreferrer" className="boton-oro flex-1 whitespace-nowrap">
+                  <a href={url} target="_blank" rel="noopener noreferrer" className="boton-tile flex-1 whitespace-nowrap">
                     <VideoIcon className="text-lg" /> Entrar
                   </a>
                 </div>
@@ -117,7 +128,7 @@ export function RecursosReunionCompacto({ tipo }: { tipo: SessionType }) {
   return (
     <div className="flex items-center gap-2">
       {carpeta && (
-        <button type="button" className="boton-oro-suave flex-1 px-3" onClick={() => setVerCarpeta(true)}>
+        <button type="button" className="boton-tile-suave tono-oro flex-1 px-3" onClick={() => setVerCarpeta(true)}>
           <FolderIcon className="text-lg" /> Carpeta
         </button>
       )}
@@ -127,13 +138,13 @@ export function RecursosReunionCompacto({ tipo }: { tipo: SessionType }) {
             href={url}
             target="_blank"
             rel="noopener noreferrer"
-            className="boton-oro-suave flex-1 px-3"
+            className={`boton-tile-suave ${TONO[tipo]} flex-1 px-3`}
           >
             <VideoIcon className="text-lg" /> Entrar a Meet
           </a>
           <button
             type="button"
-            className="boton-oro-suave"
+            className={`boton-tile-suave ${TONO[tipo]}`}
             aria-label="Copiar el enlace de Meet"
             title="Copiar el enlace de Meet"
             onClick={async () => {

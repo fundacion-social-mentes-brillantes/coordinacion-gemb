@@ -373,22 +373,106 @@
     min-height: 56px;
   }
   /* ------------------------------------------------------------------
-     Lo de la reunión (carpeta y enlaces de Meet): en dorado, para que se
-     distinga del azul de la asistencia de un vistazo.
+     Lo de la reunión (carpeta y enlaces de Meet): un recuadro de vidrio y,
+     dentro, cada cosa como su propio botón de vidrio con su color y más
+     luz, para que se vea de un vistazo (lo pidió la coordinación el 15 oct
+     2026): la carpeta en dorado, Entrega de Pasos en rojo y Reducción del
+     Ego en azul intenso.
      ------------------------------------------------------------------ */
   .recursos {
     position: relative;
     border-radius: 28px;
     background:
-      linear-gradient(160deg, rgba(245, 196, 81, 0.17) 0%, rgba(245, 196, 81, 0.05) 55%, rgba(245, 196, 81, 0.1) 100%),
+      linear-gradient(160deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.02) 55%, rgba(255, 255, 255, 0.06) 100%),
       rgb(var(--c-white) / 0.45);
-    border: 1px solid rgba(245, 196, 81, 0.32);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     box-shadow:
-      inset 0 1px 0.5px rgba(255, 236, 190, 0.35),
-      0 20px 44px -26px rgba(0, 0, 0, 0.95),
-      0 0 30px -18px rgba(245, 196, 81, 0.55);
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.28),
+      0 20px 44px -26px rgba(0, 0, 0, 0.95);
     backdrop-filter: blur(26px) saturate(170%);
     -webkit-backdrop-filter: blur(26px) saturate(170%);
+  }
+  /* El color de cada cosa. Solo pone las variables: el aspecto lo dan
+     .tile-recurso y los botones de abajo. */
+  .tono-oro {
+    --t: 255 204 64;
+    --t-claro: #fff0b8;
+    --t-oscuro: #e3a91f;
+    --t-texto: #2a1d00;
+    --t-letra: #ffdc78;
+    /* Sobre el fondo oscuro el dorado tiende a café: va más encendido. */
+    --t-fuerza: 0.48;
+  }
+  .tono-rojo {
+    --t: 255 76 66;
+    --t-claro: #ff9f97;
+    --t-oscuro: #dc2f25;
+    --t-texto: #ffffff;
+    --t-letra: #ff8e86;
+  }
+  .tono-azul {
+    --t: 66 122 255;
+    --t-claro: #9bb8ff;
+    --t-oscuro: #1f4fe8;
+    --t-texto: #ffffff;
+    --t-letra: #9db9ff;
+  }
+  /* Cada cosa: un botón de vidrio teñido de su color, con brillo arriba y
+     un halo alrededor para que resalte. */
+  .tile-recurso {
+    position: relative;
+    display: block;
+    width: 100%;
+    border-radius: 22px;
+    padding: 12px;
+    text-align: left;
+    background:
+      linear-gradient(
+        155deg,
+        rgb(var(--t) / var(--t-fuerza, 0.36)) 0%,
+        rgb(var(--t) / 0.12) 55%,
+        rgb(var(--t) / 0.22) 100%
+      ),
+      rgba(255, 255, 255, 0.05);
+    border: 1px solid rgb(var(--t) / 0.6);
+    box-shadow:
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.5),
+      inset 0 0 22px -8px rgb(var(--t) / 0.5),
+      0 0 34px -12px rgb(var(--t) / 0.85),
+      0 14px 30px -20px rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(20px) saturate(185%) brightness(1.1);
+    -webkit-backdrop-filter: blur(20px) saturate(185%) brightness(1.1);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  button.tile-recurso:active {
+    transform: scale(0.98);
+  }
+  .tile-recurso:disabled {
+    @apply pointer-events-none opacity-50;
+  }
+  .icono-tile {
+    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-xl;
+    color: var(--t-letra);
+    background: rgb(var(--t) / 0.22);
+    box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.4);
+  }
+  .boton-tile {
+    @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full px-4 text-[15px] font-semibold transition active:scale-95;
+    min-height: 40px;
+    color: var(--t-texto);
+    background: linear-gradient(180deg, var(--t-claro) 0%, rgb(var(--t)) 55%, var(--t-oscuro) 100%);
+    box-shadow:
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.65),
+      0 8px 20px -10px rgb(var(--t) / 0.95);
+  }
+  .boton-tile-suave {
+    @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full text-[15px] font-semibold transition active:scale-95;
+    min-height: 40px;
+    min-width: 40px;
+    color: var(--t-letra);
+    background: rgb(var(--t) / 0.16);
+    border: 1px solid rgb(var(--t) / 0.45);
+    box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.3);
   }
   .icono-burbuja {
     @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-xl;
