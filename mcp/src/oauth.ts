@@ -7,14 +7,15 @@
 //
 //  Cómo encaja:
 //
-//    Claude  →  /api/oauth/authorize   (empieza; exige PKCE)
+//    Claude o ChatGPT  →  /api/oauth/authorize   (empieza; exige PKCE)
 //            →  la app: /autorizar     (la persona entra con Google)
 //            →  /api/oauth/aprobar     (la app entrega la llave por POST y
 //                                       recibe un código CIFRADO, ver sobre.ts)
-//            →  vuelve a Claude con ese código
+//            →  vuelve al asistente con ese código
 //            →  /api/oauth/token       (el código se cambia por el permiso,
 //                                       también cifrado)
-//            →  ya puede consultar
+//            →  ya puede consultar (y con el refresh_token pide otro
+//               permiso sin volver a entrar)
 //
 //  La llave de sesión de Firebase nunca aparece en una dirección: antes iba
 //  dentro del código, en claro, y quedaba en el historial del navegador.
@@ -109,7 +110,7 @@ export function metadatosServidor() {
     token_endpoint: `${RAIZ}/api/oauth/token`,
     registration_endpoint: `${RAIZ}/api/oauth/register`,
     response_types_supported: ['code'],
-    grant_types_supported: ['authorization_code'],
+    grant_types_supported: ['authorization_code', 'refresh_token'],
     code_challenge_methods_supported: ['S256'],
     token_endpoint_auth_methods_supported: ['none'],
     scopes_supported: ['coordinacion'],
@@ -162,7 +163,7 @@ export function registrarCliente(datos: Record<string, unknown>) {
     client_id_issued_at: Math.floor(Date.now() / 1000),
     redirect_uris: redirects,
     token_endpoint_auth_method: 'none',
-    grant_types: ['authorization_code'],
+    grant_types: ['authorization_code', 'refresh_token'],
     response_types: ['code'],
     client_name: typeof datos.client_name === 'string' ? datos.client_name : 'Cliente MCP',
   };
@@ -180,7 +181,7 @@ interface Codigo {
   exp: number;
 }
 
-/** Lo que guarda Claude como permiso (cifrado). */
+/** Lo que guarda el asistente como permiso (cifrado). */
 export interface Acceso {
   llave: string;
   /** Cuándo se conectó (ms). */
@@ -204,7 +205,7 @@ async function sha256Base64Url(texto: string): Promise<string> {
  * Paso 1: mandar a la persona a entrar con Google.
  *
  * No se pide nada aquí: se reenvía a una pantalla de la propia app, que ya
- * sabe hacer el ingreso con Google, y que al terminar devuelve a Claude.
+ * sabe hacer el ingreso con Google, y que al terminar devuelve al asistente.
  */
 export function irAAutorizar(req: Peticion): { destino: string } | { error: string } {
   const p = parametros(req);
@@ -233,7 +234,7 @@ export function irAAutorizar(req: Peticion): { destino: string } | { error: stri
 /**
  * Paso 2: la persona tocó "Permitir" en /autorizar. La app manda aquí (por
  * POST, nunca en la dirección) su llave de sesión, y recibe la dirección de
- * vuelta a Claude con un código cifrado que solo este servidor sabe abrir.
+ * vuelta al asistente con un código cifrado que solo este servidor sabe abrir.
  */
 export function aprobar(datos: Record<string, unknown>): { destino: string } | { error: string } {
   const llave = typeof datos.llave === 'string' ? datos.llave.trim() : '';
@@ -246,7 +247,7 @@ export function aprobar(datos: Record<string, unknown>): { destino: string } | {
     return { error: 'Esa dirección de retorno no está autorizada.' };
   }
   if (!RETO_VALIDO.test(reto)) {
-    return { error: 'Falta información de seguridad (PKCE). Vuelve a intentarlo desde Claude.' };
+    return { error: 'Falta información de seguridad (PKCE). Vuelve a intentarlo desde Claude o ChatGPT.' };
   }
 
   const codigo: Codigo = { llave, reto, destino: redirect, exp: Date.now() + 5 * 60_000 };
@@ -256,14 +257,53 @@ export function aprobar(datos: Record<string, unknown>): { destino: string } | {
   return { destino: destino.toString() };
 }
 
-/** Paso 3: cambiar el código por el permiso de consulta. */
+/**
+ * El permiso de consulta (una hora, anunciada) y el de renovarlo. Los dos
+ * llevan la misma llave de la persona, cifrados y de tipos distintos: uno no
+ * sirve como el otro.
+ *
+ * El de renovar (refresh_token) es para ChatGPT: cuando pasa la hora pide uno
+ * nuevo solo, en vez de hacer que la persona vuelva a tocar "Conectar". Se
+ * corta igual que todo lo demás: desactivando la cuenta en la app (las
+ * consultas fallan) o cambiando MCP_SECRETO (deja de abrirse).
+ */
+function permisos(llave: string, desde: number) {
+  const acceso: Acceso = { llave, desde };
+  return {
+    access_token: sellar('acceso', acceso),
+    token_type: 'Bearer',
+    // Por dentro, la sesión se renueva sola en cada consulta. Se anuncia
+    // una hora, como siempre, para que el cliente no la cachee de más.
+    expires_in: 3600,
+    refresh_token: sellar('renovar', acceso),
+    scope: 'coordinacion',
+  };
+}
+
+/** Pedir un permiso nuevo con el de renovar, sin volver a entrar con Google. */
+function renovar(datos: Record<string, string>): { ok: object } | { error: string; detalle: string } {
+  if (!datos.refresh_token) {
+    return { error: 'invalid_request', detalle: 'Falta refresh_token.' };
+  }
+  const r = abrir<Acceso>('renovar', datos.refresh_token);
+  if (!r || typeof r.llave !== 'string' || r.llave.length < 20) {
+    return { error: 'invalid_grant', detalle: 'El permiso para renovar no es válido. Vuelve a conectar.' };
+  }
+  return { ok: permisos(r.llave, typeof r.desde === 'number' ? r.desde : Date.now()) };
+}
+
+/** Paso 3: cambiar el código por el permiso de consulta (o renovarlo). */
 export async function canjearCodigo(
   req: Peticion,
 ): Promise<{ ok: object } | { error: string; detalle: string }> {
   const datos = { ...Object.fromEntries(parametros(req)), ...cuerpo(req) };
 
+  if (datos.grant_type === 'refresh_token') return renovar(datos);
   if (datos.grant_type !== 'authorization_code') {
-    return { error: 'unsupported_grant_type', detalle: 'Solo se admite authorization_code.' };
+    return {
+      error: 'unsupported_grant_type',
+      detalle: 'Solo se admiten authorization_code y refresh_token.',
+    };
   }
   if (!datos.code) {
     return { error: 'invalid_request', detalle: 'Falta el código.' };
@@ -289,17 +329,7 @@ export async function canjearCodigo(
     return { error: 'invalid_grant', detalle: 'El code_verifier no coincide.' };
   }
 
-  const acceso: Acceso = { llave: codigo.llave, desde: Date.now() };
-  return {
-    ok: {
-      access_token: sellar('acceso', acceso),
-      token_type: 'Bearer',
-      // Por dentro, la sesión se renueva sola en cada consulta. Se anuncia
-      // una hora, como siempre, para que el cliente no la cachee de más.
-      expires_in: 3600,
-      scope: 'coordinacion',
-    },
-  };
+  return { ok: permisos(codigo.llave, Date.now()) };
 }
 
 /* ------------------------------------------------------------------ */

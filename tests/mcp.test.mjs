@@ -168,29 +168,60 @@ async function oauthLlamar(ruta, { method = 'POST', body, query = '' } = {}) {
 }
 
 const VUELTA = 'https://claude.ai/api/mcp/auth_callback';
+// Las dos vueltas de ChatGPT (developers.openai.com/apps-sdk/build/auth).
+const VUELTA_CHATGPT = 'https://chatgpt.com/connector_platform_oauth_redirect';
+const VUELTA_CHATGPT_ID = 'https://chatgpt.com/connector/oauth/cb_9Xy-8z';
 
-/** Aprobar en /autorizar y canjear el código, con PKCE. Devuelve el permiso. */
-async function conectar(llave, { verificadorAlCanjear } = {}) {
+/**
+ * Aprobar en /autorizar y canjear el código, con PKCE. Devuelve el permiso
+ * (o, con `completo`, toda la respuesta de /token).
+ */
+async function conectar(llave, { verificadorAlCanjear, vuelta = VUELTA, completo = false } = {}) {
   const verificador = randomBytes(32).toString('base64url');
   const reto = createHash('sha256').update(verificador).digest('base64url');
   const a = await oauthLlamar('aprobar', {
-    body: { llave, redirect_uri: VUELTA, state: 'abc', code_challenge: reto },
+    body: { llave, redirect_uri: vuelta, state: 'abc', code_challenge: reto },
   });
   assert.equal(a.estado, 200, JSON.stringify(a.cuerpo));
-  const vuelta = new URL(a.cuerpo.destino);
-  assert.equal(vuelta.searchParams.get('state'), 'abc');
-  const code = vuelta.searchParams.get('code');
+  const regreso = new URL(a.cuerpo.destino);
+  assert.equal(regreso.searchParams.get('state'), 'abc');
+  const code = regreso.searchParams.get('code');
   const t = await oauthLlamar('token', {
     body: {
       grant_type: 'authorization_code',
       code,
       code_verifier: verificadorAlCanjear ?? verificador,
-      redirect_uri: VUELTA,
+      redirect_uri: vuelta,
     },
   });
   if (verificadorAlCanjear) return t;
   assert.equal(t.estado, 200, JSON.stringify(t.cuerpo));
-  return t.cuerpo.access_token;
+  return completo ? t.cuerpo : t.cuerpo.access_token;
+}
+
+/** Los nombres de las herramientas que se le ofrecen a ese permiso. */
+async function herramientas(token) {
+  let cuerpo;
+  const res = {
+    status() {
+      return res;
+    },
+    setHeader() {},
+    json(b) {
+      cuerpo = b;
+    },
+    end() {},
+  };
+  await handler(
+    {
+      method: 'POST',
+      url: '/api/mcp',
+      headers: { authorization: `Bearer ${token}` },
+      body: { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
+    },
+    res,
+  );
+  return (cuerpo?.result?.tools ?? []).map((h) => h.name);
 }
 
 const idDe = (texto) => {
@@ -605,4 +636,94 @@ test('crear reunión sin modalidad ni coordinadora: las toma del Calendario', as
   assert.equal(p.error, false, p.texto);
   assert.match(p.texto, /Modalidad: Presencial/);
   assert.match(p.texto, /Coordina: Marcela Sánchez/);
+});
+
+/* ------------------------------------------------------------------ */
+/* ChatGPT (desde el 16 oct 2026)                                      */
+/* ------------------------------------------------------------------ */
+
+test('ChatGPT: sus dos vueltas sí; las parecidas no, y Claude sigue igual', async () => {
+  const reto = createHash('sha256').update('c'.repeat(43)).digest('base64url');
+  const empezar = (vuelta) =>
+    oauthLlamar('authorize', {
+      method: 'GET',
+      query:
+        `&redirect_uri=${encodeURIComponent(vuelta)}&state=1` +
+        `&code_challenge=${reto}&code_challenge_method=S256` +
+        `&resource=${encodeURIComponent('https://coordinacion-gemb.vercel.app/api/mcp')}`,
+    });
+  const si = [
+    VUELTA_CHATGPT,
+    VUELTA_CHATGPT_ID,
+    VUELTA,
+    'https://claude.com/api/mcp/auth_callback',
+    'http://localhost:6274/oauth/callback',
+  ];
+  const no = [
+    'https://chatgpt.com/share/abc123', // una conversación compartida: la publica cualquiera
+    'https://chatgpt.com/g/g-abc/un-gpt',
+    'https://chatgpt.com/connector_platform_oauth_redirect/otra-cosa',
+    'https://chatgpt.com/connector/oauth/',
+    'https://chatgpt.com/connector/oauth/a/../../share/x',
+    'https://chatgpt.com/connector/oauth/a%2F..%2Fshare',
+    'https://chatgpt.com.malo.com/connector_platform_oauth_redirect',
+    'https://malochatgpt.com/connector_platform_oauth_redirect',
+    'https://www.chatgpt.com/connector_platform_oauth_redirect',
+    'https://chatgpt.com:8443/connector_platform_oauth_redirect',
+    'http://chatgpt.com/connector_platform_oauth_redirect',
+    'https://chat.openai.com/connector_platform_oauth_redirect',
+    'https://claude.ai.malo.com/api/mcp/auth_callback',
+  ];
+  for (const v of si) assert.equal((await empezar(v)).estado, 302, `debería dejar: ${v}`);
+  for (const v of no) {
+    assert.equal((await empezar(v)).estado, 400, `no debería dejar: ${v}`);
+    // La segunda puerta (al tocar "Permitir") tampoco entrega nada.
+    const a = await oauthLlamar('aprobar', {
+      body: { llave: admin.llave, redirect_uri: v, code_challenge: reto },
+    });
+    assert.equal(a.estado, 400, `aprobar no debería dejar: ${v}`);
+  }
+});
+
+test('ChatGPT de punta a punta: la coordinadora solo lee y la administración escribe', async () => {
+  const tCoord = await conectar(coord.llave, { vuelta: VUELTA_CHATGPT_ID });
+  const tAdmin = await conectar(admin.llave, { vuelta: VUELTA_CHATGPT });
+
+  const yo = await llamar(tCoord, 'quien_soy');
+  assert.equal(yo.estado, 200);
+  assert.equal(yo.error, false, yo.texto);
+
+  const deCoord = await herramientas(tCoord);
+  assert.ok(deCoord.includes('reuniones'), deCoord.join(', '));
+  assert.ok(!deCoord.some((n) => n.startsWith('preparar_')), `a la coordinadora: ${deCoord.join(', ')}`);
+  const p = await llamar(tCoord, 'preparar_marcar_presente', { reunion_id: SESION, persona_id: 'm_ana' });
+  assert.equal(p.error, true);
+  assert.match(p.texto, /solo para administración/);
+
+  const deAdmin = await herramientas(tAdmin);
+  assert.ok(deAdmin.includes('preparar_marcar_presente'), deAdmin.join(', '));
+});
+
+test('el permiso se renueva sin volver a entrar (refresh_token), y solo con el de renovar', async () => {
+  const meta = await oauthLlamar('as-metadata', { method: 'GET' });
+  assert.ok(meta.cuerpo.grant_types_supported.includes('refresh_token'));
+
+  const t = await conectar(admin.llave, { vuelta: VUELTA_CHATGPT, completo: true });
+  assert.ok(t.refresh_token, JSON.stringify(t));
+  assert.notEqual(t.refresh_token, t.access_token);
+
+  const r = await oauthLlamar('token', { body: { grant_type: 'refresh_token', refresh_token: t.refresh_token } });
+  assert.equal(r.estado, 200, JSON.stringify(r.cuerpo));
+  assert.ok(r.cuerpo.refresh_token);
+  const yo = await llamar(r.cuerpo.access_token, 'quien_soy');
+  assert.equal(yo.error, false, yo.texto);
+
+  // Un permiso de consulta no sirve para renovar, ni algo inventado.
+  for (const falso of [t.access_token, 'g1.inventado', 'x'.repeat(60)]) {
+    const m = await oauthLlamar('token', { body: { grant_type: 'refresh_token', refresh_token: falso } });
+    assert.equal(m.estado, 400);
+    assert.equal(m.cuerpo.error, 'invalid_grant');
+  }
+  // Ni el de renovar sirve como permiso de consulta.
+  assert.equal((await llamar(t.refresh_token, 'quien_soy')).estado, 401);
 });

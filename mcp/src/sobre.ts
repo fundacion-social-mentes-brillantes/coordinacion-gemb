@@ -18,7 +18,8 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 
 const PREFIJO = 'g1.';
 
-export type TipoSobre = 'codigo' | 'acceso';
+/** `renovar`: el permiso largo con el que el asistente pide uno nuevo (refresh_token). */
+export type TipoSobre = 'codigo' | 'acceso' | 'renovar';
 
 export class SinSecretoError extends Error {}
 
@@ -27,7 +28,7 @@ function clave(): Buffer {
   if (s.length < 32) {
     throw new SinSecretoError(
       'Falta configurar MCP_SECRETO en el servidor (Vercel → Settings → ' +
-        'Environment Variables). Sin ella no se puede conectar Claude.',
+        'Environment Variables). Sin ella no se puede conectar Claude ni ChatGPT.',
     );
   }
   return createHash('sha256').update(s).digest();

@@ -2286,7 +2286,7 @@ async function canjear(llave) {
     const codigo = d.error?.message ?? `HTTP ${r.status}`;
     if (codigo.startsWith("TOKEN_EXPIRED") || codigo.startsWith("USER_NOT_FOUND") || codigo.startsWith("INVALID_REFRESH_TOKEN") || codigo.startsWith("INVALID_GRANT_TYPE") || codigo.startsWith("MISSING_REFRESH_TOKEN")) {
       throw new LlaveInvalidaError(
-        "El acceso ya no sirve (caduc\xF3 o lo revocaron). Vuelve a conectar el conector desde Claude y entra otra vez con Google."
+        "El acceso ya no sirve (caduc\xF3 o lo revocaron). Vuelve a conectar el conector desde Claude o ChatGPT y entra otra vez con Google."
       );
     }
     if (codigo.startsWith("USER_DISABLED")) {
@@ -2415,7 +2415,7 @@ function limpiarVencidos() {
 async function abrirSesion(llave) {
   if (!llave || llave.length < 20) {
     throw new ConfigError(
-      'Falta entrar con Google. En Claude, toca "Conectar" en este conector y entra con tu cuenta de siempre.'
+      'Falta entrar con Google. En Claude o ChatGPT, toca "Conectar" en este conector y entra con tu cuenta de siempre.'
     );
   }
   limpiarVencidos();
@@ -5146,7 +5146,7 @@ var HERRAMIENTAS = [
   {
     name: "quien_soy",
     title: "Con qu\xE9 cuenta estoy consultando",
-    description: "Dice con qu\xE9 cuenta y con qu\xE9 rol est\xE1 conectado Claude, y por tanto qu\xE9 puede y qu\xE9 no puede consultar. \xDAtil para comprobar que la llave es la correcta.",
+    description: "Dice con qu\xE9 cuenta y con qu\xE9 rol est\xE1 conectado el asistente, y por tanto qu\xE9 puede y qu\xE9 no puede consultar. \xDAtil para comprobar que la llave es la correcta.",
     alcance: "todos",
     inputSchema: objeto(),
     async ejecutar(c) {
@@ -5474,7 +5474,7 @@ function clave() {
   const s = process.env.MCP_SECRETO ?? "";
   if (s.length < 32) {
     throw new SinSecretoError(
-      "Falta configurar MCP_SECRETO en el servidor (Vercel \u2192 Settings \u2192 Environment Variables). Sin ella no se puede conectar Claude."
+      "Falta configurar MCP_SECRETO en el servidor (Vercel \u2192 Settings \u2192 Environment Variables). Sin ella no se puede conectar Claude ni ChatGPT."
     );
   }
   return createHash2("sha256").update(s).digest();
@@ -5542,7 +5542,7 @@ async function atender(p, obtener) {
           {
             name: "quien_soy",
             title: "Revisar la conexi\xF3n",
-            description: "Dice con qu\xE9 cuenta est\xE1 conectado Claude y qu\xE9 puede hacer. Ahora mismo la conexi\xF3n no est\xE1 completa; ll\xE1mala para saber por qu\xE9.",
+            description: "Dice con qu\xE9 cuenta est\xE1 conectado el asistente y qu\xE9 puede hacer. Ahora mismo la conexi\xF3n no est\xE1 completa; ll\xE1mala para saber por qu\xE9.",
             inputSchema: { type: "object", properties: {}, required: [] }
           }
         ]
@@ -5628,7 +5628,7 @@ async function handler(req, res) {
       nombre: "coordinacion-gemb",
       mcp: VERSION_PROTOCOLO,
       estado: "en pie",
-      como_conectar: 'Agrega esta direcci\xF3n como conector en Claude con autenticaci\xF3n "siempre requerida" y entra con Google cuando te lo pida. Los pasos, en la app: Ajustes (rueda dentada) \u2192 "Conectar con Claude".'
+      como_conectar: 'Agrega esta direcci\xF3n como conector en Claude (autenticaci\xF3n "siempre requerida") o en ChatGPT (servidor MCP personalizado, con OAuth) y entra con Google cuando te lo pida. Los pasos, en la app: Ajustes (rueda dentada) \u2192 "Conectar con Claude o ChatGPT".'
     });
     return;
   }
@@ -5641,7 +5641,7 @@ async function handler(req, res) {
       fallo(
         null,
         -32600,
-        'La llave ya no se acepta en la direcci\xF3n (?k=\u2026): quedaba guardada en los registros. Quita ese pedazo de la direcci\xF3n del conector y entra con Google desde Claude ("Conectar").'
+        'La llave ya no se acepta en la direcci\xF3n (?k=\u2026): quedaba guardada en los registros. Quita ese pedazo de la direcci\xF3n del conector y entra con Google desde Claude o ChatGPT ("Conectar").'
       )
     );
     return;
@@ -5665,7 +5665,7 @@ async function handler(req, res) {
         fallo(
           null,
           -32001,
-          "Esta conexi\xF3n ya no vale (se renov\xF3 la seguridad). Vuelve a conectar el conector desde Claude y entra con Google."
+          "Esta conexi\xF3n ya no vale (se renov\xF3 la seguridad). Vuelve a conectar el conector desde Claude o ChatGPT y entra con Google."
         )
       );
       return;
@@ -5678,7 +5678,7 @@ async function handler(req, res) {
   if (!llave && !soloSaludo) {
     res.setHeader("WWW-Authenticate", DONDE_ENTRAR);
     res.status(401).json(
-      fallo(null, -32001, "Hay que entrar con Google. Conecta el conector desde Claude.")
+      fallo(null, -32001, "Hay que entrar con Google. Conecta el conector desde Claude o ChatGPT.")
     );
     return;
   }

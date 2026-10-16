@@ -63,7 +63,7 @@ export const HERRAMIENTAS: Herramienta[] = [
     name: 'quien_soy',
     title: 'Con qué cuenta estoy consultando',
     description:
-      'Dice con qué cuenta y con qué rol está conectado Claude, y por tanto qué ' +
+      'Dice con qué cuenta y con qué rol está conectado el asistente, y por tanto qué ' +
       'puede y qué no puede consultar. Útil para comprobar que la llave es la ' +
       'correcta.',
     alcance: 'todos',

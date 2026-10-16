@@ -4,15 +4,16 @@ import { Logo } from '../components/Logo';
 import { Spinner } from '../components/Spinner';
 import { AuthStuck } from '../components/AuthStuck';
 import { ROLE_LABELS } from '../lib/constants';
-import { redirectPermitido } from '../lib/oauthRedirect';
+import { asistenteDe, redirectPermitido } from '../lib/oauthRedirect';
 
 /**
- * "Entrar con Google" para conectar Claude.
+ * "Entrar con Google" para conectar Claude o ChatGPT.
  *
- * Aquí llega la persona cuando toca "Conectar" en Claude. Si no tiene sesión,
- * entra con Google como siempre; si ya la tiene, solo confirma. Al aceptar, se
- * devuelve a Claude un código de un solo uso con el permiso de ESA persona:
- * su rol —y por tanto qué podrá hacer Claude— viene dado, sin configurar nada.
+ * Aquí llega la persona cuando toca "Conectar" en su asistente. Si no tiene
+ * sesión, entra con Google como siempre; si ya la tiene, solo confirma. Al
+ * aceptar, se le devuelve un código de un solo uso con el permiso de ESA
+ * persona: su rol —y por tanto qué podrá hacer el asistente— viene dado, sin
+ * configurar nada.
  */
 export function AuthorizePage() {
   // `authError` es donde `signIn` deja sus avisos (ventana cerrada, iPhone con
@@ -27,7 +28,7 @@ export function AuthorizePage() {
     const pedido = p.get('redirect_uri') ?? '';
     // Aquí se puede llegar por un enlace suelto, sin pasar por /api/oauth. Por
     // eso se vuelve a comprobar: al aceptar se entrega la llave de sesión de
-    // quien acepta, y solo puede acabar en Claude.
+    // quien acepta, y solo puede acabar en Claude o en ChatGPT.
     const permitido = pedido !== '' && redirectPermitido(pedido);
     return {
       redirectUri: permitido ? pedido : '',
@@ -37,9 +38,13 @@ export function AuthorizePage() {
     };
   }, []);
 
+  // A quién se le da el permiso, para decirlo con su nombre.
+  const asistente = redirectUri ? asistenteDe(redirectUri) : 'tu asistente';
+  const titulo = redirectUri ? `Conectar con ${asistente}` : 'Conectar tu asistente';
+
   useEffect(() => {
-    document.title = 'Conectar con Claude';
-  }, []);
+    document.title = titulo;
+  }, [titulo]);
 
   const esAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
 
@@ -48,13 +53,13 @@ export function AuthorizePage() {
     // `redirectUri` ya viene filtrado, pero se comprueba otra vez justo antes
     // de entregar: es la última línea antes de que la llave salga de aquí.
     if (!llave || !redirectUri || !redirectPermitido(redirectUri) || !reto) {
-      setError('Falta información para completar la conexión. Vuelve a intentarlo desde Claude.');
+      setError(`Falta información para completar la conexión. Vuelve a intentarlo desde ${asistente}.`);
       return;
     }
     setEnviando(true);
     setError('');
     // La llave va al servidor por POST, nunca en la dirección: él devuelve la
-    // vuelta a Claude con un código CIFRADO que dura 5 minutos y solo sirve
+    // vuelta al asistente con un código CIFRADO que dura 5 minutos y solo sirve
     // con el reto PKCE de esta conversación. Antes el código era la llave en
     // claro y quedaba en el historial del navegador.
     try {
@@ -82,9 +87,9 @@ export function AuthorizePage() {
     }
   };
 
-  // "Cancelar" le responde a Claude que no se dio permiso, como pide OAuth.
+  // "Cancelar" le responde al asistente que no se dio permiso, como pide OAuth.
   // Antes era "volver atrás", y como esta pantalla suele abrirse en una
-  // pestaña nueva, el botón no hacía nada y Claude se quedaba esperando.
+  // pestaña nueva, el botón no hacía nada y el asistente se quedaba esperando.
   const cancelar = () => {
     if (!redirectUri || !redirectPermitido(redirectUri)) {
       window.location.replace('/');
@@ -96,19 +101,22 @@ export function AuthorizePage() {
     window.location.replace(destino.toString());
   };
 
-  // Alguien intentó que esto devolviera la llave a un sitio que no es Claude.
+  // Alguien intentó que esto devolviera la llave a un sitio que no es Claude
+  // ni ChatGPT.
   // Se corta aquí y se dice claro, porque quien lo ve probablemente llegó por
   // un enlace que le pasaron.
   if (destinoAjeno) {
     return (
-      <Marco>
+      <Marco titulo={titulo}>
         <p className="text-sm font-semibold text-red-700">Conexión bloqueada</p>
         <p className="mt-2 text-sm text-slate-600">
-          Este enlace pedía devolver tu acceso a un sitio que no es Claude, así
-          que no se ha entregado nada. Si te lo mandó alguien, bórralo.
+          Este enlace pedía devolver tu acceso a un sitio que no es Claude ni
+          ChatGPT, así que no se ha entregado nada. Si te lo mandó alguien,
+          bórralo.
         </p>
         <p className="mt-2 text-sm text-slate-600">
-          Para conectar de verdad, hazlo desde Claude: él abre esta pantalla solo.
+          Para conectar de verdad, hazlo desde Claude o ChatGPT: ellos abren esta
+          pantalla solos.
         </p>
       </Marco>
     );
@@ -116,10 +124,10 @@ export function AuthorizePage() {
 
   if (!redirectUri) {
     return (
-      <Marco>
+      <Marco titulo={titulo}>
         <p className="text-sm text-slate-600">
-          Esta pantalla se abre desde Claude, al conectar el conector de
-          Coordinación. No hace falta entrar aquí por tu cuenta.
+          Esta pantalla se abre desde Claude o ChatGPT, al conectar el conector
+          de Coordinación. No hace falta entrar aquí por tu cuenta.
         </p>
       </Marco>
     );
@@ -127,7 +135,7 @@ export function AuthorizePage() {
 
   if (loading) {
     return (
-      <Marco>
+      <Marco titulo={titulo}>
         <div className="flex justify-center py-6">
           <Spinner className="h-8 w-8" />
         </div>
@@ -138,10 +146,10 @@ export function AuthorizePage() {
   // Sin sesión: entrar con Google, como en el resto de la app.
   if (!user) {
     return (
-      <Marco>
+      <Marco titulo={titulo}>
         <p className="text-sm text-slate-600">
-          Entra con tu cuenta de Google —la misma de siempre— para que Claude
-          pueda consultar la asistencia en tu nombre.
+          Entra con tu cuenta de Google —la misma de siempre— para que{' '}
+          {asistente} pueda consultar la asistencia en tu nombre.
         </p>
         <button
           type="button"
@@ -165,7 +173,7 @@ export function AuthorizePage() {
   // aquí salía "tu cuenta no está aprobada" durante ese instante.
   if (!profile) {
     return (
-      <Marco>
+      <Marco titulo={titulo}>
         <div className="flex flex-col items-center gap-3 py-6">
           <Spinner className="h-8 w-8" />
           <p className="text-sm text-slate-500">Preparando tu cuenta…</p>
@@ -176,7 +184,7 @@ export function AuthorizePage() {
 
   if (profile.role === 'pending' || !profile.active) {
     return (
-      <Marco>
+      <Marco titulo={titulo}>
         <p className="text-sm text-slate-600">
           Tu cuenta <strong>{user.email}</strong> todavía no está aprobada en la
           app, así que no se puede conectar. Pídele a la administración que te
@@ -187,16 +195,16 @@ export function AuthorizePage() {
           onClick={cancelar}
           className="btn-secondary mt-4 min-h-[48px] w-full"
         >
-          Volver a Claude
+          Volver a {asistente}
         </button>
       </Marco>
     );
   }
 
   return (
-    <Marco>
+    <Marco titulo={titulo}>
       <p className="text-sm text-slate-600">
-        Vas a permitir que Claude consulte la asistencia como:
+        Vas a permitir que {asistente} consulte la asistencia como:
       </p>
       <p className="mt-2 font-semibold text-primary-800">{profile.displayName || user.email}</p>
       <p className="text-xs text-slate-500">{ROLE_LABELS[profile.role]}</p>
@@ -245,21 +253,20 @@ export function AuthorizePage() {
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
       <p className="mt-4 text-[11px] leading-snug text-slate-400">
-        Puedes retirarle el permiso cuando quieras quitando el conector en
-        Claude (Ajustes → Conectores). Salir de esta app no lo desconecta. Si
-        desactivan tu cuenta en Usuarios, Claude deja de poder usarla al
-        instante.
+        Puedes retirarle el permiso cuando quieras quitando el conector en{' '}
+        {asistente}. Salir de esta app no lo desconecta. Si desactivan tu
+        cuenta en Usuarios, {asistente} deja de poder usarla al instante.
       </p>
     </Marco>
   );
 }
 
-function Marco({ children }: { children: React.ReactNode }) {
+function Marco({ children, titulo }: { children: React.ReactNode; titulo: string }) {
   return (
     <div className="safe-top safe-bottom flex min-h-[100dvh] items-center justify-center p-4">
       <div className="card w-full max-w-sm p-6 text-center">
         <Logo className="mx-auto h-14 w-14" />
-        <h1 className="mt-3 text-lg font-bold text-primary-900">Conectar con Claude</h1>
+        <h1 className="mt-3 text-lg font-bold text-primary-900">{titulo}</h1>
         <div className="mt-3">{children}</div>
       </div>
     </div>

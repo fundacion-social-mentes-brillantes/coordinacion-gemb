@@ -107,7 +107,7 @@ async function atender(p: Peticion, obtener: () => Promise<Cliente>): Promise<ob
             name: 'quien_soy',
             title: 'Revisar la conexión',
             description:
-              'Dice con qué cuenta está conectado Claude y qué puede hacer. ' +
+              'Dice con qué cuenta está conectado el asistente y qué puede hacer. ' +
               'Ahora mismo la conexión no está completa; llámala para saber por qué.',
             inputSchema: { type: 'object', properties: {}, required: [] },
           },
@@ -242,9 +242,10 @@ export default async function handler(req: Req, res: Res) {
       mcp: VERSION_PROTOCOLO,
       estado: 'en pie',
       como_conectar:
-        'Agrega esta dirección como conector en Claude con autenticación ' +
-        '"siempre requerida" y entra con Google cuando te lo pida. Los pasos, ' +
-        'en la app: Ajustes (rueda dentada) → "Conectar con Claude".',
+        'Agrega esta dirección como conector en Claude (autenticación "siempre ' +
+        'requerida") o en ChatGPT (servidor MCP personalizado, con OAuth) y entra ' +
+        'con Google cuando te lo pida. Los pasos, en la app: Ajustes (rueda ' +
+        'dentada) → "Conectar con Claude o ChatGPT".',
     });
     return;
   }
@@ -260,7 +261,7 @@ export default async function handler(req: Req, res: Res) {
         -32600,
         'La llave ya no se acepta en la dirección (?k=…): quedaba guardada en los ' +
           'registros. Quita ese pedazo de la dirección del conector y entra con Google ' +
-          'desde Claude ("Conectar").',
+          'desde Claude o ChatGPT ("Conectar").',
       ),
     );
     return;
@@ -291,7 +292,7 @@ export default async function handler(req: Req, res: Res) {
             null,
             -32001,
             'Esta conexión ya no vale (se renovó la seguridad). Vuelve a conectar el ' +
-              'conector desde Claude y entra con Google.',
+              'conector desde Claude o ChatGPT y entra con Google.',
           ),
         );
       return;
@@ -311,7 +312,7 @@ export default async function handler(req: Req, res: Res) {
   if (!llave && !soloSaludo) {
     res.setHeader('WWW-Authenticate', DONDE_ENTRAR);
     res.status(401).json(
-      fallo(null, -32001, 'Hay que entrar con Google. Conecta el conector desde Claude.'),
+      fallo(null, -32001, 'Hay que entrar con Google. Conecta el conector desde Claude o ChatGPT.'),
     );
     return;
   }

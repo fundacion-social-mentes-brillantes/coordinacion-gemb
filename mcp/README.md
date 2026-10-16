@@ -1,11 +1,12 @@
 # MCP de Coordinación GEMB
 
-Para poder preguntarle a Claude por la asistencia sin entrar a la app:
+Para poder preguntarle a Claude **o a ChatGPT** por la asistencia sin entrar a la app:
 *"¿cuántas personas están haciendo Pasos últimamente?"*, *"¿quién dejó de
 venir?"*, *"¿cuántas fueron el jueves?"*.
 
-**Cada persona lo conecta a su propio Claude con su propia llave.** Lo que
-Claude puede hacer depende de quién es esa persona en la app.
+**Cada persona lo conecta a su propio Claude o ChatGPT, entrando con su
+propio Google.** Lo que el asistente puede hacer depende de quién es esa
+persona en la app, sea Claude o ChatGPT.
 
 ---
 
@@ -24,7 +25,8 @@ Claude puede hacer depende de quién es esa persona en la app.
 | **Aprobar personas nuevas** | ❌ | ✅ |
 
 > ### Coordinación: **SOLO LECTURA**
-> Puede consultar, pero **no puede cambiar absolutamente nada** desde Claude.
+> Puede consultar, pero **no puede cambiar absolutamente nada** desde Claude
+> ni desde ChatGPT.
 > Ni marcar asistencia, ni crear reuniones, ni tocar fichas. Eso se sigue
 > haciendo en la app, como siempre.
 >
@@ -70,7 +72,10 @@ una fundación no debería poder pasar por un malentendido en una frase.
 ## Puesta en marcha (cada persona, una vez, ~30 segundos)
 
 **No hay llaves que copiar ni nada que configurar.** Se entra con Google, como
-en cualquier otro conector.
+en cualquier otro conector. Los mismos pasos están en la app: Ajustes → *Conectar
+con Claude o ChatGPT*.
+
+### En Claude
 
 1. En [claude.ai](https://claude.ai) → **Personalizar** → **Conectores** →
    *Agregar* → *Agregar conector personalizado*
@@ -89,14 +94,42 @@ automáticamente.
 Funciona en **cualquier Claude**: el del celular, el de la web, el de
 escritorio, Claude Code. Es la misma dirección para todo el mundo.
 
+### En ChatGPT (desde el 16 oct 2026)
+
+Hace falta un plan de ChatGPT que permita **servidores MCP personalizados**
+(modo desarrollador). El gratuito no lo permite; en los de pago depende del
+plan y OpenAI lo va cambiando. Se agrega desde el computador.
+
+1. Entra a [chatgpt.com/plugins](https://chatgpt.com/plugins), toca **+** y
+   elige *Agregar servidor MCP personalizado* (*Add custom MCP server*).
+2. Nombre: **Coordinadores**. Conexión: *Public endpoint* con la dirección
+   `https://coordinacion-gemb.vercel.app/api/mcp`.
+3. Autenticación: **OAuth**. No hay que llenar nada más: ChatGPT se registra
+   solo.
+4. Acepta el aviso de riesgo y créalo. Se abre la pantalla de la app: entras
+   con tu Google y le das a **Permitir** (la pantalla dice *Conectar con
+   ChatGPT*).
+5. En un chat nuevo escribe **@**, elige *Coordinadores* y pregúntale *"¿con
+   qué cuenta estás conectado?"*.
+
+Igual que en Claude, el rol viene con tu cuenta: una coordinadora queda en
+solo lectura también en ChatGPT. ChatGPT renueva el permiso solo cada hora
+(con un *refresh token* cifrado), así que no hay que volver a conectar.
+
+Los nombres de los menús de ChatGPT cambian a menudo; la guía oficial es
+<https://developers.openai.com/apps-sdk/deploy/connect-chatgpt>.
+
 > **Si algún día deja de conectar de golpe y a todo el mundo a la vez**, mira
 > `src/lib/oauthRedirect.ts`. Ahí está la lista cerrada de sitios a los que se
-> puede devolver el acceso (los dominios de Claude y el propio equipo). Es una
-> cerradura a propósito: sin ella bastaría un enlace preparado para que, al
-> tocar "Permitir", tu acceso viajara al sitio de otro. Si Claude cambiara de
-> dominio, hay que añadirlo ahí — y en ningún otro sitio.
+> puede devolver el acceso: los dominios de Claude, las DOS direcciones de
+> vuelta de ChatGPT (solo `chatgpt.com/connector_platform_oauth_redirect` y
+> `chatgpt.com/connector/oauth/{id}`, nada más de chatgpt.com) y el propio
+> equipo. Es una cerradura a propósito: sin ella bastaría un enlace preparado
+> para que, al tocar "Permitir", tu acceso viajara al sitio de otro. Si Claude
+> o ChatGPT cambiaran su dirección de vuelta, hay que añadirla ahí — y en
+> ningún otro sitio. ChatGPT muestra la suya exacta en la página del conector.
 
-La conexión **solo** funciona entrando con Google desde Claude. Lo que Claude
+La conexión **solo** funciona entrando con Google desde Claude o ChatGPT. Lo que Claude
 guarda es un permiso **cifrado** por el servidor (ver `mcp/src/sobre.ts`): fuera
 de este servidor no sirve para nada, y la llave de sesión de Firebase nunca
 viaja en una dirección (antes iba dentro del código de vuelta, en claro, y
@@ -105,14 +138,16 @@ dirección (`?k=…`) ni una llave en claro en la cabecera.
 
 ### Para cortar el acceso
 
-- **Tú mismo:** en Claude, quita el conector (Personalizar → Conectores).
-  **Salir de la app no lo desconecta**: cerrar sesión solo borra la sesión de
-  ese celular o computador, no el permiso que ya tiene Claude.
+- **Tú mismo:** quita el conector en Claude (Personalizar → Conectores) o en
+  ChatGPT (chatgpt.com/plugins). **Salir de la app no lo desconecta**: cerrar
+  sesión solo borra la sesión de ese celular o computador, no el permiso que ya
+  tiene el asistente.
 - **La administración:** app → **Usuarios** → desactivar esa cuenta. Deja de
   funcionar de inmediato, porque las reglas exigen `active == true`.
 - **A todo el mundo de una vez** (por ejemplo, si se sospecha una filtración):
   cambiar la variable `MCP_SECRETO` en Vercel y volver a desplegar. Todas las
-  conexiones con Claude dejan de valer y cada quien vuelve a tocar "Conectar".
+  conexiones con Claude y ChatGPT dejan de valer (también los permisos de
+  renovar) y cada quien vuelve a tocar "Conectar".
 
 ---
 
@@ -185,7 +220,8 @@ no pueden decir números distintos.
 - `mcp/src/informes.ts` — el texto de cada respuesta. Lógica pura, probada con
   datos armados a mano.
 - `mcp/src/oauth.ts` y `mcp/src/sobre.ts` — el ingreso con Google (OAuth con
-  PKCE obligatorio) y el cifrado AES-256-GCM de códigos y permisos. Necesitan
+  PKCE obligatorio, registro automático de clientes y `refresh_token`) y el
+  cifrado AES-256-GCM de códigos, permisos y permisos de renovar. Necesitan
   la variable de entorno **`MCP_SECRETO`** en Vercel (32+ caracteres
   aleatorios); sin ella la conexión con Claude responde un error que lo dice.
 - `mcp/src/http.ts` — el servidor HTTP. **Fuente**; lo que se despliega es

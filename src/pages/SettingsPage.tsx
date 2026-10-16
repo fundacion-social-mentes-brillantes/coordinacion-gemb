@@ -57,13 +57,13 @@ export function SettingsPage() {
         </section>
       )}
 
-      {/* Conectar con Claude. */}
+      {/* Conectar con Claude o ChatGPT. */}
       <section className="space-y-2">
         <h3 className="px-1 text-xs font-bold uppercase tracking-wider text-slate-500">Avanzado</h3>
         <Link to="/conectar" className="card flex items-center gap-3 p-4 text-left">
           <RobotIcon className="shrink-0 text-2xl text-primary-500" />
           <span className="min-w-0 flex-1">
-            <span className="block font-semibold text-slate-800">Conectar con Claude</span>
+            <span className="block font-semibold text-slate-800">Conectar con Claude o ChatGPT</span>
             <span className="block text-sm text-slate-500">
               Para preguntarle por la asistencia sin entrar a la app.
             </span>

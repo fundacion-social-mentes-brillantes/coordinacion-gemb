@@ -20,6 +20,18 @@
 /** Dominios de Claude. Se admite el dominio y cualquier subdominio suyo. */
 const DOMINIOS = ['claude.ai', 'claude.com', 'anthropic.com'];
 
+/**
+ * ChatGPT (OpenAI), desde el 16 oct 2026. Más estricto que con Claude a
+ * propósito: SOLO chatgpt.com (sin subdominios ni puerto) y SOLO las dos
+ * direcciones de vuelta de sus conectores, porque en chatgpt.com cualquiera
+ * puede publicar páginas (conversaciones compartidas, GPTs) y ninguna de ellas
+ * debe poder recibir un código. Según developers.openai.com/apps-sdk/build/auth:
+ *   https://chatgpt.com/connector_platform_oauth_redirect   (la fija)
+ *   https://chatgpt.com/connector/oauth/{id}                 (una por conexión)
+ */
+const CHATGPT = 'chatgpt.com';
+const RUTAS_CHATGPT = [/^\/connector_platform_oauth_redirect$/, /^\/connector\/oauth\/[A-Za-z0-9_-]+$/];
+
 /** Equipos locales: Claude de escritorio y Claude Code abren un puerto propio. */
 const LOCALES = ['localhost', '127.0.0.1', '::1'];
 
@@ -46,9 +58,22 @@ export function redirectPermitido(uri: string): boolean {
 
   if (u.protocol !== 'https:') return false;
 
+  if (host === CHATGPT) {
+    return u.port === '' && RUTAS_CHATGPT.some((r) => r.test(u.pathname));
+  }
+
   // `endsWith('.' + d)` y no `includes(d)`: si no, "claude.ai.malo.com" pasaría.
   return DOMINIOS.some((d) => host === d || host.endsWith(`.${d}`));
 }
 
+/** Para decirle a la persona a quién le está dando permiso. */
+export function asistenteDe(uri: string): 'ChatGPT' | 'Claude' {
+  try {
+    return new URL(uri).hostname.toLowerCase() === CHATGPT ? 'ChatGPT' : 'Claude';
+  } catch {
+    return 'Claude';
+  }
+}
+
 /** Para el mensaje de error, sin repetir la lista a mano en cada pantalla. */
-export const DESTINOS_PERMITIDOS = [...DOMINIOS, ...LOCALES].join(', ');
+export const DESTINOS_PERMITIDOS = [...DOMINIOS, CHATGPT, ...LOCALES].join(', ');

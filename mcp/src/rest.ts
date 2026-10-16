@@ -156,7 +156,7 @@ async function canjear(llave: string): Promise<Credencial> {
     ) {
       throw new LlaveInvalidaError(
         'El acceso ya no sirve (caducó o lo revocaron). ' +
-          'Vuelve a conectar el conector desde Claude y entra otra vez con Google.',
+          'Vuelve a conectar el conector desde Claude o ChatGPT y entra otra vez con Google.',
       );
     }
     if (codigo.startsWith('USER_DISABLED')) {
@@ -341,7 +341,7 @@ function limpiarVencidos() {
 export async function abrirSesion(llave: string): Promise<Cliente> {
   if (!llave || llave.length < 20) {
     throw new ConfigError(
-      'Falta entrar con Google. En Claude, toca "Conectar" en este conector y ' +
+      'Falta entrar con Google. En Claude o ChatGPT, toca "Conectar" en este conector y ' +
         'entra con tu cuenta de siempre.',
     );
   }

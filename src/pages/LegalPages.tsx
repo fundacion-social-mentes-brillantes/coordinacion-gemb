@@ -123,11 +123,12 @@ export function PrivacidadPage() {
         </p>
       </Bloque>
 
-      <Bloque titulo="Conexión con Claude (opcional)">
+      <Bloque titulo="Conexión con Claude o ChatGPT (opcional)">
         <p>
-          Si una persona del equipo lo activa en <em>Ajustes → Conectar con Claude</em>, el
-          asistente Claude (de Anthropic) puede consultar la asistencia para responderle a ella,
-          con sus mismos permisos. Se puede desconectar en cualquier momento.
+          Si una persona del equipo lo activa en <em>Ajustes → Conectar con Claude o ChatGPT</em>,
+          el asistente que ella elija —Claude (de Anthropic) o ChatGPT (de OpenAI)— puede
+          consultar la asistencia para responderle a ella, con sus mismos permisos. Se puede
+          desconectar en cualquier momento.
         </p>
       </Bloque>
 

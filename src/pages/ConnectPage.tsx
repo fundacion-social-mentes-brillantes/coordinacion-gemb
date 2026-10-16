@@ -9,16 +9,16 @@ import { copiarTexto } from '../lib/nativo';
 const URL_MCP = 'https://coordinacion-gemb.vercel.app/api/mcp';
 
 /**
- * "Conectar con Claude".
+ * "Conectar con Claude o ChatGPT" (ChatGPT desde el 16 oct 2026).
  *
  * Ya no se copia ninguna llave. Antes esta pantalla entregaba un enlace con el
  * permiso de sesión metido dentro (…/api/mcp?k=<llave>), y eso obligaba a cada
  * persona a manejar un secreto en texto plano: pegarlo, guardarlo, quizá
- * mandárselo por WhatsApp. Ahora se entra con Google desde el propio Claude,
+ * mandárselo por WhatsApp. Ahora se entra con Google desde el propio asistente,
  * como en cualquier otro conector, y aquí solo queda una dirección pública.
  *
- * Lo que Claude podrá hacer sale del rol de cada quien en la app; no hay nada
- * que configurar por persona.
+ * Lo que el asistente podrá hacer sale del rol de cada quien en la app; no hay
+ * nada que configurar por persona.
  */
 export function ConnectPage() {
   const { profile } = useAuth();
@@ -46,14 +46,14 @@ export function ConnectPage() {
       </Link>
 
       <div>
-        <h2 className="titulo-pantalla">Conectar con Claude</h2>
+        <h2 className="titulo-pantalla">Conectar con Claude o ChatGPT</h2>
         <p className="mt-1 text-sm text-slate-500">
           Para poder preguntarle por la asistencia sin entrar a la app: “¿cuántas
           personas están haciendo Pasos últimamente?”, “¿quién dejó de venir?”.
         </p>
       </div>
 
-      {/* Qué verá Claude, según quién eres */}
+      {/* Qué verá el asistente, según quién eres */}
       <div className="card p-4">
         <p className="text-sm text-slate-600">
           Se conectará como{' '}
@@ -108,7 +108,8 @@ export function ConnectPage() {
         </li>
 
         <li className="card p-4">
-          <p className="font-semibold text-slate-800">2. Agrégala en Claude</p>
+          <p className="font-semibold text-slate-800">2. Agrégala en tu asistente</p>
+          <p className="mt-2 text-sm font-semibold text-slate-700">En Claude</p>
           <p className="mt-1 text-sm text-slate-600">
             En claude.ai: <strong>Personalizar</strong> → <strong>Conectores</strong>{' '}
             → <em>Agregar</em> → <em>Agregar conector personalizado</em>.
@@ -124,14 +125,33 @@ export function ConnectPage() {
             <strong>“Siempre requerido”</strong>. Si eliges “Ninguno”, el conector
             se agrega vacío, sin herramientas.
           </p>
+          <p className="mt-4 text-sm font-semibold text-slate-700">En ChatGPT</p>
+          <p className="mt-1 text-sm text-slate-600">
+            Desde el computador, en <strong>chatgpt.com/plugins</strong>: toca{' '}
+            <strong>+</strong> → <em>Agregar servidor MCP personalizado</em> (en
+            inglés, <em>Add custom MCP server</em>).
+          </p>
+          <ul className="mt-2 space-y-1 text-sm text-slate-600">
+            <li>
+              · Nombre: <strong>Coordinadores</strong> (o el que prefieras)
+            </li>
+            <li>· Dirección del servidor: la que acabas de copiar</li>
+            <li>
+              · Autenticación: <strong>OAuth</strong>
+            </li>
+          </ul>
+          <p className="mt-2 text-sm text-slate-600">
+            Acepta el aviso y créalo. Hace falta un plan de ChatGPT que permita
+            conectores personalizados.
+          </p>
         </li>
 
         <li className="card p-4">
           <p className="font-semibold text-slate-800">3. Entra con Google</p>
           <p className="mt-1 text-sm text-slate-600">
-            En la lista de conectores, toca <strong>Conectar</strong>. Se abre
-            esta misma app, entras con tu cuenta de siempre y tocas{' '}
-            <strong>Permitir</strong>. Eso es todo: no hay nada que pegar.
+            Toca <strong>Conectar</strong> en el conector. Se abre esta misma app,
+            entras con tu cuenta de siempre y tocas <strong>Permitir</strong>.
+            Eso es todo: no hay nada que pegar.
           </p>
         </li>
 
@@ -139,7 +159,8 @@ export function ConnectPage() {
           <p className="font-semibold text-slate-800">4. Pruébalo</p>
           <p className="mt-1 text-sm text-slate-600">
             Pregúntale: <em>“¿con qué cuenta estás conectado?”</em>. Debe
-            responder con tu nombre y tu rol.
+            responder con tu nombre y tu rol. En ChatGPT, primero escribe{' '}
+            <strong>@</strong> y elige el conector.
           </p>
         </li>
       </ol>
@@ -148,10 +169,11 @@ export function ConnectPage() {
         <p className="flex items-start gap-2 text-sm text-amber-900">
           <LockIcon className="mt-0.5 shrink-0 text-base" />
           <span>
-            <strong>Si alguna vez quieres cortarla:</strong> en Claude, quita el
-            conector (Personalizar → Conectores). Salir de esta app{' '}
-            <strong>no</strong> lo desconecta. Si una administradora desactiva tu
-            cuenta en Usuarios, Claude deja de poder usarla al instante.
+            <strong>Si alguna vez quieres cortarla:</strong> quita el conector en
+            Claude (Personalizar → Conectores) o en ChatGPT (chatgpt.com/plugins).
+            Salir de esta app <strong>no</strong> lo desconecta. Si una
+            administradora desactiva tu cuenta en Usuarios, el asistente deja de
+            poder usarla al instante.
           </span>
         </p>
       </div>
@@ -159,9 +181,9 @@ export function ConnectPage() {
       <p className="flex items-start gap-2 px-1 text-xs text-slate-400">
         <CheckIcon className="mt-0.5 shrink-0" />
         <span>
-          Nuestro servidor no guarda tu permiso: lo guarda Claude, cifrado, y lo
-          manda con cada consulta. Cada vez se comprueba tu cuenta y tu rol en la
-          app, así que Claude ve exactamente lo mismo que tú, ni más ni menos.
+          Nuestro servidor no guarda tu permiso: lo guarda el asistente, cifrado,
+          y lo manda con cada consulta. Cada vez se comprueba tu cuenta y tu rol
+          en la app, así que ve exactamente lo mismo que tú, ni más ni menos.
         </span>
       </p>
 

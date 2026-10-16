@@ -1,5 +1,7 @@
 // src/lib/oauthRedirect.ts
 var DOMINIOS = ["claude.ai", "claude.com", "anthropic.com"];
+var CHATGPT = "chatgpt.com";
+var RUTAS_CHATGPT = [/^\/connector_platform_oauth_redirect$/, /^\/connector\/oauth\/[A-Za-z0-9_-]+$/];
 var LOCALES = ["localhost", "127.0.0.1", "::1"];
 function redirectPermitido(uri) {
   let u;
@@ -13,9 +15,12 @@ function redirectPermitido(uri) {
     return u.protocol === "http:" || u.protocol === "https:";
   }
   if (u.protocol !== "https:") return false;
+  if (host === CHATGPT) {
+    return u.port === "" && RUTAS_CHATGPT.some((r) => r.test(u.pathname));
+  }
   return DOMINIOS.some((d) => host === d || host.endsWith(`.${d}`));
 }
-var DESTINOS_PERMITIDOS = [...DOMINIOS, ...LOCALES].join(", ");
+var DESTINOS_PERMITIDOS = [...DOMINIOS, CHATGPT, ...LOCALES].join(", ");
 
 // mcp/src/sobre.ts
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
@@ -26,7 +31,7 @@ function clave() {
   const s = process.env.MCP_SECRETO ?? "";
   if (s.length < 32) {
     throw new SinSecretoError(
-      "Falta configurar MCP_SECRETO en el servidor (Vercel \u2192 Settings \u2192 Environment Variables). Sin ella no se puede conectar Claude."
+      "Falta configurar MCP_SECRETO en el servidor (Vercel \u2192 Settings \u2192 Environment Variables). Sin ella no se puede conectar Claude ni ChatGPT."
     );
   }
   return createHash("sha256").update(s).digest();
@@ -98,7 +103,7 @@ function metadatosServidor() {
     token_endpoint: `${RAIZ}/api/oauth/token`,
     registration_endpoint: `${RAIZ}/api/oauth/register`,
     response_types_supported: ["code"],
-    grant_types_supported: ["authorization_code"],
+    grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
     scopes_supported: ["coordinacion"]
@@ -133,7 +138,7 @@ function registrarCliente(datos) {
     client_id_issued_at: Math.floor(Date.now() / 1e3),
     redirect_uris: redirects,
     token_endpoint_auth_method: "none",
-    grant_types: ["authorization_code"],
+    grant_types: ["authorization_code", "refresh_token"],
     response_types: ["code"],
     client_name: typeof datos.client_name === "string" ? datos.client_name : "Cliente MCP"
   };
@@ -173,7 +178,7 @@ function aprobar(datos) {
     return { error: "Esa direcci\xF3n de retorno no est\xE1 autorizada." };
   }
   if (!RETO_VALIDO.test(reto)) {
-    return { error: "Falta informaci\xF3n de seguridad (PKCE). Vuelve a intentarlo desde Claude." };
+    return { error: "Falta informaci\xF3n de seguridad (PKCE). Vuelve a intentarlo desde Claude o ChatGPT." };
   }
   const codigo = { llave, reto, destino: redirect, exp: Date.now() + 5 * 6e4 };
   const destino = new URL(redirect);
@@ -181,10 +186,36 @@ function aprobar(datos) {
   if (state) destino.searchParams.set("state", state);
   return { destino: destino.toString() };
 }
+function permisos(llave, desde) {
+  const acceso = { llave, desde };
+  return {
+    access_token: sellar("acceso", acceso),
+    token_type: "Bearer",
+    // Por dentro, la sesión se renueva sola en cada consulta. Se anuncia
+    // una hora, como siempre, para que el cliente no la cachee de más.
+    expires_in: 3600,
+    refresh_token: sellar("renovar", acceso),
+    scope: "coordinacion"
+  };
+}
+function renovar(datos) {
+  if (!datos.refresh_token) {
+    return { error: "invalid_request", detalle: "Falta refresh_token." };
+  }
+  const r = abrir("renovar", datos.refresh_token);
+  if (!r || typeof r.llave !== "string" || r.llave.length < 20) {
+    return { error: "invalid_grant", detalle: "El permiso para renovar no es v\xE1lido. Vuelve a conectar." };
+  }
+  return { ok: permisos(r.llave, typeof r.desde === "number" ? r.desde : Date.now()) };
+}
 async function canjearCodigo(req) {
   const datos = { ...Object.fromEntries(parametros(req)), ...cuerpo(req) };
+  if (datos.grant_type === "refresh_token") return renovar(datos);
   if (datos.grant_type !== "authorization_code") {
-    return { error: "unsupported_grant_type", detalle: "Solo se admite authorization_code." };
+    return {
+      error: "unsupported_grant_type",
+      detalle: "Solo se admiten authorization_code y refresh_token."
+    };
   }
   if (!datos.code) {
     return { error: "invalid_request", detalle: "Falta el c\xF3digo." };
@@ -206,17 +237,7 @@ async function canjearCodigo(req) {
   if (await sha256Base64Url(verificador) !== codigo.reto) {
     return { error: "invalid_grant", detalle: "El code_verifier no coincide." };
   }
-  const acceso = { llave: codigo.llave, desde: Date.now() };
-  return {
-    ok: {
-      access_token: sellar("acceso", acceso),
-      token_type: "Bearer",
-      // Por dentro, la sesión se renueva sola en cada consulta. Se anuncia
-      // una hora, como siempre, para que el cliente no la cachee de más.
-      expires_in: 3600,
-      scope: "coordinacion"
-    }
-  };
+  return { ok: permisos(codigo.llave, Date.now()) };
 }
 async function atenderOauth(req, res, ruta) {
   res.setHeader("Cache-Control", "no-store");
