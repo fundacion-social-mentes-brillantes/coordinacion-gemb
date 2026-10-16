@@ -394,31 +394,33 @@
   }
   /* El color de cada cosa. Solo pone las variables: el aspecto lo dan
      .tile-recurso y los botones de abajo. */
+  /* Colores con clase (pedido del 16 oct 2026): dorado champaña, no
+     amarillo; vino tinto translúcido; azul profundo translúcido. */
   .tono-oro {
-    --t: 255 204 64;
-    --t-claro: #fff0b8;
-    --t-oscuro: #e3a91f;
-    --t-texto: #2a1d00;
-    --t-letra: #ffdc78;
-    /* Sobre el fondo oscuro el dorado tiende a café: va más encendido. */
-    --t-fuerza: 0.48;
+    --t: 214 176 100;
+    --t-claro: #f3e2b4;
+    --t-oscuro: #a27f3f;
+    --t-texto: #1f1605;
+    --t-letra: #ebd29c;
+    --t-fuerza: 0.46;
   }
   .tono-rojo {
-    --t: 255 76 66;
-    --t-claro: #ff9f97;
-    --t-oscuro: #dc2f25;
+    --t: 136 30 62;
+    --t-claro: #c0566f;
+    --t-oscuro: #5e1129;
     --t-texto: #ffffff;
-    --t-letra: #ff8e86;
+    --t-letra: #e9a3b4;
+    --t-fuerza: 0.55;
   }
   .tono-azul {
-    --t: 66 122 255;
-    --t-claro: #9bb8ff;
-    --t-oscuro: #1f4fe8;
+    --t: 44 78 180;
+    --t-claro: #6f8fe6;
+    --t-oscuro: #1c3384;
     --t-texto: #ffffff;
-    --t-letra: #9db9ff;
+    --t-letra: #a9bcf2;
+    --t-fuerza: 0.5;
   }
-  /* Cada cosa: un botón de vidrio teñido de su color, con brillo arriba y
-     un halo alrededor para que resalte. */
+  /* Cada cosa: un botón de vidrio teñido de su color. */
   .tile-recurso {
     position: relative;
     display: block;
@@ -426,22 +428,22 @@
     border-radius: 22px;
     padding: 12px;
     text-align: left;
+    /* Como tarjeta de vidrio oscuro: el color entra por la esquina de
+       arriba y se apaga hacia abajo, con borde fino y sin halos. */
     background:
       linear-gradient(
-        155deg,
-        rgb(var(--t) / var(--t-fuerza, 0.36)) 0%,
-        rgb(var(--t) / 0.12) 55%,
-        rgb(var(--t) / 0.22) 100%
+        145deg,
+        rgb(var(--t) / var(--t-fuerza, 0.5)) 0%,
+        rgb(var(--t) / 0.2) 48%,
+        rgba(8, 12, 28, 0.55) 100%
       ),
-      rgba(255, 255, 255, 0.05);
-    border: 1px solid rgb(var(--t) / 0.6);
+      rgba(13, 18, 36, 0.6);
+    border: 1px solid rgb(var(--t) / 0.38);
     box-shadow:
-      inset 0 1px 0.5px rgba(255, 255, 255, 0.5),
-      inset 0 0 22px -8px rgb(var(--t) / 0.5),
-      0 0 34px -12px rgb(var(--t) / 0.85),
-      0 14px 30px -20px rgba(0, 0, 0, 0.9);
-    backdrop-filter: blur(20px) saturate(185%) brightness(1.1);
-    -webkit-backdrop-filter: blur(20px) saturate(185%) brightness(1.1);
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.12),
+      0 18px 40px -24px rgba(0, 0, 0, 0.95);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
     transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
   button.tile-recurso:active {
@@ -460,19 +462,18 @@
     @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full px-4 text-[15px] font-semibold transition active:scale-95;
     min-height: 40px;
     color: var(--t-texto);
-    background: linear-gradient(180deg, var(--t-claro) 0%, rgb(var(--t)) 55%, var(--t-oscuro) 100%);
-    box-shadow:
-      inset 0 1px 0.5px rgba(255, 255, 255, 0.65),
-      0 8px 20px -10px rgb(var(--t) / 0.95);
+    background: linear-gradient(180deg, var(--t-claro) 0%, rgb(var(--t)) 60%, var(--t-oscuro) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.3);
   }
   .boton-tile-suave {
     @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full text-[15px] font-semibold transition active:scale-95;
     min-height: 40px;
     min-width: 40px;
     color: var(--t-letra);
-    background: rgb(var(--t) / 0.16);
-    border: 1px solid rgb(var(--t) / 0.45);
-    box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.3);
+    background: rgb(var(--t) / 0.22);
+    border: 1px solid rgb(var(--t) / 0.4);
+    box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.1);
   }
   .icono-burbuja {
     @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-xl;
