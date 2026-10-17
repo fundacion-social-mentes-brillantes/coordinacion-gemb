@@ -77,9 +77,13 @@ export class ConflictoError extends AccesoError {
  *  borrar      solo si existe: quitar dos veces no resta dos al contador.
  *  sumar       suma atómica a un número, como `increment()` en la app: no
  *              pisa lo que marcan a la vez las coordinadoras.
+ *  poner       el documento entero, exista o no (como `setDoc` sin merge).
+ *              Para registros que solo se sobrescriben, como quién cambió
+ *              por última vez un día del calendario.
  */
 export type Escritura =
   | { tipo: 'crear'; ruta: string; datos: Record<string, unknown> }
+  | { tipo: 'poner'; ruta: string; datos: Record<string, unknown> }
   | {
       tipo: 'actualizar';
       ruta: string;
@@ -461,6 +465,11 @@ const rutaCampo = (campo: string) =>
 
 function aEscrituraRest(e: Escritura): Record<string, unknown> {
   switch (e.tipo) {
+    case 'poner': {
+      const fields: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(e.datos)) fields[k] = aValorRest(v);
+      return { update: { name: nombreDoc(e.ruta), fields } };
+    }
     case 'crear':
     case 'actualizar': {
       const fields: Record<string, unknown> = {};

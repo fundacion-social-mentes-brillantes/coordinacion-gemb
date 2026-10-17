@@ -685,17 +685,21 @@ export async function ejecutar(c: Cliente, o: Operacion): Promise<string> {
       const fecha = fechaDe(o.args.fecha);
       const nombre = String(o.args.nombre ?? '').trim().slice(0, 80);
       const ruta = `programacion_dias/${fecha}`;
-      const datos = {
-        coordinadora: nombre,
-        updatedAt: new Date(),
-        updatedBy: c.uid,
-        updatedByName: c.nombre,
-      };
+      const ahora = new Date();
+      // El día es público (el calendario se ve sin entrar): quién lo cambió va
+      // aparte, en programacion_cambios, que solo lee el equipo.
+      const datos = { coordinadora: nombre, updatedAt: ahora };
       await c.guardar([
         (await c.leer(ruta))
           ? // Se borra quién se la había tomado con "Yo la coordino": ya no es suya.
-            { tipo: 'actualizar', ruta, datos, borrar: ['coordinadoraUid'] }
+            // Y la firma vieja que quedara en el día público.
+            { tipo: 'actualizar', ruta, datos, borrar: ['coordinadoraUid', 'updatedBy', 'updatedByName'] }
           : { tipo: 'crear', ruta, datos },
+        {
+          tipo: 'poner',
+          ruta: `programacion_cambios/${fecha}`,
+          datos: { updatedAt: ahora, updatedBy: c.uid, updatedByName: c.nombre },
+        },
       ]);
       return nombre
         ? `Listo. ${nombre} coordina la reunión del ${fmtDate(sessionDateFromKey(fecha))}. Ya se ve en la pestaña Coordinación de la app.`

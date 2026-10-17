@@ -391,14 +391,22 @@ describe('Ingreso, usuarios e invitaciones', () => {
   });
 });
 
+/**
+ * Como la app: el cambio público y, en el mismo lote, quién lo hizo en
+ * programacion_cambios (que solo lee el equipo).
+ */
+const conFirma = (db, id, uid, escribir) => {
+  const b = writeBatch(db);
+  escribir(b);
+  b.set(doc(db, `programacion_cambios/${id}`), { updatedAt: serverTimestamp(), updatedBy: uid, updatedByName: uid });
+  return b.commit();
+};
+
 describe('Programación (el antiguo Calendario)', () => {
-  const cambio = (uid, extra = {}) => ({
-    coordinadora: 'Marcela Sánchez',
-    updatedAt: Timestamp.now(),
-    updatedBy: uid,
-    updatedByName: 'Alguien',
-    ...extra,
-  });
+  const cambio = (extra = {}) => ({ coordinadora: 'Marcela Sánchez', updatedAt: Timestamp.now(), ...extra });
+  /** Guardar un día como lo hace la app; `firma` es a nombre de quién va el registro privado. */
+  const guardar = (db, dia, firma, extra = {}) =>
+    conFirma(db, dia, firma, (b) => b.set(doc(db, `programacion_dias/${dia}`), cambio(extra)));
 
   test('cualquiera la lee sin iniciar sesión', async () => {
     await assertSucceeds(getDoc(doc(como.anonimo(), 'programacion/config')));
@@ -407,21 +415,19 @@ describe('Programación (el antiguo Calendario)', () => {
   });
 
   test('sin sesión, o siendo coordinadora sin permiso, no se cambia', async () => {
-    await assertFails(setDoc(doc(como.anonimo(), 'programacion_dias/2026-10-15'), cambio('x')));
-    await assertFails(setDoc(doc(como.coord(), 'programacion_dias/2026-10-15'), cambio('coord')));
+    await assertFails(guardar(como.anonimo(), '2026-10-15', 'x'));
+    await assertFails(guardar(como.coord(), '2026-10-15', 'coord'));
     await assertFails(deleteDoc(doc(como.coord(), 'programacion_dias/2026-10-13')));
   });
 
   test('la administración y quien tiene el permiso sí la cambian', async () => {
-    await assertSucceeds(setDoc(doc(como.admin(), 'programacion_dias/2026-10-15'), cambio('admin')));
-    await assertSucceeds(
-      setDoc(doc(como.progra(), 'programacion_dias/2026-10-20'), cambio('progra', { modalidad: 'virtual' })),
-    );
+    await assertSucceeds(guardar(como.admin(), '2026-10-15', 'admin'));
+    await assertSucceeds(guardar(como.progra(), '2026-10-20', 'progra', { modalidad: 'virtual' }));
     await assertSucceeds(deleteDoc(doc(como.progra(), 'programacion_dias/2026-10-13')));
   });
 
   test('un pendiente que se guardó el permiso no puede programar', async () => {
-    await assertFails(setDoc(doc(como.colado(), 'programacion_dias/2026-10-15'), cambio('colado')));
+    await assertFails(guardar(como.colado(), '2026-10-15', 'colado'));
   });
 
   test('nadie se da el permiso de programar al crear su cuenta', async () => {
@@ -449,12 +455,34 @@ describe('Programación (el antiguo Calendario)', () => {
 
   test('se rechazan campos desconocidos, modalidades raras y firmas ajenas', async () => {
     const db = como.admin();
-    await assertFails(setDoc(doc(db, 'programacion_dias/2026-10-15'), cambio('admin', { colado: 1 })));
-    await assertFails(
-      setDoc(doc(db, 'programacion_dias/2026-10-15'), cambio('admin', { modalidad: 'hibrida' })),
-    );
-    await assertFails(setDoc(doc(db, 'programacion_dias/2026-10-15'), cambio('otra-persona')));
-    await assertFails(setDoc(doc(db, 'programacion_dias/no-es-fecha'), cambio('admin')));
+    await assertFails(guardar(db, '2026-10-15', 'admin', { colado: 1 }));
+    await assertFails(guardar(db, '2026-10-15', 'admin', { modalidad: 'hibrida' }));
+    await assertFails(guardar(db, '2026-10-15', 'otra-persona'), 'firmar a nombre de otra');
+    await assertFails(guardar(db, 'no-es-fecha', 'admin'));
+  });
+
+  test('quién lo cambió no queda en lo público: va aparte y solo lo lee el equipo', async () => {
+    const db = como.admin();
+    // En el día público, ni con la firma privada al lado.
+    await assertFails(guardar(db, '2026-10-15', 'admin', { updatedBy: 'admin' }));
+    await assertFails(guardar(db, '2026-10-15', 'admin', { updatedByName: 'Admin' }));
+    // Y sin la firma privada el cambio no pasa (siempre queda quién fue).
+    await assertFails(setDoc(doc(db, 'programacion_dias/2026-10-15'), cambio()));
+    await assertSucceeds(guardar(db, '2026-10-15', 'admin'));
+    const publico = (await getDoc(doc(como.anonimo(), 'programacion_dias/2026-10-15'))).data();
+    assert.equal(publico.coordinadora, 'Marcela Sánchez');
+    assert.equal('updatedBy' in publico || 'updatedByName' in publico, false);
+    // El registro: el equipo sí, sin sesión o pendiente no.
+    await assertFails(getDoc(doc(como.anonimo(), 'programacion_cambios/2026-10-15')));
+    await assertFails(getDoc(doc(como.pendiente(), 'programacion_cambios/2026-10-15')));
+    const firma = (await getDoc(doc(como.coord(), 'programacion_cambios/2026-10-15'))).data();
+    assert.equal(firma.updatedBy, 'admin');
+    // Nadie lo escribe a nombre de otra, ni sin sesión, ni lo borra.
+    const firmar = (dbx, uid) =>
+      setDoc(doc(dbx, 'programacion_cambios/2026-10-16'), { updatedAt: serverTimestamp(), updatedBy: uid, updatedByName: uid });
+    await assertFails(firmar(como.coord(), 'admin'));
+    await assertFails(firmar(como.anonimo(), 'x'));
+    await assertFails(deleteDoc(doc(como.admin(), 'programacion_cambios/2026-10-15')));
   });
 
   test('Apartar sin sesión ya no se usa; quien programa limpia las solicitudes viejas', async () => {
@@ -470,7 +498,7 @@ describe('Programación (el antiguo Calendario)', () => {
     await assertSucceeds(deleteDoc(doc(como.progra(), 'programacion_solicitudes/2026-10-15')));
   });
 
-  test('la configuración solo la cambia quien programa, y con forma válida', async () => {
+  test('la configuración solo la cambia quien programa, con forma válida y sin firma pública', async () => {
     const base = {
       dias: {},
       coordinadoras: ['Tatiana López'],
@@ -480,12 +508,14 @@ describe('Programación (el antiguo Calendario)', () => {
       grupoWhatsapp: '',
       updatedAt: Timestamp.now(),
     };
-    await assertFails(setDoc(doc(como.coord(), 'programacion/config'), { ...base, updatedBy: 'coord' }));
-    await assertSucceeds(setDoc(doc(como.progra(), 'programacion/config'), { ...base, updatedBy: 'progra' }));
-    await assertFails(
-      setDoc(doc(como.admin(), 'programacion/config'), { ...base, desde: 'febrero', updatedBy: 'admin' }),
-    );
-    await assertFails(setDoc(doc(como.admin(), 'programacion/otra'), { ...base, updatedBy: 'admin' }));
+    const poner = (db, uid, datos, ruta = 'programacion/config') =>
+      conFirma(db, 'config', uid, (b) => b.set(doc(db, ruta), datos));
+    await assertFails(poner(como.coord(), 'coord', base));
+    await assertSucceeds(poner(como.progra(), 'progra', base));
+    await assertFails(poner(como.admin(), 'admin', { ...base, desde: 'febrero' }));
+    await assertFails(poner(como.admin(), 'admin', base, 'programacion/otra'));
+    await assertFails(poner(como.admin(), 'admin', { ...base, updatedBy: 'admin' }), 'firma pública');
+    await assertFails(setDoc(doc(como.admin(), 'programacion/config'), base), 'sin firma privada');
   });
 });
 
@@ -565,18 +595,24 @@ describe('Yo la coordino: cada coordinadora se toma una fecha libre', () => {
   const LIBRE = diaBogota(3);
   const OTRA = diaBogota(5);
   const PASADA = diaBogota(-10);
-  const firma = (uid) => ({ updatedAt: serverTimestamp(), updatedBy: uid, updatedByName: uid });
+  // Como la app: el día público solo con cuándo (y borrando la firma que
+  // hubiera quedado de antes); quién fue, aparte y en el mismo lote.
+  const sello = () => ({ updatedAt: serverTimestamp(), updatedBy: deleteField(), updatedByName: deleteField() });
   const tomar = (db, uid, dia, nombre = 'Marcela Sánchez', extra = {}) =>
-    setDoc(
-      doc(db, `programacion_dias/${dia}`),
-      { coordinadora: nombre, coordinadoraUid: uid, ...firma(uid), ...extra },
-      { merge: true },
+    conFirma(db, dia, uid, (b) =>
+      b.set(
+        doc(db, `programacion_dias/${dia}`),
+        { coordinadora: nombre, coordinadoraUid: uid, ...sello(), ...extra },
+        { merge: true },
+      ),
     );
   const soltar = (db, uid, dia) =>
-    setDoc(
-      doc(db, `programacion_dias/${dia}`),
-      { coordinadora: deleteField(), coordinadoraUid: deleteField(), ...firma(uid) },
-      { merge: true },
+    conFirma(db, dia, uid, (b) =>
+      b.set(
+        doc(db, `programacion_dias/${dia}`),
+        { coordinadora: deleteField(), coordinadoraUid: deleteField(), ...sello() },
+        { merge: true },
+      ),
     );
 
   beforeEach(async () => {
@@ -611,15 +647,7 @@ describe('Yo la coordino: cada coordinadora se toma una fecha libre', () => {
   test('solo con un nombre del equipo y con su propia cuenta', async () => {
     await assertFails(tomar(como.coord(), 'coord', LIBRE, 'Alguien de afuera'));
     await assertFails(tomar(como.coord(), 'coord2', LIBRE), 'a nombre de la cuenta de otra');
-    await assertFails(
-      setDoc(doc(como.coord(), `programacion_dias/${LIBRE}`), {
-        coordinadora: 'Marcela Sánchez',
-        coordinadoraUid: 'coord',
-        ...firma('coord'),
-        cancelada: true,
-      }),
-      'no puede cancelar la reunión de paso',
-    );
+    await assertFails(tomar(como.coord(), 'coord', LIBRE, 'Marcela Sánchez', { cancelada: true }), 'no puede cancelar la reunión de paso');
   });
 
   test('no cambia quién coordinó reuniones que ya pasaron', async () => {
@@ -643,11 +671,14 @@ describe('Yo la coordino: cada coordinadora se toma una fecha libre', () => {
 
   test('si quien programa la cambia de persona, se borra quién se la había tomado', async () => {
     await assertSucceeds(tomar(como.coord(), 'coord', LIBRE));
+    const progra = como.progra();
     const reasignar = (extra = {}) =>
-      setDoc(
-        doc(como.progra(), `programacion_dias/${LIBRE}`),
-        { coordinadora: 'Tatiana López', ...firma('progra'), ...extra },
-        { merge: true },
+      conFirma(progra, LIBRE, 'progra', (b) =>
+        b.set(
+          doc(progra, `programacion_dias/${LIBRE}`),
+          { coordinadora: 'Tatiana López', ...sello(), ...extra },
+          { merge: true },
+        ),
       );
     await assertFails(reasignar(), 'dejaría la marca de la anterior');
     await assertFails(reasignar({ coordinadoraUid: 'coord2' }), 'ni inventarse una marca');
@@ -657,12 +688,25 @@ describe('Yo la coordino: cada coordinadora se toma una fecha libre', () => {
     // Quien programa sí cambia otras cosas del día sin tocar la marca.
     await assertSucceeds(tomar(como.coord2(), 'coord2', diaBogota(9), 'Tatiana López'));
     await assertSucceeds(
-      setDoc(
-        doc(como.progra(), `programacion_dias/${diaBogota(9)}`),
-        { modalidad: 'virtual', ...firma('progra') },
-        { merge: true },
+      conFirma(progra, diaBogota(9), 'progra', (b) =>
+        b.set(doc(progra, `programacion_dias/${diaBogota(9)}`), { modalidad: 'virtual', ...sello() }, { merge: true }),
       ),
     );
+  });
+
+  test('un día con la firma vieja (de antes) se puede tomar, y la firma se borra', async () => {
+    const dia = diaBogota(11);
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), `programacion_dias/${dia}`), {
+        modalidad: 'virtual',
+        updatedBy: 'admin',
+        updatedByName: 'Admin de antes',
+      });
+    });
+    await assertSucceeds(tomar(como.coord(), 'coord', dia));
+    const d = (await getDoc(doc(como.anonimo(), `programacion_dias/${dia}`))).data();
+    assert.equal(d.coordinadora, 'Marcela Sánchez');
+    assert.equal('updatedBy' in d || 'updatedByName' in d, false);
   });
 });
 

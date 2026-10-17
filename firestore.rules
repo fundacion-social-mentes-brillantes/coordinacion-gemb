@@ -342,7 +342,7 @@ service cloud.firestore {
         && docId == 'config'
         && request.resource.data.keys().hasOnly([
              'dias', 'coordinadoras', 'desde', 'hasta', 'semanasVirtuales',
-             'grupoWhatsapp', 'updatedAt', 'updatedBy', 'updatedByName'])
+             'grupoWhatsapp', 'updatedAt'])
         && request.resource.data.coordinadoras is list
         && request.resource.data.coordinadoras.size() <= 60
         && request.resource.data.dias is map
@@ -350,11 +350,37 @@ service cloud.firestore {
         && esDia(request.resource.data.hasta)
         && request.resource.data.semanasVirtuales in ['par', 'impar']
         && textoCorto(request.resource.data.grupoWhatsapp, 200)
-        && request.resource.data.updatedBy == request.auth.uid;
+        && firmado('config');
+      allow delete: if false;
+    }
+
+    // ==================== Quién cambió el calendario ====================
+    // La configuración y los días son públicos (el calendario se ve sin
+    // entrar), así que quién los cambió por última vez NO va en ellos: va
+    // aquí, que solo lee el equipo (pedido de Sebastián, 17 oct 2026). Se
+    // escribe en el mismo lote que el cambio, y cada quien solo se firma a sí
+    // misma.
+    function firmado(id) {
+      return getAfter(/databases/$(database)/documents/programacion_cambios/$(id)).data.get('updatedBy', '') == request.auth.uid;
+    }
+    // El documento público no puede llevar el nombre de quien lo cambió.
+    function sinFirmaPublica() {
+      return !('updatedBy' in request.resource.data) && !('updatedByName' in request.resource.data);
+    }
+    match /programacion_cambios/{id} {
+      allow read: if canRead();
+      allow create, update: if isStaff() && isActive()
+        && (id == 'config' || esDia(id))
+        && request.resource.data.keys().hasOnly(['updatedAt', 'updatedBy', 'updatedByName'])
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt is timestamp
+        && textoCorto(request.resource.data.get('updatedByName', ''), 120);
       allow delete: if false;
     }
 
     // Los campos que toca "Yo la coordino" / "Soltar": nada más del día.
+    // updatedBy y updatedByName están solo para poder BORRAR la firma que
+    // quedó de antes en el día público (ver sinFirmaPublica).
     function camposDeTomar() {
       return ['coordinadora', 'coordinadoraUid', 'updatedAt', 'updatedBy', 'updatedByName'];
     }
@@ -369,15 +395,14 @@ service cloud.firestore {
       let d = request.resource.data;
       return d.keys().hasOnly([
              'coordinadora', 'coordinadoraUid', 'modalidad', 'actividades', 'horario',
-             'cancelada', 'motivo', 'especial', 'updatedAt', 'updatedBy', 'updatedByName'])
+             'cancelada', 'motivo', 'especial', 'updatedAt'])
         && textoCorto(d.get('coordinadora', ''), 80)
         && d.get('modalidad', 'virtual') in ['presencial', 'virtual']
         && d.get('actividades', []) is list
         && textoCorto(d.get('horario', ''), 40)
         && d.get('cancelada', false) is bool
         && textoCorto(d.get('motivo', ''), 120)
-        && d.get('especial', false) is bool
-        && d.updatedBy == request.auth.uid;
+        && d.get('especial', false) is bool;
     }
     // "Yo la coordino": alguien del equipo se pone a sí misma en una fecha
     // libre, con su nombre de la lista y su propia cuenta (coordinadoraUid).
@@ -386,9 +411,7 @@ service cloud.firestore {
       return isStaff() && isActive()
         && d.coordinadora is string
         && d.coordinadora in equipo()
-        && d.coordinadoraUid == request.auth.uid
-        && d.updatedBy == request.auth.uid
-        && textoCorto(d.get('updatedByName', ''), 120);
+        && d.coordinadoraUid == request.auth.uid;
     }
     // "Soltar": solo la fecha que ella misma se tomó, y la deja libre.
     function sueltaLaSuya() {
@@ -397,18 +420,17 @@ service cloud.firestore {
         && resource.data.get('coordinadoraUid', '') == request.auth.uid
         && d.get('coordinadora', '') == ''
         && !('coordinadoraUid' in d)
-        && d.updatedBy == request.auth.uid
         && d.diff(resource.data).affectedKeys().hasOnly(camposDeTomar());
     }
 
     match /programacion_dias/{dia} {
       allow read: if true;
-      allow create: if esDia(dia) && (
+      allow create: if esDia(dia) && sinFirmaPublica() && firmado(dia) && (
         // Quien programa no se inventa una "tomada por" ajena.
         (puedeProgramar() && diaValido() && !('coordinadoraUid' in request.resource.data))
         || (seLaToma() && noEsPasada(dia)
             && request.resource.data.keys().hasOnly(camposDeTomar())));
-      allow update: if esDia(dia) && (
+      allow update: if esDia(dia) && sinFirmaPublica() && firmado(dia) && (
         // Si quien programa cambia quién coordina, se borra la marca de quién
         // se la había tomado: así nadie "suelta" una fecha que ya no es suya.
         (puedeProgramar() && diaValido()

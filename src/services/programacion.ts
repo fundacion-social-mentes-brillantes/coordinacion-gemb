@@ -7,6 +7,7 @@ import {
   serverTimestamp,
   setDoc,
   writeBatch,
+  type WriteBatch,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import {
@@ -24,12 +25,18 @@ import type { UserProfile } from '../types';
 //                               coordina, modalidad, si no hay reunión…)
 //   programacion_solicitudes/{día}  pedidos viejos de "Apartar" (ya no se crean)
 // Las tres se leen sin iniciar sesión: el calendario es público, como antes.
+//
+// Quién cambió por última vez la configuración o un día NO va en esos
+// documentos públicos (pedido de Sebastián, 17 oct 2026): va aparte, en
+//   programacion_cambios/{día o "config"}   quién y cuándo (solo el equipo)
+// y se escribe en el mismo lote que el cambio.
 
 const configRef = doc(db, 'programacion', 'config');
 /** Los enlaces de Meet: aparte de la configuración porque NO son públicos. */
 const enlacesRef = doc(db, 'programacion', 'enlaces');
 const diasCol = collection(db, 'programacion_dias');
 const solicitudesCol = collection(db, 'programacion_solicitudes');
+const cambiosCol = collection(db, 'programacion_cambios');
 
 export function listenConfig(
   onData: (c: ProgramacionConfig, existe: boolean) => void,
@@ -75,14 +82,33 @@ export function listenSolicitudes(
   );
 }
 
+/** Quién lo hizo. Solo en documentos que lee el equipo. */
 const firma = (user: UserProfile) => ({
   updatedAt: serverTimestamp(),
   updatedBy: user.uid,
   updatedByName: user.displayName || user.email,
 });
 
+/**
+ * Para un día público: cuándo, sin quién. Borra la firma que hubiera quedado
+ * de antes (se escribía en el propio día y se veía sin entrar).
+ */
+const sello = () => ({
+  updatedAt: serverTimestamp(),
+  updatedBy: deleteField(),
+  updatedByName: deleteField(),
+});
+
+/** El cambio público y, en el mismo lote, quién lo hizo (para el equipo). */
+function conFirma(id: string, user: UserProfile, escribir: (b: WriteBatch) => void) {
+  const b = writeBatch(db);
+  escribir(b);
+  b.set(doc(cambiosCol, id), firma(user));
+  return b.commit();
+}
+
 export function guardarConfig(c: ProgramacionConfig, user: UserProfile) {
-  return setDoc(configRef, { ...c, ...firma(user) });
+  return conFirma('config', user, (b) => b.set(configRef, { ...c, updatedAt: serverTimestamp() }));
 }
 
 /** Los enlaces fijos de Meet de cada reunión (solo con sesión iniciada). */
@@ -111,12 +137,12 @@ export function guardarDia(
   /** Quién coordinaba antes: si cambia, se borra quién se la había tomado. */
   coordinadoraAntes?: string,
 ) {
-  const datos: Record<string, unknown> = { ...firma(user) };
+  const datos: Record<string, unknown> = { ...sello() };
   for (const [k, v] of Object.entries(cambios)) datos[k] = v === null ? deleteField() : v;
   if ('coordinadora' in cambios && (cambios.coordinadora ?? '') !== (coordinadoraAntes ?? '')) {
     datos.coordinadoraUid = deleteField();
   }
-  return setDoc(doc(diasCol, key), datos, { merge: true });
+  return conFirma(key, user, (b) => b.set(doc(diasCol, key), datos, { merge: true }));
 }
 
 /**
@@ -125,19 +151,15 @@ export function guardarDia(
  * marca sea su propia cuenta; si otra llegó primero, falla (permiso).
  */
 export function tomarFecha(key: string, nombre: string, user: UserProfile) {
-  return setDoc(
-    doc(diasCol, key),
-    { coordinadora: nombre, coordinadoraUid: user.uid, ...firma(user) },
-    { merge: true },
+  return conFirma(key, user, (b) =>
+    b.set(doc(diasCol, key), { coordinadora: nombre, coordinadoraUid: user.uid, ...sello() }, { merge: true }),
   );
 }
 
 /** "Soltar": deja libre la fecha que ella misma se tomó. */
 export function soltarFecha(key: string, user: UserProfile) {
-  return setDoc(
-    doc(diasCol, key),
-    { coordinadora: deleteField(), coordinadoraUid: deleteField(), ...firma(user) },
-    { merge: true },
+  return conFirma(key, user, (b) =>
+    b.set(doc(diasCol, key), { coordinadora: deleteField(), coordinadoraUid: deleteField(), ...sello() }, { merge: true }),
   );
 }
 

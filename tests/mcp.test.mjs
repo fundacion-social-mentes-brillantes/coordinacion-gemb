@@ -305,6 +305,9 @@ beforeEach(async () => {
     coordinadora: 'Marcela Sánchez',
     coordinadoraUid: 'uid-marcela',
     modalidad: 'presencial',
+    // La firma que antes quedaba en el día público (se borra al cambiarlo).
+    updatedBy: 'uid-marcela',
+    updatedByName: 'Marcela Sánchez',
   });
   const personas = [
     ['m_rous', 'Rous', []],
@@ -624,6 +627,11 @@ test('asignar coordinadora: entiende el nombre mal escrito y lo guarda bien', as
   assert.equal(d.coordinadora, 'Tatiana López');
   assert.equal(d.modalidad, 'presencial', 'no toca lo demás del día');
   assert.equal(d.coordinadoraUid, undefined, 'Marcela ya no la puede soltar: no es suya');
+  // El día es público: quién lo cambió va aparte, en lo que solo lee el equipo.
+  assert.equal(d.updatedBy, undefined);
+  assert.equal(d.updatedByName, undefined);
+  const firma = await leer(`programacion_cambios/${EN_3}`);
+  assert.equal(firma.updatedBy, admin.uid);
 });
 
 test('la coordinadora no puede asignar desde Claude', async () => {

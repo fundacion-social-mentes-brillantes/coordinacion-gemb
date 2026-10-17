@@ -2507,6 +2507,11 @@ var nombreDoc = (ruta) => `${RAIZ_DOCS}/${ruta}`;
 var rutaCampo = (campo) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(campo) ? campo : "`" + campo.replace(/[`\\]/g, "\\$&") + "`";
 function aEscrituraRest(e) {
   switch (e.tipo) {
+    case "poner": {
+      const fields = {};
+      for (const [k, v] of Object.entries(e.datos)) fields[k] = aValorRest(v);
+      return { update: { name: nombreDoc(e.ruta), fields } };
+    }
     case "crear":
     case "actualizar": {
       const fields = {};
@@ -5050,17 +5055,19 @@ async function ejecutar(c, o) {
       const fecha = fechaDe(o.args.fecha);
       const nombre = String(o.args.nombre ?? "").trim().slice(0, 80);
       const ruta = `programacion_dias/${fecha}`;
-      const datos = {
-        coordinadora: nombre,
-        updatedAt: /* @__PURE__ */ new Date(),
-        updatedBy: c.uid,
-        updatedByName: c.nombre
-      };
+      const ahora = /* @__PURE__ */ new Date();
+      const datos = { coordinadora: nombre, updatedAt: ahora };
       await c.guardar([
         await c.leer(ruta) ? (
           // Se borra quién se la había tomado con "Yo la coordino": ya no es suya.
-          { tipo: "actualizar", ruta, datos, borrar: ["coordinadoraUid"] }
-        ) : { tipo: "crear", ruta, datos }
+          // Y la firma vieja que quedara en el día público.
+          { tipo: "actualizar", ruta, datos, borrar: ["coordinadoraUid", "updatedBy", "updatedByName"] }
+        ) : { tipo: "crear", ruta, datos },
+        {
+          tipo: "poner",
+          ruta: `programacion_cambios/${fecha}`,
+          datos: { updatedAt: ahora, updatedBy: c.uid, updatedByName: c.nombre }
+        }
       ]);
       return nombre ? `Listo. ${nombre} coordina la reuni\xF3n del ${fmtDate(sessionDateFromKey(fecha))}. Ya se ve en la pesta\xF1a Coordinaci\xF3n de la app.` : `Listo. La reuni\xF3n del ${fmtDate(sessionDateFromKey(fecha))} qued\xF3 sin coordinadora.`;
     }
