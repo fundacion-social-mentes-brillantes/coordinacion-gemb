@@ -99,7 +99,11 @@ export default defineConfig({
         //             /api/oauth/authorize con el index.html cacheado encima
         //             y la app pinta "Página no encontrada": el 302 hacia
         //             /autorizar nunca se llega a pedir.
-        navigateFallbackDenylist: [/^\/__\//, /^\/api\//],
+        //  /autorizar la pantalla de "Permitir" de Claude y ChatGPT: siempre
+        //             la versión publicada. Con la guardada, al añadir
+        //             ChatGPT salió "Conexión bloqueada" en los dos
+        //             navegadores (era la versión de antes de ChatGPT).
+        navigateFallbackDenylist: [/^\/__\//, /^\/api\//, /^\/autorizar/],
       },
       // El SW no se registra en desarrollo para evitar cachés molestas.
       devOptions: { enabled: false },
