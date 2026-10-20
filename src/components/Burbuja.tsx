@@ -20,12 +20,14 @@ import { AndroidIcon, BurbujaIcon, XIcon } from './Icons';
 // ---------------------------------------------------------------------------
 
 /**
- * La app de Android se reparte por Google Play (prueba interna: solo las
- * cuentas del equipo que estén en la lista de Play Console). Un solo canal:
- * el APK de GitHub está firmado con otra llave y no se podría actualizar
- * desde Play sin desinstalar.
+ * La app de Android se reparte por Google Play: publicada para todos desde el
+ * 18 oct 2026 (antes era una prueba interna con lista de correos). Entrar
+ * sigue pidiendo que la administración apruebe la cuenta. Un solo canal: el
+ * APK de GitHub está firmado con otra llave y no se podría actualizar desde
+ * Play sin desinstalar.
  */
-export const URL_APP_ANDROID = 'https://play.google.com/apps/internaltest/4701459342913607202';
+export const URL_APP_ANDROID =
+  'https://play.google.com/store/apps/details?id=com.gimnasioemocionalmb.coordinacion';
 
 const NO_OFRECER_APP = 'gemb:no-ofrecer-app-android';
 
