@@ -58,6 +58,8 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Los avisos del día antes (push y el toque en el aviso).
+        importScripts: ['avisos-sw.js'],
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         // Las librerías de exportar/importar (Excel y PDF, más de 1 MB) solo
         // las usa la administración: no se descargan de antemano en el

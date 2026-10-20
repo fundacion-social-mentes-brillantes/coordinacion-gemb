@@ -10,6 +10,9 @@ import {
 import { ColoresEditor } from '../components/ColoresEditor';
 import { ChevronRightIcon, RobotIcon } from '../components/Icons';
 import { EliminarCuenta } from '../components/EliminarCuenta';
+import { AvisosCoordina } from '../components/AvisosCoordina';
+import { useProgramacion } from '../hooks/useProgramacion';
+import { useMiNombre } from '../hooks/useMiNombre';
 
 /**
  * Ajustes: el cajón de lo que casi nunca se toca (cuenta, colores, conectar
@@ -24,6 +27,9 @@ export function SettingsPage() {
   const [puedeInstalar] = usePuedeInstalar();
   const necesitaAyudaIos = useNecesitaAyudaIos();
   const hayAlgoQueInstalar = puedeInstalar !== null || necesitaAyudaIos;
+  // Para el aviso del día antes: con qué nombre del equipo coordina.
+  const prog = useProgramacion({ conSolicitudes: false });
+  const { miNombre } = useMiNombre(prog.config.coordinadoras);
 
   return (
     <div className="space-y-6">
@@ -39,6 +45,11 @@ export function SettingsPage() {
         <p className="mt-2 inline-flex rounded-full bg-primary-500/15 px-3 py-1 text-xs font-bold text-primary-500">
           {nombreDeRol(profile)}
         </p>
+      </section>
+
+      <section className="space-y-2">
+        <h3 className="px-1 text-xs font-bold uppercase tracking-wider text-slate-500">Avisos</h3>
+        <AvisosCoordina miNombre={prog.cargando ? '' : miNombre} />
       </section>
 
       <section className="space-y-2">

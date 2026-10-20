@@ -10,14 +10,14 @@
     "emuladores": "node scripts/emuladores.mjs emulators:start --only auth,firestore --project demo-gemb",
     "test:reglas": "node scripts/emuladores.mjs emulators:exec --only firestore --project demo-gemb-reglas \"node --test tests/reglas.test.mjs\"",
     "test:varias": "node scripts/emuladores.mjs emulators:exec --only auth,firestore --project demo-gemb \"node --test --test-concurrency=1 tests/varias-personas.test.mjs\"",
-    "test:mcp": "npm run build:api && node scripts/emuladores.mjs emulators:exec --only auth,firestore --project demo-gemb \"node --test --test-concurrency=1 tests/mcp.test.mjs\"",
+    "test:mcp": "npm run build:api && node scripts/emuladores.mjs emulators:exec --only auth,firestore --project demo-gemb \"node --test --test-concurrency=1 tests/mcp.test.mjs tests/avisos.test.mjs\"",
     "test": "npm run test:reglas && npm run test:varias && npm run test:mcp",
     "build": "npm run typecheck && npm run check:auth && npm run build:api && vite build",
     "check:auth": "node scripts/check-auth-hosts.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.mcp.json",
     "gen:icons": "node scripts/gen-icons.mjs",
-    "build:api": "esbuild mcp/src/http.ts --bundle --platform=node --format=esm --target=node20 --outfile=api/mcp.js --log-level=warning && esbuild mcp/src/oauth-http.ts --bundle --platform=node --format=esm --target=node20 --outfile=api/oauth.js --log-level=warning"
+    "build:api": "esbuild mcp/src/http.ts --bundle --platform=node --format=esm --target=node20 --outfile=api/mcp.js --log-level=warning && esbuild mcp/src/oauth-http.ts --bundle --platform=node --format=esm --target=node20 --outfile=api/oauth.js --log-level=warning && esbuild mcp/src/avisos-http.ts --bundle --platform=node --format=esm --target=node20 --outfile=api/avisos.js --log-level=warning"
   },
   "dependencies": {
     "@capacitor/core": "^8.5.3",

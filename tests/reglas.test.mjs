@@ -757,6 +757,60 @@ describe('Imágenes de las coordinadoras (para anunciar su reunión)', () => {
   });
 });
 
+describe('Avisos del día antes (los teléfonos de cada quien)', () => {
+  const android = (uid, extra = {}) => ({
+    uid,
+    nombre: 'Tatiana López',
+    plataforma: 'android',
+    token: 'token-fcm-de-prueba',
+    updatedAt: serverTimestamp(),
+    ...extra,
+  });
+  const web = (uid, extra = {}) => ({
+    uid,
+    nombre: 'Tatiana López',
+    plataforma: 'web',
+    suscripcion: { endpoint: 'https://web.push.apple.com/abc', p256dh: 'BKx', auth: 'aut' },
+    updatedAt: serverTimestamp(),
+    ...extra,
+  });
+
+  test('cada quien registra SUS teléfonos (también una coordinadora); sin acceso no', async () => {
+    await assertSucceeds(setDoc(doc(como.coord(), 'avisos/coord__telefono01'), android('coord')));
+    await assertSucceeds(setDoc(doc(como.coord(), 'avisos/coord__iphone0001'), web('coord')));
+    await assertFails(setDoc(doc(como.coord(), 'avisos/coord2__telefono01'), android('coord2')), 'con el id de otra');
+    await assertFails(setDoc(doc(como.coord(), 'avisos/coord__telefono02'), android('coord2')), 'a nombre de otra cuenta');
+    await assertFails(setDoc(doc(como.pendiente(), 'avisos/pendiente__telefono01'), android('pendiente')));
+    await assertFails(setDoc(doc(como.inactiva(), 'avisos/inactiva__telefono01'), android('inactiva')));
+    await assertFails(setDoc(doc(como.anonimo(), 'avisos/x__telefono01'), android('x')));
+  });
+
+  test('solo nombres del equipo, datos con forma y nada colado', async () => {
+    const db = como.coord();
+    await assertFails(setDoc(doc(db, 'avisos/coord__telefono01'), android('coord', { nombre: 'Alguien de afuera' })));
+    await assertFails(setDoc(doc(db, 'avisos/coord__telefono01'), android('coord', { plataforma: 'ios' })));
+    await assertFails(setDoc(doc(db, 'avisos/coord__telefono01'), android('coord', { colado: 1 })));
+    await assertFails(setDoc(doc(db, 'avisos/coord__telefono01'), android('coord', { token: 'x'.repeat(5000) })));
+    await assertFails(setDoc(doc(db, 'avisos/coord__telefono01'), android('coord', { suscripcion: web('coord').suscripcion })));
+    await assertFails(
+      setDoc(doc(db, 'avisos/coord__iphone0001'), web('coord', { suscripcion: { endpoint: 'http://inseguro', p256dh: 'a', auth: 'b' } })),
+    );
+    await assertFails(setDoc(doc(db, 'avisos/coord__x'), android('coord')), 'id de dispositivo muy corto');
+    await assertFails(setDoc(doc(db, 'avisos/coord__telefono01'), android('coord', { updatedAt: Timestamp.now() })));
+  });
+
+  test('nadie lee ni borra los teléfonos de otra persona (ni la administración desde la app)', async () => {
+    await assertSucceeds(setDoc(doc(como.coord(), 'avisos/coord__telefono01'), android('coord')));
+    await assertSucceeds(getDoc(doc(como.coord(), 'avisos/coord__telefono01')));
+    await assertFails(getDoc(doc(como.coord2(), 'avisos/coord__telefono01')));
+    await assertFails(getDoc(doc(como.admin(), 'avisos/coord__telefono01')));
+    await assertFails(getDocs(collection(como.admin(), 'avisos')));
+    await assertFails(getDoc(doc(como.anonimo(), 'avisos/coord__telefono01')));
+    await assertFails(deleteDoc(doc(como.coord2(), 'avisos/coord__telefono01')));
+    await assertSucceeds(deleteDoc(doc(como.coord(), 'avisos/coord__telefono01')));
+  });
+});
+
 describe('Recursos de la reunión: enlaces de Meet y carpeta', () => {
   beforeEach(async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {

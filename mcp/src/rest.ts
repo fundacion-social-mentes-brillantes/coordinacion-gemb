@@ -224,7 +224,7 @@ function valor(v: unknown): unknown {
   return undefined;
 }
 
-function campos(f?: Record<string, unknown>): Record<string, unknown> {
+export function campos(f?: Record<string, unknown>): Record<string, unknown> {
   const salida: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(f ?? {})) salida[k] = valor(v);
   return salida;

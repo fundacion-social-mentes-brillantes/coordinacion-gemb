@@ -8,7 +8,7 @@
   //  tipos ni una vez. Este archivo cierra ese hueco y `npm run build` lo
   //  ejecuta.
   //
-  //  Entran los dos puntos de entrada que Vercel despliega y todo lo que
+  //  Entran los puntos de entrada que Vercel despliega y todo lo que
   //  arrastran. Queda fuera mcp/src/index.ts (el servidor de terminal), que
   //  necesita el SDK de MCP instalado aparte, en mcp/node_modules.
   // ---------------------------------------------------------------------
@@ -28,5 +28,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "files": ["mcp/src/http.ts", "mcp/src/oauth-http.ts"]
+  "files": ["mcp/src/http.ts", "mcp/src/oauth-http.ts", "mcp/src/avisos-http.ts"]
 }

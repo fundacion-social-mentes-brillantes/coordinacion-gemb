@@ -45,6 +45,7 @@ import androidx.webkit.WebViewFeature;
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption;
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
+import com.google.firebase.messaging.FirebaseMessaging;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.util.Collections;
@@ -179,6 +180,12 @@ final class Puente implements WebViewCompat.WebMessageListener {
                 case "ajustesAvisos":
                     Burbuja.abrirAjustesAvisos(actividad);
                     listo(respuesta, id, null);
+                    break;
+                case "avisos":
+                    activarAvisos(respuesta, id);
+                    break;
+                case "estadoAvisos":
+                    estadoAvisos(respuesta, id);
                     break;
                 default:
                     fallo(respuesta, id, "desconocida", "Acción desconocida: " + accion);
@@ -433,6 +440,79 @@ final class Puente implements WebViewCompat.WebMessageListener {
                 }
             }
         );
+    }
+
+    // ------------------------------------------------- aviso del día antes
+
+    /**
+     * «Activar avisos»: pide el permiso (Android 13+) y devuelve el token de
+     * Firebase Cloud Messaging de este teléfono, que la página guarda en
+     * Firestore (avisos/{uid}__{dispositivo}) para que el servidor le avise.
+     */
+    private void activarAvisos(JavaScriptReplyProxy r, String id) {
+        if (
+            Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(actividad, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            trasPermiso = concedido -> {
+                if (concedido) tokenDeAvisos(r, id);
+                else fallo(r, id, "sin-permiso", "Sin permiso para mostrar avisos.");
+            };
+            pedirAvisos.launch(Manifest.permission.POST_NOTIFICATIONS);
+            return;
+        }
+        tokenDeAvisos(r, id);
+    }
+
+    private void tokenDeAvisos(JavaScriptReplyProxy r, String id) {
+        AvisosServicio.crearCanal(actividad);
+        if (!AvisosServicio.puedeAvisar(actividad)) {
+            fallo(r, id, "sin-permiso", "Los avisos de la app están apagados.");
+            return;
+        }
+        FirebaseMessaging.getInstance().setAutoInitEnabled(true);
+        FirebaseMessaging.getInstance().getToken().addOnCompleteListener(t -> {
+            if (t.isSuccessful() && t.getResult() != null) {
+                try {
+                    JSONObject d = new JSONObject();
+                    d.put("token", t.getResult());
+                    listo(r, id, d);
+                } catch (JSONException ignorada) {
+                    // No pasa: la clave es fija.
+                }
+            } else {
+                Log.w(TAG, "Sin token de avisos", t.getException());
+                fallo(r, id, "fallo", "No se pudo conectar con el servicio de avisos de Google.");
+            }
+        });
+    }
+
+    /** Sin preguntar nada: si hay permiso y, si lo hay, el token actual. */
+    private void estadoAvisos(JavaScriptReplyProxy r, String id) {
+        AvisosServicio.crearCanal(actividad);
+        boolean permiso = AvisosServicio.puedeAvisar(actividad);
+        if (!permiso || !FirebaseMessaging.getInstance().isAutoInitEnabled()) {
+            // Sin permiso, o nunca activó los avisos en este teléfono: no se
+            // pide token (eso registraría el teléfono en Google sin necesidad).
+            try {
+                JSONObject d = new JSONObject();
+                d.put("permiso", permiso);
+                listo(r, id, d);
+            } catch (JSONException ignorada) {
+                // No pasa: la clave es fija.
+            }
+            return;
+        }
+        FirebaseMessaging.getInstance().getToken().addOnCompleteListener(t -> {
+            try {
+                JSONObject d = new JSONObject();
+                d.put("permiso", true);
+                if (t.isSuccessful() && t.getResult() != null) d.put("token", t.getResult());
+                listo(r, id, d);
+            } catch (JSONException ignorada) {
+                // No pasa: las claves son fijas.
+            }
+        });
     }
 
     // ----------------------------------------------------------------- burbuja

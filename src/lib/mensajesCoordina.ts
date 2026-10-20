@@ -60,3 +60,24 @@ export function mensajeCoordina(
   if (opts.nombre) partes.push(`— ${opts.nombre}`);
   return partes.join('\n\n');
 }
+
+/**
+ * La notificación del día antes (la manda el servidor a las 9 a. m.): corta,
+ * porque el teléfono la recorta. Al tocarla se abre Asistencia, donde está la
+ * tarjeta con la imagen y el mensaje.
+ */
+export function avisoDiaAntes(p: FechaPlan, tipo: SessionType): { titulo: string; cuerpo: string } {
+  const dia = `${NOMBRES_DIA[p.diaSemana].toLowerCase()} ${p.fecha.getUTCDate()}`;
+  return {
+    titulo: 'Mañana coordinas tú ✨',
+    cuerpo:
+      `${SESSION_TYPE_LABELS[tipo]} · ${dia} · ${MODALITY_LABELS[p.modalidad].toLowerCase()}, ` +
+      `${horaDe(p.horario)}. Toca aquí para mandar tu imagen al grupo.`,
+  };
+}
+
+/** La de «Probar aviso»: para que vea cómo le va a llegar. */
+export const AVISO_DE_PRUEBA = {
+  titulo: '¡Listo! Así te llegará el aviso 🔔',
+  cuerpo: 'El día antes de coordinar te aviso aquí, con tu imagen y el mensaje listos para el grupo.',
+};

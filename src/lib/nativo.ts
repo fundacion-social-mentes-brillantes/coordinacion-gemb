@@ -221,3 +221,14 @@ export const ajustesDeBurbujas = () => pedir('ajustesBurbuja');
 export const ajustesDeAvisos = () => pedir('ajustesAvisos');
 /** Desde la burbuja: abre la app completa. */
 export const abrirLaApp = () => pedir('abrirApp');
+
+// ------------------------------------------------- aviso del día antes (1.0.4)
+
+/**
+ * Pide permiso de avisos (Android 13+) y devuelve el token de Firebase Cloud
+ * Messaging de este teléfono. Las versiones anteriores a la 1.0.4 responden
+ * «desconocida»: ahí hay que actualizar la app.
+ */
+export const activarAvisosNativo = () => pedir<{ token: string }>('avisos');
+/** Sin preguntar nada: ¿hay permiso? y, si lo hay, el token actual. */
+export const estadoAvisosNativo = () => pedir<{ permiso: boolean; token?: string }>('estadoAvisos', {}, 8000);

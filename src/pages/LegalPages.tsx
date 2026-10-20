@@ -5,7 +5,7 @@ import { Logo } from '../components/Logo';
 import { EliminarCuenta, ponerMarcaEliminar } from '../components/EliminarCuenta';
 
 const CORREO = 'fundacionsocial@gimnasioemocionalmb.com';
-const ACTUALIZADA = '15 de octubre de 2026';
+const ACTUALIZADA = '19 de octubre de 2026';
 
 /**
  * Páginas públicas que exige Google Play: la política de privacidad y cómo
@@ -92,6 +92,11 @@ export function PrivacidadPage() {
           <li>
             <strong>Del calendario:</strong> quién coordina cada reunión.
           </li>
+          <li>
+            <strong>De los avisos (solo si los activas):</strong> un código de tu teléfono o
+            navegador para mandarte el recordatorio el día antes de coordinar, junto con el nombre
+            con que coordinas.
+          </li>
         </ul>
         <p>
           No pedimos ubicación, contactos, fotos, cámara ni micrófono. La app no tiene anuncios ni
@@ -119,7 +124,9 @@ export function PrivacidadPage() {
         <p>
           En Google Firebase (Google Cloud), siempre con conexión cifrada. La página se sirve
           desde Vercel. El teléfono guarda una copia para funcionar sin señal, y se borra al
-          cerrar sesión.
+          cerrar sesión. Los avisos los entrega el servicio de notificaciones de Google (Android y
+          navegadores) o de Apple (iPhone); los del iPhone y los navegadores van cifrados de
+          punta a punta.
         </p>
       </Bloque>
 
@@ -134,7 +141,8 @@ export function PrivacidadPage() {
 
       <Bloque titulo="App de Android">
         <p>
-          Pide permiso de notificaciones solo para mostrar la burbuja flotante encima de Meet.
+          Pide permiso de notificaciones para mostrar la burbuja flotante encima de Meet y, si lo
+          activas, el aviso el día antes de coordinar. Los avisos se apagan en Ajustes de la app.
         </p>
       </Bloque>
 

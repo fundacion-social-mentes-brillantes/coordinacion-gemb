@@ -471,6 +471,35 @@ service cloud.firestore {
       }
     }
 
+    // ==================== Avisos del día antes ====================
+    // Cada teléfono o navegador que pidió el aviso «Mañana coordinas tú» (19
+    // oct 2026). El id es «uid__dispositivo»: cada quien solo crea, ve y
+    // borra los suyos. Los lee el servidor del aviso diario con su propia
+    // cuenta (api/avisos), que no pasa por estas reglas.
+    function suscripcionValida(s) {
+      return s is map
+        && s.keys().hasOnly(['endpoint', 'p256dh', 'auth'])
+        && textoCorto(s.endpoint, 1000) && s.endpoint.matches('^https://.+')
+        && textoCorto(s.p256dh, 200) && textoCorto(s.auth, 100);
+    }
+    match /avisos/{id} {
+      allow get: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create, update: if canRead()
+        && id.matches('^' + request.auth.uid + '__[A-Za-z0-9_-]{8,40}$')
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.nombre in equipo()
+        && request.resource.data.updatedAt == request.time
+        && (
+          (request.resource.data.plataforma == 'android'
+            && request.resource.data.keys().hasOnly(['uid', 'nombre', 'plataforma', 'token', 'updatedAt'])
+            && textoCorto(request.resource.data.token, 4096))
+          || (request.resource.data.plataforma == 'web'
+            && request.resource.data.keys().hasOnly(['uid', 'nombre', 'plataforma', 'suscripcion', 'updatedAt'])
+            && suscripcionValida(request.resource.data.suscripcion))
+        );
+      allow delete: if isSignedIn() && id.matches('^' + request.auth.uid + '__.+');
+    }
+
     // ==================== Carpeta de coordinación ====================
     // El guion de cada reunión (páginas como imágenes). Solo lo ve el equipo;
     // se sube con la llave de servicio, no desde la app. Es solo para leer en

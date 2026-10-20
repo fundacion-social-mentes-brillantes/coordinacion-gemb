@@ -4,20 +4,41 @@
     {
       "name": "dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 5173
     },
     {
       "name": "dev-emulador",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:emulador"],
+      "runtimeArgs": [
+        "run",
+        "dev:emulador"
+      ],
       "port": 5173
     },
     {
       "name": "emuladores",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "emuladores"],
+      "runtimeArgs": [
+        "run",
+        "emuladores"
+      ],
       "port": 8080
+    },
+    {
+      "name": "preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "preview",
+        "--port",
+        "4173",
+        "--strictPort"
+      ],
+      "port": 4173
     }
   ]
 }

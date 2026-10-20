@@ -40,6 +40,7 @@ import { Modal } from '../components/Modal';
 import { CoordinatorPicker } from '../components/CoordinatorPicker';
 import { RecursosReunion } from '../components/RecursosReunion';
 import { TuImagenCoordina } from '../components/TuImagenCoordina';
+import { InvitarAvisos } from '../components/AvisosCoordina';
 import { BotonBurbuja } from '../components/Burbuja';
 import { InstallButton, IosInstallHelp } from '../components/InstallPrompt';
 import { Spinner } from '../components/Spinner';
@@ -317,6 +318,7 @@ export function SessionsPage() {
 
       {/* El día antes (y el mismo día) de su reunión: su imagen y el mensaje para el grupo. */}
       <TuImagenCoordina prog={prog} miNombre={miNombre} hoyKey={hoyKey} />
+      {!prog.cargando && <InvitarAvisos miNombre={miNombre} />}
 
       {/* Hoy: la reunión del calendario, lista para tomar asistencia. */}
       {prog.cargando || loading ? (
