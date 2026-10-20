@@ -444,6 +444,33 @@ service cloud.firestore {
       allow delete: if puedeProgramar();
     }
 
+    // ==================== Imágenes de las coordinadoras ====================
+    // La pieza de cada coordinadora para anunciar su reunión (19 oct 2026):
+    // una por reunión y modalidad, de alguien del equipo del calendario. La
+    // suben quienes programan; la ve el equipo. La imagen va aparte de la
+    // ficha (pesa) y en JPEG base64, por debajo de 1 MB.
+    match /imagenes_coordinadoras/{id} {
+      allow read: if canRead();
+      allow create, update: if puedeProgramar()
+        && request.resource.data.keys().hasOnly(['coordinadora', 'tipo', 'modalidad', 'version', 'updatedAt', 'updatedBy'])
+        && request.resource.data.coordinadora in equipo()
+        && request.resource.data.tipo in ['entrega_pasos', 'reduccion_ego']
+        && request.resource.data.modalidad in ['virtual', 'presencial']
+        && textoCorto(request.resource.data.version, 40)
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if puedeProgramar();
+      match /archivo/{parte} {
+        allow read: if canRead();
+        allow create, update: if puedeProgramar()
+          && parte == 'actual'
+          && request.resource.data.keys().hasOnly(['datos', 'version'])
+          && request.resource.data.datos is string
+          && request.resource.data.datos.size() < 950000
+          && textoCorto(request.resource.data.version, 40);
+        allow delete: if puedeProgramar();
+      }
+    }
+
     // ==================== Carpeta de coordinación ====================
     // El guion de cada reunión (páginas como imágenes). Solo lo ve el equipo;
     // se sube con la llave de servicio, no desde la app. Es solo para leer en

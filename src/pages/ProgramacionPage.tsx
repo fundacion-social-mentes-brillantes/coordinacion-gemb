@@ -47,6 +47,7 @@ import type { Modality, Session, SessionType } from '../types';
 import { Modal } from '../components/Modal';
 import { CoordinatorPicker } from '../components/CoordinatorPicker';
 import { Spinner } from '../components/Spinner';
+import { ImagenesCoordinadoras } from '../components/ImagenesCoordinadoras';
 import { ModalityBadge } from '../components/badges';
 import {
   CheckIcon,
@@ -1230,6 +1231,7 @@ function Ajustes({ config, onClose }: { config: ProgramacionConfig; onClose: () 
   const [c, setC] = useState<ProgramacionConfig>(() => JSON.parse(JSON.stringify(config)));
   const [nuevo, setNuevo] = useState('');
   const [guardando, setGuardando] = useState(false);
+  const [verImagenes, setVerImagenes] = useState(false);
   const hoyKey = dayKey(new Date());
   const estaSemana = modalidadPorRegla(hoyKey, undefined, c);
   // Los enlaces de Meet llegan aparte (no son públicos): se copian al
@@ -1428,6 +1430,20 @@ function Ajustes({ config, onClose }: { config: ProgramacionConfig; onClose: () 
               Agregar
             </button>
           </form>
+        </section>
+
+        <section className="space-y-2">
+          <h4 className="text-sm font-bold text-primary-900">Imágenes de las coordinadoras</h4>
+          <p className="text-xs text-slate-500">
+            La imagen de cada una para anunciar su reunión. El día antes le sale en Asistencia para
+            mandarla al grupo.
+          </p>
+          <button type="button" onClick={() => setVerImagenes(true)} className="btn-secondary min-h-[46px] w-full">
+            Subir o ver las imágenes
+          </button>
+          {verImagenes && (
+            <ImagenesCoordinadoras equipo={config.coordinadoras} onClose={() => setVerImagenes(false)} />
+          )}
         </section>
 
         <section className="space-y-2">

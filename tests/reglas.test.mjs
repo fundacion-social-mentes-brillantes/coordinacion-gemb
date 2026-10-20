@@ -710,6 +710,53 @@ describe('Yo la coordino: cada coordinadora se toma una fecha libre', () => {
   });
 });
 
+describe('Imágenes de las coordinadoras (para anunciar su reunión)', () => {
+  const ID = 'tatiana-lopez__reduccion_ego__virtual';
+  const ficha = (uid, extra = {}) => ({
+    coordinadora: 'Tatiana López',
+    tipo: 'reduccion_ego',
+    modalidad: 'virtual',
+    version: 'v1',
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+    ...extra,
+  });
+  const subir = (db, uid, extra = {}, archivo = { datos: 'abc', version: 'v1' }) => {
+    const b = writeBatch(db);
+    b.set(doc(db, `imagenes_coordinadoras/${ID}`), ficha(uid, extra));
+    b.set(doc(db, `imagenes_coordinadoras/${ID}/archivo/actual`), archivo);
+    return b.commit();
+  };
+
+  test('las suben quienes programan; una coordinadora o alguien sin sesión no', async () => {
+    await assertSucceeds(subir(como.admin(), 'admin'));
+    await assertSucceeds(subir(como.progra(), 'progra'));
+    await assertFails(subir(como.coord(), 'coord'));
+    await assertFails(subir(como.anonimo(), 'x'));
+    await assertFails(subir(como.colado(), 'colado'));
+  });
+
+  test('solo de alguien del equipo, reuniones y modalidades válidas, y sin firmar por otra', async () => {
+    const db = como.admin();
+    await assertFails(subir(db, 'admin', { coordinadora: 'Alguien de afuera' }));
+    await assertFails(subir(db, 'admin', { tipo: 'otra' }));
+    await assertFails(subir(db, 'admin', { modalidad: 'hibrida' }));
+    await assertFails(subir(db, 'otra-persona'));
+    await assertFails(subir(db, 'admin', { colado: 1 }));
+    await assertFails(subir(db, 'admin', {}, { datos: 'x'.repeat(960000), version: 'v1' }), 'demasiado pesada');
+  });
+
+  test('la ve el equipo (también la coordinadora), no quien no tiene acceso; borra quien programa', async () => {
+    await assertSucceeds(subir(como.admin(), 'admin'));
+    await assertSucceeds(getDoc(doc(como.coord(), `imagenes_coordinadoras/${ID}/archivo/actual`)));
+    await assertSucceeds(getDocs(collection(como.coord(), 'imagenes_coordinadoras')));
+    await assertFails(getDoc(doc(como.anonimo(), `imagenes_coordinadoras/${ID}/archivo/actual`)));
+    await assertFails(getDoc(doc(como.pendiente(), `imagenes_coordinadoras/${ID}`)));
+    await assertFails(deleteDoc(doc(como.coord(), `imagenes_coordinadoras/${ID}`)));
+    await assertSucceeds(deleteDoc(doc(como.progra(), `imagenes_coordinadoras/${ID}/archivo/actual`)));
+  });
+});
+
 describe('Recursos de la reunión: enlaces de Meet y carpeta', () => {
   beforeEach(async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
