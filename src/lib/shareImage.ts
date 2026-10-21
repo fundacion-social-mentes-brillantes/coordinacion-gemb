@@ -6,7 +6,9 @@ import {
   ORO,
   TONO_AZUL,
   TONO_VINO,
+  CEREBRO,
   aPng,
+  cargarImagen,
   chip,
   degradadoAcento,
   espaciado,
@@ -17,6 +19,7 @@ import {
   pieApp,
   prepararImagenApp,
   recortar,
+  rect,
   rgba,
   temaDeImagen,
   vidrio,
@@ -28,100 +31,67 @@ import { compartirArchivo, enAppAndroid } from './nativo';
  * La imagen de la lista de asistencia para el grupo de WhatsApp, con el
  * diseño de la app (ver imagenApp.ts). Antes era una tarjeta blanca con el
  * logo viejo; desde el 20 oct 2026 va como la imagen del día de Agenda MB:
- * fondo de la app, ícono, marca, vidrio y el color de cada reunión.
+ * fondo de la app, ícono, marca y vidrio. La lista va en franjas de colores
+ * con un cerebrito dorado y el número grande, como el ejemplo que mandó.
  */
 
-const ROW_H = 78;
-const TWO_COL_FROM = 22; // a partir de tantos nombres, dos columnas
 /**
  * Alto máximo de la zona de nombres. Safari en iPhone deja el lienzo en
  * blanco si la imagen se pasa de unos 4.000 px de alto, así que a partir de
  * cierta cantidad de gente se reparte en más columnas en vez de crecer.
  */
 const MAX_LIST_H = 3000;
-const MAX_COLS = 4;
 
-/** Cada reunión con su color, como en «Para la reunión». */
+/** Cada reunión con su color, como en «Para la reunión» (la píldora). */
 const TONOS: Record<SessionType, Tono> = {
   entrega_pasos: TONO_VINO,
   reduccion_ego: TONO_AZUL,
 };
 
-/** El azul claro de las bolitas con el número (las dos reuniones). */
-const AZUL_BOLITA: [number, number, number] = [104, 186, 255];
-
 /**
- * Una bolita de cristal azul claro, como el Liquid Glass de Apple: cuerpo
- * translúcido que se aclara hacia el borde (como un lente), un reflejo de luz
- * abajo, el brillo arriba y un borde de luz más fuerte arriba a la izquierda.
+ * Las franjas de la lista, como el ejemplo que mandó (20 oct 2026): un
+ * cuadro de color con el cerebrito dorado, el número grande en una franja
+ * clara y la barra de color con el nombre. Los colores van rotando.
  */
-function bolitaDeCristal(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
-  const circulo = () => {
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  };
-  // Sombra suave debajo, para que flote.
-  ctx.save();
-  ctx.shadowColor = 'rgba(0, 10, 40, 0.45)';
-  ctx.shadowBlur = 10;
-  ctx.shadowOffsetY = 3;
-  circulo();
-  ctx.fillStyle = rgba(AZUL_BOLITA, 0.4);
-  ctx.fill();
-  ctx.restore();
+interface ColorFila {
+  fondo: string;
+  numero: string;
+  letra: string;
+}
+const FILAS: ColorFila[] = [
+  { fondo: '#66a9a6', numero: '#4f9592', letra: '#ffffff' },
+  { fondo: '#9edac8', numero: '#55b398', letra: '#173430' },
+  { fondo: '#b9ca55', numero: '#97a92f', letra: '#26300a' },
+  { fondo: '#e1d36d', numero: '#c2ae38', letra: '#3a3008' },
+];
+/** El fondo claro de la «pantalla» donde van las franjas. */
+const PANTALLA = '#eef0f5';
 
-  ctx.save();
-  circulo();
-  ctx.clip();
-  // El cuerpo: transparente al centro y más claro hacia el borde (como un lente).
-  const cuerpo = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-  cuerpo.addColorStop(0, rgba(AZUL_BOLITA, 0.38));
-  cuerpo.addColorStop(0.7, rgba(AZUL_BOLITA, 0.55));
-  cuerpo.addColorStop(1, 'rgba(170, 214, 255, 0.82)');
-  ctx.fillStyle = cuerpo;
-  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-  // La luz que atraviesa el cristal y sale por abajo.
-  const abajo = ctx.createRadialGradient(cx, cy + r * 0.8, 0, cx, cy + r * 0.8, r * 0.75);
-  abajo.addColorStop(0, 'rgba(214, 236, 255, 0.38)');
-  abajo.addColorStop(1, 'rgba(214, 236, 255, 0)');
-  ctx.fillStyle = abajo;
-  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-  ctx.restore();
-
-  // Los destellos pegados al borde: arriba a la izquierda (fuerte) y abajo a
-  // la derecha (suave), como el Liquid Glass de Apple.
-  const destello = (desde: number, hasta: number, color: string, ancho: number) => {
-    const g = ctx.createConicGradient
-      ? ctx.createConicGradient(0, cx, cy)
-      : null;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r - ancho / 2 - 0.5, desde, hasta);
-    if (g) {
-      const a = (desde / (Math.PI * 2) + 1) % 1;
-      const b = (hasta / (Math.PI * 2) + 1) % 1;
-      const m = a < b ? (a + b) / 2 : ((a + b + 1) / 2) % 1;
-      g.addColorStop(0, 'rgba(255, 255, 255, 0)');
-      g.addColorStop(Math.min(a, b), 'rgba(255, 255, 255, 0)');
-      g.addColorStop(m, color);
-      g.addColorStop(Math.max(a, b), 'rgba(255, 255, 255, 0)');
-      g.addColorStop(1, 'rgba(255, 255, 255, 0)');
-      ctx.strokeStyle = g;
-    } else {
-      ctx.strokeStyle = color;
-    }
-    ctx.lineWidth = ancho;
-    ctx.lineCap = 'round';
-    ctx.stroke();
-  };
-  destello(Math.PI * 1.02, Math.PI * 1.62, 'rgba(255, 255, 255, 0.95)', 2.6);
-  destello(Math.PI * 0.08, Math.PI * 0.55, 'rgba(206, 232, 255, 0.75)', 2);
-  // El contorno fino de todo el cristal.
+/** Rectángulo con solo dos esquinas redondeadas (las de un lado). */
+function medioRedondo(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+  lado: 'izquierda' | 'derecha',
+) {
+  const rr = Math.min(r, h / 2, w / 2);
   ctx.beginPath();
-  ctx.arc(cx, cy, r - 0.6, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(210, 232, 255, 0.45)';
-  ctx.lineWidth = 1.2;
-  ctx.stroke();
-  ctx.lineCap = 'butt';
+  if (lado === 'izquierda') {
+    ctx.moveTo(x + w, y);
+    ctx.lineTo(x + w, y + h);
+    ctx.lineTo(x + rr, y + h);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+  } else {
+    ctx.moveTo(x, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.lineTo(x, y + h);
+  }
+  ctx.closePath();
 }
 
 /** El ícono y las letras, de antemano (ver prepararImagenApp). */
@@ -140,17 +110,24 @@ export interface AttendanceImageInput {
 /** Dibuja la lista de asistencia y devuelve el PNG como Blob. */
 export async function buildAttendanceImage(data: AttendanceImageInput): Promise<Blob> {
   const names = data.names;
-  // Columnas: 1 normalmente, 2 con mucha gente y más si aun así sería
-  // demasiado alta (el iPhone no dibuja lienzos gigantes).
-  let cols = names.length > TWO_COL_FROM ? 2 : 1;
-  while (cols < MAX_COLS && Math.ceil(names.length / cols) * ROW_H > MAX_LIST_H) cols++;
-  const rowsPerCol = Math.max(1, Math.ceil(names.length / cols));
-  // Si ni con las columnas cabe, se aprietan un poco las filas.
-  const rowH = Math.max(44, Math.min(ROW_H, MAX_LIST_H / rowsPerCol));
+  // Columnas: una franja por persona; con mucha gente, en dos o más columnas
+  // (el iPhone no dibuja lienzos gigantes).
+  const n = names.length;
+  const cols = n <= 24 ? 1 : n <= 60 ? 2 : n <= 99 ? 3 : 4;
+  const rowsPerCol = Math.max(1, Math.ceil(n / cols));
+  let rowH = [84, 64, 50, 44][cols - 1];
+  let gap = Math.round(rowH * 0.3);
+  // Si ni así cabe, se aprietan un poco las franjas.
+  const alto = rowsPerCol * (rowH + gap) - gap;
+  if (alto > MAX_LIST_H) {
+    const k = MAX_LIST_H / alto;
+    rowH = Math.max(30, Math.floor(rowH * k));
+    gap = Math.max(6, Math.floor(gap * k));
+  }
 
   const t = temaDeImagen();
   const tono = TONOS[data.type];
-  const icono = await prepararImagenApp();
+  const [icono, cerebro] = await Promise.all([prepararImagenApp(), cargarImagen(CEREBRO)]);
 
   const anchoUtil = ANCHO - MARGEN * 2;
   const yChips = 428;
@@ -158,8 +135,9 @@ export async function buildAttendanceImage(data: AttendanceImageInput): Promise<
   const altoCoord = 118;
   const yCoord = yChips + altoChip + 34;
   const yLista = data.coordinator ? yCoord + altoCoord + 22 : yCoord;
-  const padLista = 28;
-  const altoLista = names.length ? rowsPerCol * rowH + padLista * 2 : 170;
+  const padX = 34;
+  const padY = 40;
+  const altoLista = n ? rowsPerCol * (rowH + gap) - gap + padY * 2 : 170;
   const yPie = yLista + altoLista + 76;
   const { canvas, ctx } = lienzo(yPie + 58);
 
@@ -230,68 +208,83 @@ export async function buildAttendanceImage(data: AttendanceImageInput): Promise<
     ctx.fillText(recortar(ctx, data.coordinator, MARGEN + anchoUtil - tx - 30), tx, yCoord + 90);
   }
 
-  // --- La lista ---
-  vidrio(ctx, MARGEN, yLista, anchoUtil, altoLista, 34, t);
-  const listX = MARGEN + 28;
-  const listW = anchoUtil - 56;
-  const GAP = 30;
-  const colW = (listW - GAP * (cols - 1)) / cols;
-  const r = Math.min(24, Math.round(rowH * 0.31));
-  const tamNombre = Math.min(cols === 1 ? 32 : cols === 2 ? 27 : cols === 3 ? 23 : 20, Math.round(rowH * 0.42));
+  // --- La lista: la «pantalla» clara con una franja por persona ---
+  ctx.save();
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+  ctx.shadowBlur = 50;
+  ctx.shadowOffsetY = 22;
+  rect(ctx, MARGEN, yLista, anchoUtil, altoLista, 30);
+  ctx.fillStyle = PANTALLA;
+  ctx.fill();
+  ctx.restore();
 
-  for (let c = 1; c < cols; c++) {
-    const lx = listX + c * (colW + GAP) - GAP / 2;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(lx, yLista + padLista);
-    ctx.lineTo(lx, yLista + altoLista - padLista);
-    ctx.stroke();
-  }
+  const GAP_COL = 26;
+  const colW = (anchoUtil - padX * 2 - GAP_COL * (cols - 1)) / cols;
+  const cuadro = rowH;
+  const franja = Math.round(rowH * 0.98);
+  const radio = Math.round(rowH * 0.16);
+  const tamNombre = Math.min([31, 25, 21, 18][cols - 1], Math.round(rowH * 0.4));
 
   names.forEach((name, i) => {
+    const c = FILAS[i % FILAS.length];
     const col = Math.floor(i / rowsPerCol);
     const fila = i % rowsPerCol;
-    const x0 = listX + col * (colW + GAP);
-    const y0 = yLista + padLista + fila * rowH;
+    const x0 = MARGEN + padX + col * (colW + GAP_COL);
+    const y0 = yLista + padY + fila * (rowH + gap);
     const cy = y0 + rowH / 2;
 
-    // El número en una bolita azul claro estilo Liquid Glass, en las dos
-    // reuniones (pedido del 20 oct 2026).
-    bolitaDeCristal(ctx, x0 + r, cy, r);
-    ctx.save();
-    ctx.shadowColor = 'rgba(0, 40, 120, 0.55)';
-    ctx.shadowBlur = 4;
-    ctx.shadowOffsetY = 1;
-    ctx.fillStyle = '#ffffff';
-    ctx.font = font(Math.round(r * 0.9), '700');
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(i + 1), x0 + r, cy + 1);
-    ctx.restore();
+    // El cuadro de color con el cerebrito dorado.
+    medioRedondo(ctx, x0, y0, cuadro, rowH, radio, 'izquierda');
+    ctx.fillStyle = c.fondo;
+    ctx.fill();
+    if (cerebro) {
+      const b = Math.round(cuadro * 0.84);
+      ctx.save();
+      ctx.shadowColor = 'rgba(55, 35, 0, 0.55)';
+      ctx.shadowBlur = Math.max(4, Math.round(rowH * 0.09));
+      ctx.shadowOffsetY = Math.max(1, Math.round(rowH * 0.03));
+      ctx.drawImage(cerebro, x0 + (cuadro - b) / 2, cy - b / 2, b, b);
+      ctx.restore();
+    }
 
+    // La barra de color con el nombre.
+    const bx = x0 + cuadro + franja;
+    const bw = colW - cuadro - franja;
+    medioRedondo(ctx, bx, y0, bw, rowH, radio, 'derecha');
+    ctx.fillStyle = c.fondo;
+    ctx.fill();
+    ctx.fillStyle = c.letra;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = t.fuerte;
-    ctx.font = font(tamNombre, '600');
-    const nx = x0 + r * 2 + 20;
-    ctx.fillText(recortar(ctx, name, colW - (nx - x0) - 6), nx, cy + 1);
-    ctx.textBaseline = 'alphabetic';
-
-    // Una línea fina entre renglones (no después del último de la columna).
-    if (fila < rowsPerCol - 1 && i + 1 < names.length) {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(nx, y0 + rowH);
-      ctx.lineTo(x0 + colW, y0 + rowH);
-      ctx.stroke();
+    const sangria = Math.max(16, Math.round(rowH * 0.32));
+    // Un nombre largo baja un poco la letra antes de cortarse con «…».
+    let tam = tamNombre;
+    ctx.font = font(tam, '700');
+    while (tam > tamNombre * 0.78 && ctx.measureText(name).width > bw - sangria * 2) {
+      tam -= 1;
+      ctx.font = font(tam, '700');
     }
+    ctx.fillText(recortar(ctx, name, bw - sangria * 2), bx + sangria, cy + 1);
+
+    // La franja clara con el número grande, un poco más alta que la fila.
+    const extra = Math.round(rowH * 0.09);
+    ctx.save();
+    ctx.shadowColor = 'rgba(30, 40, 60, 0.16)';
+    ctx.shadowBlur = Math.round(rowH * 0.16);
+    ctx.fillStyle = '#f7f8fb';
+    ctx.fillRect(x0 + cuadro - 1, y0 - extra, franja + 2, rowH + extra * 2);
+    ctx.restore();
+    ctx.fillStyle = c.numero;
+    ctx.font = font(Math.round(rowH * 0.46), '800');
+    ctx.textAlign = 'center';
+    ctx.fillText(String(i + 1).padStart(2, '0'), x0 + cuadro + franja / 2, cy + 2);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
   });
 
-  if (names.length === 0) {
+  if (n === 0) {
     ctx.textAlign = 'center';
-    ctx.fillStyle = t.tenue;
+    ctx.fillStyle = '#8a93a6';
     ctx.font = font(30, '500');
     ctx.fillText('Sin personas registradas', ANCHO / 2, yLista + altoLista / 2 + 10);
     ctx.textAlign = 'left';
