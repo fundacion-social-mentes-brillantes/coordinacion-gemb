@@ -210,7 +210,8 @@ export function AttendancePage() {
     return unsub;
   }, [id]);
 
-  // Deja el logo listo para que "Compartir" arme la imagen al instante.
+  // Deja el ícono y las letras de la marca listos para que "Compartir"
+  // arme la imagen al instante.
   useEffect(() => {
     void preloadLogo();
   }, []);

@@ -38,6 +38,7 @@ import {
   type ProgramacionConfig,
 } from '../lib/programacion';
 import { buildProgramacionImage, programacionImageName } from '../lib/programacionImage';
+import { prepararImagenApp } from '../lib/imagenApp';
 import { shareOrDownloadImage } from '../lib/shareImage';
 import { exportPDF } from '../lib/export';
 import { esperarConLimite } from '../lib/esperar';
@@ -856,6 +857,12 @@ function CompartirMes({
   const { toast } = useToast();
   const [armandoImagen, setArmandoImagen] = useState(false);
   const [manual, setManual] = useState<string | null>(null);
+
+  // El ícono y las letras de la marca, de antemano: en iPhone, si la imagen
+  // tarda en armarse después del toque, el menú de compartir se bloquea.
+  useEffect(() => {
+    void prepararImagenApp();
+  }, []);
 
   const compartirImagen = async () => {
     setArmandoImagen(true);
