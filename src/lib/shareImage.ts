@@ -50,6 +50,80 @@ const TONOS: Record<SessionType, Tono> = {
 /** El azul claro de las bolitas con el número (las dos reuniones). */
 const AZUL_BOLITA: [number, number, number] = [104, 186, 255];
 
+/**
+ * Una bolita de cristal azul claro, como el Liquid Glass de Apple: cuerpo
+ * translúcido que se aclara hacia el borde (como un lente), un reflejo de luz
+ * abajo, el brillo arriba y un borde de luz más fuerte arriba a la izquierda.
+ */
+function bolitaDeCristal(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
+  const circulo = () => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  };
+  // Sombra suave debajo, para que flote.
+  ctx.save();
+  ctx.shadowColor = 'rgba(0, 10, 40, 0.45)';
+  ctx.shadowBlur = 10;
+  ctx.shadowOffsetY = 3;
+  circulo();
+  ctx.fillStyle = rgba(AZUL_BOLITA, 0.4);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  circulo();
+  ctx.clip();
+  // El cuerpo: transparente al centro y más claro hacia el borde (como un lente).
+  const cuerpo = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  cuerpo.addColorStop(0, rgba(AZUL_BOLITA, 0.38));
+  cuerpo.addColorStop(0.7, rgba(AZUL_BOLITA, 0.55));
+  cuerpo.addColorStop(1, 'rgba(170, 214, 255, 0.82)');
+  ctx.fillStyle = cuerpo;
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  // La luz que atraviesa el cristal y sale por abajo.
+  const abajo = ctx.createRadialGradient(cx, cy + r * 0.8, 0, cx, cy + r * 0.8, r * 0.75);
+  abajo.addColorStop(0, 'rgba(214, 236, 255, 0.38)');
+  abajo.addColorStop(1, 'rgba(214, 236, 255, 0)');
+  ctx.fillStyle = abajo;
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  ctx.restore();
+
+  // Los destellos pegados al borde: arriba a la izquierda (fuerte) y abajo a
+  // la derecha (suave), como el Liquid Glass de Apple.
+  const destello = (desde: number, hasta: number, color: string, ancho: number) => {
+    const g = ctx.createConicGradient
+      ? ctx.createConicGradient(0, cx, cy)
+      : null;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r - ancho / 2 - 0.5, desde, hasta);
+    if (g) {
+      const a = (desde / (Math.PI * 2) + 1) % 1;
+      const b = (hasta / (Math.PI * 2) + 1) % 1;
+      const m = a < b ? (a + b) / 2 : ((a + b + 1) / 2) % 1;
+      g.addColorStop(0, 'rgba(255, 255, 255, 0)');
+      g.addColorStop(Math.min(a, b), 'rgba(255, 255, 255, 0)');
+      g.addColorStop(m, color);
+      g.addColorStop(Math.max(a, b), 'rgba(255, 255, 255, 0)');
+      g.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.strokeStyle = g;
+    } else {
+      ctx.strokeStyle = color;
+    }
+    ctx.lineWidth = ancho;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  };
+  destello(Math.PI * 1.02, Math.PI * 1.62, 'rgba(255, 255, 255, 0.95)', 2.6);
+  destello(Math.PI * 0.08, Math.PI * 0.55, 'rgba(206, 232, 255, 0.75)', 2);
+  // El contorno fino de todo el cristal.
+  ctx.beginPath();
+  ctx.arc(cx, cy, r - 0.6, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(210, 232, 255, 0.45)';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  ctx.lineCap = 'butt';
+}
+
 /** El ícono y las letras, de antemano (ver prepararImagenApp). */
 export const preloadLogo = prepararImagenApp;
 
@@ -182,25 +256,22 @@ export async function buildAttendanceImage(data: AttendanceImageInput): Promise<
     const y0 = yLista + padLista + fila * rowH;
     const cy = y0 + rowH / 2;
 
-    // El número en una bolita de vidrio azul claro, en las dos reuniones
-    // (pedido del 20 oct 2026): translúcida, con su borde de luz.
-    const g = ctx.createLinearGradient(0, cy - r, 0, cy + r);
-    g.addColorStop(0, rgba(AZUL_BOLITA, 0.78));
-    g.addColorStop(1, rgba(AZUL_BOLITA, 0.5));
-    ctx.beginPath();
-    ctx.arc(x0 + r, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = g;
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(190, 224, 255, 0.95)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    // El número en una bolita azul claro estilo Liquid Glass, en las dos
+    // reuniones (pedido del 20 oct 2026).
+    bolitaDeCristal(ctx, x0 + r, cy, r);
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 40, 120, 0.55)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetY = 1;
     ctx.fillStyle = '#ffffff';
     ctx.font = font(Math.round(r * 0.9), '700');
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(String(i + 1), x0 + r, cy + 1);
+    ctx.restore();
 
     ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
     ctx.fillStyle = t.fuerte;
     ctx.font = font(tamNombre, '600');
     const nx = x0 + r * 2 + 20;
