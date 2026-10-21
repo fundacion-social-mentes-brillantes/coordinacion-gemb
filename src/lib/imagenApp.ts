@@ -323,39 +323,7 @@ export function pieApp(ctx: CanvasRenderingContext2D, y: number, t: TemaImagen, 
  */
 let recursos: Promise<HTMLImageElement | null> | null = null;
 
-/** Una imagen de la app (de public/), cargada una sola vez. null si falla. */
-const imagenes = new Map<string, Promise<HTMLImageElement | null>>();
-export function cargarImagen(src: string, espera = 2500): Promise<HTMLImageElement | null> {
-  const ya = imagenes.get(src);
-  if (ya) return ya;
-  const p = new Promise<HTMLImageElement | null>((ok) => {
-    let listo = false;
-    const fin = (v: HTMLImageElement | null, porTiempo = false) => {
-      if (listo) return;
-      listo = true;
-      // Si solo se agotó el tiempo, la próxima vez se vuelve a intentar.
-      if (porTiempo || !v) imagenes.delete(src);
-      ok(v);
-    };
-    setTimeout(() => fin(null, true), espera);
-    try {
-      const img = new Image();
-      img.onload = () => fin(img);
-      img.onerror = () => fin(null);
-      img.src = src;
-    } catch {
-      fin(null);
-    }
-  });
-  imagenes.set(src, p);
-  return p;
-}
-
-/** El cerebrito dorado de la lista de asistencia. */
-export const CEREBRO = '/cerebro-dorado.png';
-
 export function prepararImagenApp(): Promise<HTMLImageElement | null> {
-  void cargarImagen(CEREBRO);
   if (recursos) return recursos;
   recursos = new Promise((resolve) => {
     let listo = false;
