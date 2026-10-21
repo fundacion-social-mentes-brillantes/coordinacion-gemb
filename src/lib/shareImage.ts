@@ -47,6 +47,9 @@ const TONOS: Record<SessionType, Tono> = {
   reduccion_ego: TONO_AZUL,
 };
 
+/** El azul claro de las bolitas con el número (las dos reuniones). */
+const AZUL_BOLITA: [number, number, number] = [104, 186, 255];
+
 /** El ícono y las letras, de antemano (ver prepararImagenApp). */
 export const preloadLogo = prepararImagenApp;
 
@@ -179,19 +182,19 @@ export async function buildAttendanceImage(data: AttendanceImageInput): Promise<
     const y0 = yLista + padLista + fila * rowH;
     const cy = y0 + rowH / 2;
 
-    // El número, con el color de la reunión.
+    // El número en una bolita de vidrio azul claro, en las dos reuniones
+    // (pedido del 20 oct 2026): translúcida, con su borde de luz.
     const g = ctx.createLinearGradient(0, cy - r, 0, cy + r);
-    g.addColorStop(0, tono.claro);
-    g.addColorStop(0.6, rgba(tono.base, 1));
-    g.addColorStop(1, tono.oscuro);
+    g.addColorStop(0, rgba(AZUL_BOLITA, 0.78));
+    g.addColorStop(1, rgba(AZUL_BOLITA, 0.5));
     ctx.beginPath();
     ctx.arc(x0 + r, cy, r, 0, Math.PI * 2);
     ctx.fillStyle = g;
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(190, 224, 255, 0.95)';
+    ctx.lineWidth = 2;
     ctx.stroke();
-    ctx.fillStyle = tono.texto;
+    ctx.fillStyle = '#ffffff';
     ctx.font = font(Math.round(r * 0.9), '700');
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
