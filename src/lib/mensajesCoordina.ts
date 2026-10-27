@@ -36,18 +36,19 @@ function horaDe(horario: string): string {
 
 /**
  * El mensaje número `vuelta` (0 = el de esta fecha) para la reunión `tipo`
- * de la fecha `p`. `esHoy` cambia «mañana» por «hoy».
+ * de la fecha `p`. `dias` es cuántos faltan: 0 dice «hoy», 1 «mañana» y más
+ * adelante «el jueves 29 de octubre» (para mandarla con tiempo, 27 oct 2026).
  */
 export function mensajeCoordina(
   p: FechaPlan,
   tipo: SessionType,
-  opts: { esHoy: boolean; vuelta: number; enlace?: string; nombre?: string },
+  opts: { dias: number; vuelta: number; enlace?: string; nombre?: string },
 ): string {
   const dia = `${NOMBRES_DIA[p.diaSemana].toLowerCase()} ${p.fecha.getUTCDate()} de ${NOMBRES_MES[
     p.fecha.getUTCMonth()
   ].toLowerCase()}`;
   const datos: Datos = {
-    cuando: `${opts.esHoy ? 'hoy' : 'mañana'} ${dia}`,
+    cuando: `${opts.dias === 0 ? 'hoy' : opts.dias === 1 ? 'mañana' : 'el'} ${dia}`,
     reunion: `la ${SESSION_TYPE_LABELS[tipo]}`,
     hora: horaDe(p.horario),
     modalidad: MODALITY_LABELS[p.modalidad].toLowerCase(),

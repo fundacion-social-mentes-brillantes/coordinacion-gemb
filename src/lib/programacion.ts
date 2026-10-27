@@ -118,7 +118,7 @@ export const DIA_CORTO = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB'];
 
 const utc = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d, 12));
 export const claveDe = (d: Date) => d.toISOString().slice(0, 10);
-const deClave = (key: string) => new Date(`${key}T12:00:00Z`);
+export const deClave = (key: string) => new Date(`${key}T12:00:00Z`);
 
 /** Número de semana ISO 8601 (la semana empieza el lunes). */
 export function semanaISO(key: string): number {

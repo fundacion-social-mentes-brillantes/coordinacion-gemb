@@ -7,11 +7,12 @@ import { downloadBlob } from '../lib/export';
 import { blobDeJpeg } from '../lib/reducirImagen';
 import { mensajeCoordina } from '../lib/mensajesCoordina';
 import { copiarTexto } from '../lib/nativo';
-import { NOMBRES_DIA, hayReunion, moverDia, planDeFecha, type FechaPlan } from '../lib/programacion';
+import { NOMBRES_DIA, deClave, hayReunion, moverDia, planDeFecha, type FechaPlan } from '../lib/programacion';
 import { shareOrDownloadImage } from '../lib/shareImage';
 import { idImagen, leerImagen } from '../services/imagenesCoordinadoras';
 import type { SessionType } from '../types';
-import { CopyIcon, DownloadIcon, RefreshIcon, ShareIcon } from './Icons';
+import { CopyIcon, DownloadIcon, ImageIcon, RefreshIcon, ShareIcon } from './Icons';
+import { Modal } from './Modal';
 import { Spinner } from './Spinner';
 
 // ---------------------------------------------------------------------------
@@ -20,28 +21,50 @@ import { Spinner } from './Spinner';
 //  de Asistencia su imagen (la que subió la coordinación para esa reunión y
 //  modalidad) con un mensaje listo, para mandarlo al grupo de WhatsApp de un
 //  toque. El mensaje cambia cada vez para que no salgan todos iguales.
+//
+//  Desde el 27 oct 2026 la imagen se puede sacar también antes: si no
+//  coordina hoy ni mañana, Asistencia muestra su próxima reunión con «Ver mi
+//  imagen», y en el calendario cada día suyo tiene «Mi imagen para el grupo».
 // ---------------------------------------------------------------------------
 
 interface Turno {
   p: FechaPlan;
   tipo: SessionType;
-  esHoy: boolean;
+  /** Cuántos días faltan (0 = hoy). */
+  dias: number;
 }
+
+/** Días que van de `desde` a `hasta` (claves AAAA-MM-DD). */
+export function diasEntre(desde: string, hasta: string): number {
+  return Math.round((deClave(hasta).getTime() - deClave(desde).getTime()) / 86_400_000);
+}
+
+const turno = (p: FechaPlan, dias: number): Turno => ({ p, tipo: p.actividades[0] ?? 'reduccion_ego', dias });
 
 /** Su próxima reunión si es hoy (antes de las 7 p. m.) o mañana. */
 function turnoDe(prog: EstadoProgramacion, miNombre: string, hoyKey: string): Turno | null {
   if (!miNombre || prog.cargando) return null;
-  const opciones: [string, boolean][] = [];
-  if (new Date().getHours() < 19) opciones.push([hoyKey, true]);
-  opciones.push([moverDia(hoyKey, 1), false]);
-  for (const [key, esHoy] of opciones) {
+  const opciones: [string, number][] = [];
+  if (new Date().getHours() < 19) opciones.push([hoyKey, 0]);
+  opciones.push([moverDia(hoyKey, 1), 1]);
+  for (const [key, dias] of opciones) {
     const p = planDeFecha(key, prog.config, prog.dias);
-    if (p && hayReunion(p) && p.coordinadora === miNombre) {
-      return { p, tipo: p.actividades[0] ?? 'reduccion_ego', esHoy };
-    }
+    if (p && hayReunion(p) && p.coordinadora === miNombre) return turno(p, dias);
   }
   return null;
 }
+
+/** Su próxima reunión de pasado mañana en adelante (hasta dos meses). */
+function proximoTurno(prog: EstadoProgramacion, miNombre: string, hoyKey: string): Turno | null {
+  if (!miNombre || prog.cargando) return null;
+  for (let n = 2; n <= 62; n++) {
+    const p = planDeFecha(moverDia(hoyKey, n), prog.config, prog.dias);
+    if (p && hayReunion(p) && p.coordinadora === miNombre) return turno(p, n);
+  }
+  return null;
+}
+
+const diaCorto = (p: FechaPlan) => `${NOMBRES_DIA[p.diaSemana]} ${p.fecha.getUTCDate()}`;
 
 export function TuImagenCoordina({
   prog,
@@ -52,19 +75,55 @@ export function TuImagenCoordina({
   miNombre: string;
   hoyKey: string;
 }) {
-  const turno = useMemo(() => turnoDe(prog, miNombre, hoyKey), [prog, miNombre, hoyKey]);
-  if (!turno) return null;
-  return <Tarjeta turno={turno} miNombre={miNombre} />;
+  const cerca = useMemo(() => turnoDe(prog, miNombre, hoyKey), [prog, miNombre, hoyKey]);
+  const despues = useMemo(() => (cerca ? null : proximoTurno(prog, miNombre, hoyKey)), [cerca, prog, miNombre, hoyKey]);
+  if (cerca) return <TarjetaImagen p={cerca.p} tipo={cerca.tipo} dias={cerca.dias} nombre={miNombre} />;
+  if (despues) return <ProximaTuya turno={despues} miNombre={miNombre} />;
+  return null;
 }
 
-function Tarjeta({ turno, miNombre }: { turno: Turno; miNombre: string }) {
-  const { p, tipo, esHoy } = turno;
+/** Cuando falta más: una línea con su próxima reunión y «Ver mi imagen». */
+function ProximaTuya({ turno: t, miNombre }: { turno: Turno; miNombre: string }) {
+  const [abierta, setAbierta] = useState(false);
+  return (
+    <section className="card flex items-center gap-3 p-3" aria-label="Tu próxima reunión">
+      <ImageIcon className="shrink-0 text-2xl text-[#d6b064]" />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-slate-900">Tu próxima reunión: {diaCorto(t.p)}</p>
+        <p className="truncate text-xs text-slate-500">
+          {SESSION_TYPE_LABELS[t.tipo]} · {MODALITY_LABELS[t.p.modalidad].toLowerCase()}
+        </p>
+      </div>
+      <button type="button" onClick={() => setAbierta(true)} className="btn-secondary min-h-[40px] shrink-0 px-3 text-sm">
+        Ver mi imagen
+      </button>
+      {abierta && (
+        <Modal open onClose={() => setAbierta(false)} title="Tu imagen para el grupo">
+          <TarjetaImagen p={t.p} tipo={t.tipo} dias={t.dias} nombre={miNombre} />
+        </Modal>
+      )}
+    </section>
+  );
+}
+
+/** La imagen de `nombre` para la reunión `tipo` de la fecha `p`, con su mensaje y los botones. */
+export function TarjetaImagen({
+  p,
+  tipo,
+  dias,
+  nombre,
+}: {
+  p: FechaPlan;
+  tipo: SessionType;
+  dias: number;
+  nombre: string;
+}) {
   const { toast } = useToast();
   const { meet } = useRecursosReunion();
   const [imagen, setImagen] = useState<string | null | undefined>(undefined);
   const [vuelta, setVuelta] = useState(0);
   const blob = useRef<Blob | null>(null);
-  const id = idImagen(miNombre, tipo, p.modalidad);
+  const id = idImagen(nombre, tipo, p.modalidad);
 
   useEffect(() => {
     let vivo = true;
@@ -84,8 +143,9 @@ function Tarjeta({ turno, miNombre }: { turno: Turno; miNombre: string }) {
     };
   }, [id]);
 
-  const mensaje = mensajeCoordina(p, tipo, { esHoy, vuelta, enlace: meet[tipo], nombre: miNombre });
-  const nombreArchivo = `${SESSION_TYPE_LABELS[tipo]} - ${NOMBRES_DIA[p.diaSemana]} ${p.fecha.getUTCDate()} - ${miNombre}.jpg`;
+  const mensaje = mensajeCoordina(p, tipo, { dias, vuelta, enlace: meet[tipo], nombre });
+  const nombreArchivo = `${SESSION_TYPE_LABELS[tipo]} - ${NOMBRES_DIA[p.diaSemana]} ${p.fecha.getUTCDate()} - ${nombre}.jpg`;
+  const encabezado = dias === 0 ? 'Hoy coordinas tú' : dias === 1 ? 'Mañana coordinas tú' : `Coordinas el ${diaCorto(p).toLowerCase()}`;
 
   // Se llama justo con el toque: el iPhone no abre el menú si se espera antes.
   const compartir = async () => {
@@ -109,10 +169,8 @@ function Tarjeta({ turno, miNombre }: { turno: Turno; miNombre: string }) {
   };
 
   return (
-    <section className="recursos p-4" aria-label={esHoy ? 'Hoy coordinas tú' : 'Mañana coordinas tú'}>
-      <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#d6b064]">
-        {esHoy ? 'Hoy coordinas tú' : 'Mañana coordinas tú'} ✨
-      </p>
+    <section className="recursos p-4" aria-label={encabezado}>
+      <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#d6b064]">{encabezado} ✨</p>
       <p className="mt-1 font-semibold text-slate-900">
         {SESSION_TYPE_LABELS[tipo]} · {NOMBRES_DIA[p.diaSemana].toLowerCase()} {p.fecha.getUTCDate()} ·{' '}
         {MODALITY_LABELS[p.modalidad].toLowerCase()}
@@ -125,7 +183,7 @@ function Tarjeta({ turno, miNombre }: { turno: Turno; miNombre: string }) {
             <Spinner className="h-7 w-7" />
           </div>
         ) : imagen ? (
-          <img src={imagen} alt={`Imagen de ${miNombre} para la reunión`} className="mx-auto w-full max-w-sm rounded-2xl" />
+          <img src={imagen} alt={`Imagen de ${nombre} para la reunión`} className="mx-auto w-full max-w-sm rounded-2xl" />
         ) : (
           <p className="rounded-2xl bg-[rgba(255,255,255,0.05)] p-3 text-sm text-slate-500">
             Tu imagen para esta reunión todavía no está en la app. Pídesela a la coordinación; mientras

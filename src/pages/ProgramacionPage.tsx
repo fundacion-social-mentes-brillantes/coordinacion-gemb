@@ -25,7 +25,6 @@ import {
   esEnlaceMeet,
   estadoDeFecha,
   hayReunion,
-  mensajeCoordino,
   modalidadPorRegla,
   moverDia,
   nombreActividades,
@@ -49,6 +48,7 @@ import { Modal } from '../components/Modal';
 import { CoordinatorPicker } from '../components/CoordinatorPicker';
 import { Spinner } from '../components/Spinner';
 import { ImagenesCoordinadoras } from '../components/ImagenesCoordinadoras';
+import { TarjetaImagen, diasEntre } from '../components/TuImagenCoordina';
 import { ModalityBadge } from '../components/badges';
 import {
   CheckIcon,
@@ -127,6 +127,7 @@ export function ProgramacionView({ publico }: { publico: boolean }) {
   const [anio, setAnio] = useState(Number(hoyKey.slice(0, 4)));
   const [mes, setMes] = useState(Number(hoyKey.slice(5, 7)) - 1);
   const [elegido, setElegido] = useState(hoyKey);
+  const [imagenDe, setImagenDe] = useState<FechaPlan | null>(null);
   const plan = useMemo(() => planDelMes(anio, mes, config, dias), [anio, mes, config, dias]);
   const planDe = useMemo(() => new Map(plan.map((p) => [p.key, p])), [plan]);
 
@@ -248,25 +249,6 @@ export function ProgramacionView({ publico }: { publico: boolean }) {
       toast('No se pudo soltar. Revisa la conexión.', 'error');
     } finally {
       setOcupado(null);
-    }
-  };
-
-  const avisar = async (p: FechaPlan) => {
-    const texto = mensajeCoordino(p, p.coordinadora);
-    const nav = navigator as Navigator & { share?: (d: { text: string }) => Promise<void> };
-    if (nav.share) {
-      try {
-        await nav.share({ text: texto });
-        return;
-      } catch {
-        /* cerró el menú: se copia */
-      }
-    }
-    try {
-      await copiarTexto(texto);
-      toast('Mensaje copiado: pégalo en el grupo.', 'success');
-    } catch {
-      toast('No se pudo copiar el mensaje.', 'error');
     }
   };
 
@@ -511,7 +493,7 @@ export function ProgramacionView({ publico }: { publico: boolean }) {
               ocupado={ocupado === elegidoKey}
               onTomar={() => elegidoPlan && tomar(elegidoPlan)}
               onSoltar={() => elegidoPlan && soltar(elegidoPlan)}
-              onAvisar={() => elegidoPlan && avisar(elegidoPlan)}
+              onAvisar={() => elegidoPlan && setImagenDe(elegidoPlan)}
               onEditar={() =>
                 setEditando(
                   elegidoPlan
@@ -575,6 +557,17 @@ export function ProgramacionView({ publico }: { publico: boolean }) {
         </Modal>
       )}
       {verAjustes && <Ajustes config={config} onClose={() => setVerAjustes(false)} />}
+      {/* Su imagen para esa fecha, con el mensaje ya escrito (27 oct 2026). */}
+      {imagenDe && (
+        <Modal open onClose={() => setImagenDe(null)} title="Tu imagen para el grupo">
+          <TarjetaImagen
+            p={imagenDe}
+            tipo={imagenDe.actividades[0] ?? 'reduccion_ego'}
+            dias={diasEntre(hoyKey, imagenDe.key)}
+            nombre={imagenDe.coordinadora}
+          />
+        </Modal>
+      )}
       {verCompartir && (
         <CompartirMes anio={anio} mes={mes} plan={plan} onClose={() => setVerCompartir(false)} />
       )}
@@ -750,7 +743,7 @@ function DetalleDia({
           {estado === 'tuya' && !pasada && (
             <div className="flex gap-2">
               <button type="button" onClick={onAvisar} className="btn-secondary min-h-[44px] flex-1 text-sm">
-                <ShareIcon className="text-base" /> Avisar al grupo
+                <ImageIcon className="text-base" /> Mi imagen para el grupo
               </button>
               {propia && (
                 <button
