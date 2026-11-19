@@ -1,21 +1,19 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Reglas de R8 para la app de Android de Coordinación GEMB (desde la 1.0.5, 19 nov 2026).
+# Capacitor, Firebase, Google Play Services y AndroidX traen sus propias reglas
+# (consumer rules); aquí va solo lo que ellas no cubren.
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# El código propio de la app es poco y Capacitor llama al plugin (GembPlugin) por su
+# nombre; además Puente.java recibe los mensajes de la página. Se deja entero, sin
+# renombrar: así un error nunca depende de qué renombró R8.
+-keep class com.gimnasioemocionalmb.coordinacion.** { *; }
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Entrar con Google (Credential Manager): la guía oficial pide esta regla, porque
+# CredentialManager busca la implementación de Play Services por reflexión.
+-if class androidx.credentials.CredentialManager
+-keep class androidx.credentials.playservices.** {
+  *;
+}
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Los informes de fallos de Play muestran la línea exacta (con mapping.txt).
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

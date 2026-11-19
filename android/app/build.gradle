@@ -16,8 +16,8 @@ android {
         applicationId "com.gimnasioemocionalmb.coordinacion"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 5
-        versionName "1.0.4"
+        versionCode 6
+        versionName "1.0.5"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -40,8 +40,25 @@ android {
             if (llaveArchivo.exists()) {
                 signingConfig signingConfigs.release
             }
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Desde la 1.0.5 (19 nov 2026): R8 achica y ofusca el código. Play Console
+            // avisó que con «Ofuscación 1 %» la app pierde visibilidad y no deja publicar
+            // desde feb 2027. Las reglas propias están en proguard-rules.pro; al subir a
+            // Play hay que subir también build/outputs/mapping/release/mapping.txt.
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+// Páginas de 16 KB (aviso de Play, 17 nov 2026): la única biblioteca nativa es
+// libdatastore_shared_counter.so de androidx.datastore, que llega con Firebase. La
+// 1.1.3 venía compilada con el NDK r25c; la 1.3.0 viene con el r27 y alineada a 16 KB.
+configurations.all {
+    resolutionStrategy.eachDependency { detalles ->
+        if (detalles.requested.group == 'androidx.datastore') {
+            detalles.useVersion '1.3.0'
+            detalles.because 'la 1.3.0 trae libdatastore_shared_counter.so compilada con el NDK r27 (16 KB)'
         }
     }
 }
