@@ -559,12 +559,17 @@ export function ProgramacionView({ publico }: { publico: boolean }) {
       {verAjustes && <Ajustes config={config} onClose={() => setVerAjustes(false)} />}
       {/* Su imagen para esa fecha, con el mensaje ya escrito (27 oct 2026). */}
       {imagenDe && (
-        <Modal open onClose={() => setImagenDe(null)} title="Tu imagen para el grupo">
+        <Modal
+          open
+          onClose={() => setImagenDe(null)}
+          title={estadoDeFecha(imagenDe, yo) === 'tuya' ? 'Tu imagen para el grupo' : 'Imagen para el grupo'}
+        >
           <TarjetaImagen
             p={imagenDe}
             tipo={imagenDe.actividades[0] ?? 'reduccion_ego'}
             dias={diasEntre(hoyKey, imagenDe.key)}
             nombre={imagenDe.coordinadora}
+            propia={estadoDeFecha(imagenDe, yo) === 'tuya'}
           />
         </Modal>
       )}
@@ -756,6 +761,12 @@ function DetalleDia({
                 </button>
               )}
             </div>
+          )}
+          {/* Quien organiza el calendario manda la imagen de cualquier coordinadora (27 oct 2026). */}
+          {puede && estado === 'ocupada' && !pasada && (
+            <button type="button" onClick={onAvisar} className="btn-secondary min-h-[44px] w-full text-sm">
+              <ImageIcon className="text-base" /> Imagen para el grupo
+            </button>
           )}
           {estado === 'tuya' && !pasada && !propia && !puede && (
             <p className="text-xs text-slate-500">

@@ -25,6 +25,8 @@ import { Spinner } from './Spinner';
 //  Desde el 27 oct 2026 la imagen se puede sacar también antes: si no
 //  coordina hoy ni mañana, Asistencia muestra su próxima reunión con «Ver mi
 //  imagen», y en el calendario cada día suyo tiene «Mi imagen para el grupo».
+//  Y quien organiza el calendario (la coordinadora de coordinadoras) saca la
+//  de cualquier coordinadora desde su día: «Imagen para el grupo».
 // ---------------------------------------------------------------------------
 
 interface Turno {
@@ -106,17 +108,22 @@ function ProximaTuya({ turno: t, miNombre }: { turno: Turno; miNombre: string })
   );
 }
 
-/** La imagen de `nombre` para la reunión `tipo` de la fecha `p`, con su mensaje y los botones. */
+/**
+ * La imagen de `nombre` para la reunión `tipo` de la fecha `p`, con su mensaje y los botones.
+ * `propia` = la ve la misma coordinadora; si no, la está sacando quien organiza el calendario.
+ */
 export function TarjetaImagen({
   p,
   tipo,
   dias,
   nombre,
+  propia = true,
 }: {
   p: FechaPlan;
   tipo: SessionType;
   dias: number;
   nombre: string;
+  propia?: boolean;
 }) {
   const { toast } = useToast();
   const { meet } = useRecursosReunion();
@@ -145,7 +152,14 @@ export function TarjetaImagen({
 
   const mensaje = mensajeCoordina(p, tipo, { dias, vuelta, enlace: meet[tipo], nombre });
   const nombreArchivo = `${SESSION_TYPE_LABELS[tipo]} - ${NOMBRES_DIA[p.diaSemana]} ${p.fecha.getUTCDate()} - ${nombre}.jpg`;
-  const encabezado = dias === 0 ? 'Hoy coordinas tú' : dias === 1 ? 'Mañana coordinas tú' : `Coordinas el ${diaCorto(p).toLowerCase()}`;
+  const cuando = dias === 0 ? 'hoy' : dias === 1 ? 'mañana' : `el ${diaCorto(p).toLowerCase()}`;
+  const encabezado = propia
+    ? dias === 0
+      ? 'Hoy coordinas tú'
+      : dias === 1
+        ? 'Mañana coordinas tú'
+        : `Coordinas ${cuando}`
+    : `${nombre} coordina ${cuando}`;
 
   // Se llama justo con el toque: el iPhone no abre el menú si se espera antes.
   const compartir = async () => {
@@ -175,7 +189,9 @@ export function TarjetaImagen({
         {SESSION_TYPE_LABELS[tipo]} · {NOMBRES_DIA[p.diaSemana].toLowerCase()} {p.fecha.getUTCDate()} ·{' '}
         {MODALITY_LABELS[p.modalidad].toLowerCase()}
       </p>
-      <p className="text-xs text-slate-500">Manda tu imagen al grupo con este mensaje.</p>
+      <p className="text-xs text-slate-500">
+        {propia ? 'Manda tu imagen al grupo con este mensaje.' : 'Manda su imagen al grupo con este mensaje.'}
+      </p>
 
       <div className="mt-3">
         {imagen === undefined ? (
@@ -186,8 +202,9 @@ export function TarjetaImagen({
           <img src={imagen} alt={`Imagen de ${nombre} para la reunión`} className="mx-auto w-full max-w-sm rounded-2xl" />
         ) : (
           <p className="rounded-2xl bg-[rgba(255,255,255,0.05)] p-3 text-sm text-slate-500">
-            Tu imagen para esta reunión todavía no está en la app. Pídesela a la coordinación; mientras
-            tanto puedes mandar el mensaje.
+            {propia
+              ? 'Tu imagen para esta reunión todavía no está en la app. Pídesela a la coordinación; mientras tanto puedes mandar el mensaje.'
+              : `La imagen de ${nombre} para esta reunión todavía no está en la app. Súbela en los ajustes del calendario («Imágenes de las coordinadoras»); mientras tanto puedes mandar el mensaje.`}
           </p>
         )}
       </div>
